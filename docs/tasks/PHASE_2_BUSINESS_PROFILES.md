@@ -52,8 +52,8 @@ Out of scope:
 - [x] BUSINESS_OWNER can submit a draft, moving status to PENDING_REVIEW.
 - [x] Public `GET /v1/businesses` only returns APPROVED rows.
 - [x] Owner sees their own business at any status via `/v1/me/business`.
-- [ ] Pre-signed PUT URL endpoint enforces caller authorization and acceptable content types.
-- [ ] Upload confirmation persists a `media_assets` row tied to the business.
+- [ ] Pre-signed PUT URL endpoint enforces caller authorization and acceptable content types.<!-- mediaService.issueUploadUrl done (allowlist image/jpeg|png|webp, owner check via BusinessRepository for BUSINESS, callerUserId === ownerId for USER, STAFF deferred); Lambda handler pending -->
+- [ ] Upload confirmation persists a `media_assets` row tied to the business.<!-- mediaService.confirmUpload done (re-checks owner + storage-key prefix; PgMediaRepository.insert wired); Lambda handler pending -->
 - [x] StorageGateway interface in place; service-layer code never imports the AWS SDK.<!-- StorageGateway interface + S3StorageGateway implementation in place; AWS SDK contained to backend/shared/adapters/storage/S3StorageGateway.ts -->
 
 ## Acceptance criteria
