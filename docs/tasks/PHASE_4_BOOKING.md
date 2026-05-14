@@ -42,7 +42,7 @@ Out of scope:
 
 ## Checklist
 
-- [ ] Migrations 0009–0011 applied to dev.
+- [ ] Migrations 0009–0011 applied to dev.<!-- 0009 (appointments) authored — uses `btree_gist` + EXCLUDE constraint for double-booking prevention; 0010 + 0011 pending; "applied to dev" needs `terraform apply` + run migrations -->
 - [ ] Booking transaction acquires row-level locks on overlapping windows to prevent double-booking.
 - [ ] State machine rejects invalid transitions with `CONFLICT`.
 - [ ] Cash booking succeeds end-to-end; online booking attempt returns 400 with a clear message.
