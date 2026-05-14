@@ -399,6 +399,140 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/staff:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [catalog]
+      operationId: listStaff
+      summary: List active staff members for a business.
+      description: |
+        Public endpoint. Returns the business's active staff members
+        ordered by `created_at ASC, id ASC` — the order the owner added
+        them. Wrapped in `{ items, nextCursor: null }` for symmetry.
+        Phase 3 ships without pagination.
+      security: []
+      responses:
+        '200':
+          description: The list of active staff members.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [auth]
+      operationId: createStaff
+      summary: Create a new active staff member for a business.
+      description: |
+        Authenticated. Requires the caller's role to be `BUSINESS_OWNER`
+        and to own the target business (Phase 3 strict-owner; admin
+        write paths land in Phase 5).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateStaffRequest'
+      responses:
+        '200':
+          description: The created staff member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/staff/{id}:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [auth]
+      operationId: patchStaff
+      summary: Edit a staff member's mutable fields.
+      description: |
+        Authenticated. Requires `BUSINESS_OWNER` role and ownership of
+        the parent business. Each field optional — absent means "no
+        change". `displayName` cannot be cleared (it is NOT NULL in the
+        DB); `role` accepts `null` to clear. `isActive` cannot be
+        patched here — use DELETE to deactivate. Unknown fields are
+        tolerated.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchStaffRequest'
+      responses:
+        '200':
+          description: The updated staff member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [auth]
+      operationId: deleteStaff
+      summary: Deactivate a staff member (soft-delete).
+      description: |
+        Authenticated. Requires `BUSINESS_OWNER` role and ownership of
+        the parent business. Flips `is_active` to `false`; never removes
+        the row (`appointments.staff_id` is `ON DELETE RESTRICT`). The
+        response body is the staff member with `isActive: false`.
+      responses:
+        '200':
+          description: The deactivated staff member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaffView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -953,6 +1087,72 @@ components:
           type: [string, 'null']
           description: |
             Always `null` for `/businesses/{businessId}/services` —
+            present for envelope symmetry; Phase 3 ships without
+            pagination on this listing.
+    StaffFieldsBase:
+      type: object
+      description: |
+        Common fields for create / patch request bodies on a staff
+        member. All fields optional in this base schema; create / patch
+        add their own required-field constraints via `allOf`.
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 200
+        role:
+          type: [string, 'null']
+          maxLength: 100
+          description: |
+            Free-text role title (e.g. `Senior Stylist`, `Barber`).
+            `null` clears the field.
+    CreateStaffRequest:
+      allOf:
+        - $ref: '#/components/schemas/StaffFieldsBase'
+        - type: object
+          required: [displayName]
+    PatchStaffRequest:
+      allOf:
+        - $ref: '#/components/schemas/StaffFieldsBase'
+        - type: object
+          description: |
+            Partial update. Each field optional. `displayName` cannot be
+            `null` (DB is NOT NULL); `role` accepts `null` to clear.
+            Unknown fields are tolerated.
+    StaffView:
+      type: object
+      required: [id, businessId, displayName, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        businessId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        role:
+          type: [string, 'null']
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    StaffList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaffView'
+        nextCursor:
+          type: [string, 'null']
+          description: |
+            Always `null` for `/businesses/{businessId}/staff` —
             present for envelope symmetry; Phase 3 ships without
             pagination on this listing.
     MediaView:
