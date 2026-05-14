@@ -54,7 +54,7 @@ Out of scope:
 - [x] Owner sees their own business at any status via `/v1/me/business`.
 - [ ] Pre-signed PUT URL endpoint enforces caller authorization and acceptable content types.
 - [ ] Upload confirmation persists a `media_assets` row tied to the business.
-- [ ] StorageGateway interface in place; service-layer code never imports the AWS SDK.
+- [ ] StorageGateway interface in place; service-layer code never imports the AWS SDK.<!-- interface authored (backend/shared/adapters/storage/StorageGateway.ts, no AWS imports); S3StorageGateway implementation + service-layer consumer pending -->
 
 ## Acceptance criteria
 
