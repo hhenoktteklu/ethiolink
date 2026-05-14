@@ -44,6 +44,129 @@ paths:
                 $ref: '#/components/schemas/CategoryList'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses:
+    get:
+      tags: [catalog]
+      operationId: listBusinesses
+      summary: List APPROVED businesses with filters and cursor pagination.
+      description: |
+        Public endpoint. Returns approved businesses ordered by
+        `featured_until DESC NULLS LAST, rating_avg DESC, created_at DESC,
+        id DESC`. All filters are optional; an empty or whitespace-only
+        value is treated as "no filter".
+
+        Pagination is cursor-based. Pass the `nextCursor` value from a
+        previous response as `cursor` to fetch the next page; `nextCursor`
+        is `null` on the final page.
+      security: []
+      parameters:
+        - name: category
+          in: query
+          required: false
+          description: |
+            Active category slug (e.g. `salon`). Rejected with
+            VALIDATION_ERROR if the slug is unknown or inactive.
+          schema:
+            type: string
+        - name: city
+          in: query
+          required: false
+          description: Case-insensitive exact match on city name.
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: false
+          description: Partial match on business name (case-insensitive).
+          schema:
+            type: string
+        - name: ratingMin
+          in: query
+          required: false
+          schema:
+            type: number
+            minimum: 0
+            maximum: 5
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque pagination cursor from a previous response.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: A page of approved businesses.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{id}:
+    get:
+      tags: [catalog]
+      operationId: getBusiness
+      summary: Get one APPROVED business by id.
+      description: |
+        Public endpoint. Returns 404 if the id does not exist or if the
+        business is not in the APPROVED state. The owner's view (any
+        status) is served by `GET /v1/me/business`.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The business profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessPublicView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /me/business:
+    get:
+      tags: [auth]
+      operationId: getMyBusiness
+      summary: Get the caller's own business at any status.
+      description: |
+        Returns the calling owner's business — DRAFT, PENDING_REVIEW,
+        APPROVED, REJECTED, or SUSPENDED. The owner view includes
+        `status` and `ownerUserId`, which the public view omits.
+
+        Returns 404 if the caller has not yet called `POST /v1/auth/sync`
+        or has not yet created a business via `POST /v1/businesses`.
+      responses:
+        '200':
+          description: The caller's business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /auth/sync:
     post:
       tags: [auth]
@@ -206,6 +329,86 @@ components:
             Opaque cursor for the next page. Always `null` for
             `/categories` — included for symmetry with paginated
             listings elsewhere in the API.
+    BusinessPublicView:
+      type: object
+      description: |
+        Public projection of a business profile. Omits `ownerUserId` and
+        `status` — the listing only ever surfaces APPROVED rows.
+      required:
+        - id
+        - categoryId
+        - ratingAvg
+        - ratingCount
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoryId:
+          type: string
+          format: uuid
+        name:
+          type: [string, 'null']
+        description:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: 'null'
+        city:
+          type: [string, 'null']
+        addressLine:
+          type: [string, 'null']
+        latitude:
+          type: [number, 'null']
+        longitude:
+          type: [number, 'null']
+        phone:
+          type: [string, 'null']
+        telegramHandle:
+          type: [string, 'null']
+        whatsappPhone:
+          type: [string, 'null']
+        featuredUntil:
+          type: [string, 'null']
+          format: date-time
+        ratingAvg:
+          type: number
+        ratingCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BusinessOwnerView:
+      allOf:
+        - $ref: '#/components/schemas/BusinessPublicView'
+        - type: object
+          description: |
+            Owner-only projection. Adds the fields the public view omits.
+          required: [ownerUserId, status]
+          properties:
+            ownerUserId:
+              type: string
+              format: uuid
+            status:
+              type: string
+              enum: [DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUSPENDED]
+    BusinessList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessPublicView'
+        nextCursor:
+          type: [string, 'null']
+          description: |
+            Opaque cursor for the next page. `null` when there are no
+            more results. Pass the value back as the `cursor` query
+            parameter to fetch the next page.
     Error:
       type: object
       required: [error]

@@ -48,10 +48,10 @@ Out of scope:
 
 - [ ] Migrations 0003–0005 applied to dev.<!-- 0003 + 0004 + 0005 authored; "applied to dev" needs `terraform apply` + run migrations -->
 - [x] Categories seed inserted; `GET /v1/categories` returns the four beauty categories.<!-- end-to-end on local docker-compose: seed file + runner + categories domain + handler all in place; dev-environment deployment still gated on `terraform apply` -->
-- [ ] BUSINESS_OWNER can create a DRAFT business and edit it.<!-- domain done (businessService.create + update, ownership enforced, one-per-owner); Lambda handlers pending -->
-- [ ] BUSINESS_OWNER can submit a draft, moving status to PENDING_REVIEW.<!-- domain done (businessService.submit with DRAFT → PENDING_REVIEW guard + required-field validation: name, description.en, city, categoryId); Lambda handler pending -->
-- [ ] Public `GET /v1/businesses` only returns APPROVED rows.<!-- domain done (businessService.listPublic + repository filter status='APPROVED', cursor pagination, ORDER BY featured_until DESC NULLS LAST, rating_avg DESC, created_at DESC, id DESC); Lambda handler pending -->
-- [ ] Owner sees their own business at any status via `/v1/me/business`.<!-- domain done (businessService.getByOwner); Lambda handler pending -->
+- [ ] BUSINESS_OWNER can create a DRAFT business and edit it.<!-- domain done; write handlers (POST/PATCH /v1/businesses) pending -->
+- [ ] BUSINESS_OWNER can submit a draft, moving status to PENDING_REVIEW.<!-- domain done; submit handler (POST /v1/businesses/:id/submit) pending -->
+- [x] Public `GET /v1/businesses` only returns APPROVED rows.
+- [x] Owner sees their own business at any status via `/v1/me/business`.
 - [ ] Pre-signed PUT URL endpoint enforces caller authorization and acceptable content types.
 - [ ] Upload confirmation persists a `media_assets` row tied to the business.
 - [ ] StorageGateway interface in place; service-layer code never imports the AWS SDK.
