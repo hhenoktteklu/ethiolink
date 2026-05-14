@@ -44,7 +44,7 @@ Out of scope:
 
 - [ ] Migrations 0009–0011 applied to dev.<!-- 0009 (appointments — `btree_gist` + EXCLUDE for double-booking prevention) + 0010 (reviews — UNIQUE on `appointment_id` for one-review-per-appointment, denormalized `customer_id`/`business_id`, soft-delete) + 0011 (payment_intents — ON DELETE CASCADE from appointments, provider MOCK/TELEBIRR/CHAPA/CBE_BIRR default MOCK, status PENDING/SUCCEEDED/FAILED/CANCELLED default PENDING) authored; "applied to dev" needs `terraform apply` + run migrations -->
 - [ ] Booking transaction acquires row-level locks on overlapping windows to prevent double-booking.<!-- Strategy is the migration-0009 EXCLUDE constraint, not row-level locks. `PgAppointmentsRepository` is in place (`insert`, `findById`, `listForCustomer`, `listForBusiness`, `setStatus`, `reschedule`, `listConflictsForStaff`) and now backs the slots handler. SQLSTATE 23P01 → SLOT_UNAVAILABLE mapping lands with the booking service. -->
-- [ ] State machine rejects invalid transitions with `CONFLICT`.
+- [ ] State machine rejects invalid transitions with `CONFLICT`.<!-- Pure-function module `appointmentStateMachine.ts` + matrix `APPOINTMENT_TRANSITIONS` + typed `InvalidAppointmentTransitionError` in place, with full unit-test coverage of every allowed row, terminal sealing, and a representative disallowed sample. CONFLICT mapping at the HTTP boundary lands with the appointment service. -->
 - [ ] Cash booking succeeds end-to-end; online booking attempt returns 400 with a clear message.
 - [ ] Cancel respects 4-hour cutoff; admin override allowed.
 - [ ] Review insertion requires a COMPLETED appointment and updates business `rating_avg`/`rating_count`.
