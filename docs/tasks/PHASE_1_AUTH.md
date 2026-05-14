@@ -46,8 +46,8 @@ Out of scope:
 
 - [x] Cognito Terraform module provisioning user pool, three groups, two app clients.
 - [ ] Dev environment Terraform applied; outputs captured (user pool id, app client ids).<!-- module wired in environments/dev/main.tf; `terraform apply` not yet run against AWS -->
-- [ ] `pgcrypto` and `citext` extensions enabled in migration 0001.
-- [ ] `users` table created in migration 0002.
+- [x] `pgcrypto` and `citext` extensions enabled in migration 0001.
+- [x] `users` table created in migration 0002.
 - [ ] `AuthProvider` interface defined and `CognitoAuthProvider` implemented.
 - [ ] Cognito JWT validation works against the dev user pool (using `aws-jwt-verify` or equivalent).
 - [ ] `POST /v1/auth/sync` upserts the calling user, defaulting role from Cognito groups.
