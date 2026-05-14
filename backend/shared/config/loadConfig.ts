@@ -61,6 +61,15 @@ export interface BookingConfig {
     readonly slotStepMinutes: number;
     /** Minimum gap between adjacent appointments. Non-negative integer. */
     readonly bufferMinutes: number;
+    /**
+     * Customer-side cancellation cutoff: how many minutes before
+     * `starts_at` a customer may still cancel without admin
+     * intervention. Non-negative integer; `0` disables the cutoff
+     * (allow cancel up to the second the appointment starts). MVP
+     * default is 240 minutes (4 hours) — see
+     * `docs/tasks/PHASE_4_BOOKING.md`.
+     */
+    readonly cancelCutoffMinutes: number;
     /** IANA timezone for the marketplace (e.g. `Africa/Addis_Ababa`). */
     readonly defaultTimezone: string;
 }
@@ -175,6 +184,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
                 'BOOKING_BUFFER_MINUTES',
                 env.BOOKING_BUFFER_MINUTES,
                 5,
+            ),
+            cancelCutoffMinutes: parseNonNegativeInteger(
+                'BOOKING_CANCEL_CUTOFF_MINUTES',
+                env.BOOKING_CANCEL_CUTOFF_MINUTES,
+                240,
             ),
             defaultTimezone:
                 env.DEFAULT_TIMEZONE?.trim() || 'Africa/Addis_Ababa',

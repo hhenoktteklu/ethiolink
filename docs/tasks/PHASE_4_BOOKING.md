@@ -17,7 +17,7 @@ In scope:
   - `POST /v1/appointments/:id/review`, `GET /v1/businesses/:id/reviews`
 - Payment abstraction: `PaymentGateway` interface, `CashGateway` and `MockOnlineGateway` implementations.
 - Concurrency-safe slot reservation: `SELECT … FOR UPDATE` inside the booking transaction to prevent double-booking.
-- Cancellation policy: hardcoded 4-hour cutoff in MVP, configurable via env.
+- Cancellation policy: hardcoded 4-hour cutoff in MVP, configurable via env.<!-- `BookingConfig.cancelCutoffMinutes` wired in loadConfig from `BOOKING_CANCEL_CUTOFF_MINUTES` (non-negative int, default 240); .env.example already documents the var. Service-layer cutoff check + admin override land with the appointment service. -->
 - Denormalized `rating_avg` / `rating_count` updates on review insert.
 
 Out of scope:
