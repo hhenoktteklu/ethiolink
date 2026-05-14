@@ -55,7 +55,7 @@ Out of scope:
 - [ ] `PATCH /v1/me` updates display name and customer-profile-preferred-city.<!-- display_name path implemented end-to-end; preferred_city deferred until the customer_profiles migration lands -->
 
 - [x] Local docker-compose Postgres + migrations runnable with `npm run db:migrate`.
-- [ ] Unit tests for `userService` (sync, get, update) using an in-memory repository fake.
+- [x] Unit tests for `userService` (sync, get, update) using an in-memory repository fake.
 
 ## Acceptance criteria
 
