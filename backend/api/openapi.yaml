@@ -1,0 +1,22 @@
+openapi: 3.1.0
+info:
+  title: EthioLink API
+  version: 0.0.0
+  description: |
+    Stub OpenAPI document for the EthioLink REST API.
+    Filled out endpoint-by-endpoint starting in Phase 1.
+    The canonical contract today is docs/architecture/API_SPEC.md.
+servers:
+  - url: https://api-dev.ethiolink.example/v1
+    description: Dev (placeholder)
+  - url: https://api.ethiolink.example/v1
+    description: Prod (placeholder)
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+security:
+  - cognito: []
+paths: {}

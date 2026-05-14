@@ -1,0 +1,228 @@
+# Database Schema
+
+PostgreSQL 15 on Amazon RDS. All schema changes go through versioned SQL migrations in `backend/db/migrations/`. Do not modify production schema outside of migrations.
+
+## Conventions
+
+- `id` columns are `uuid` (generated with `gen_random_uuid()`, requires `pgcrypto`).
+- All tables include `created_at` and `updated_at` (`timestamptz`, default `now()`).
+- Soft-delete via `deleted_at timestamptz NULL` only where retention is required (`appointments`, `reviews`, `media_assets`). Most tables use hard delete.
+- Foreign keys are always `ON DELETE` declared explicitly — no defaults.
+- Monetary values are `numeric(12, 2)` representing ETB.
+- Multilingual text fields are JSONB keyed by language code: `{"en": "...", "am": "..."}`. MVP writes only `en`.
+- Enum-like fields use Postgres `CHECK` constraints, not `ENUM` types, to keep migrations cheap.
+
+## Tables
+
+### `users`
+
+Mirror of Cognito identities. One row per authenticated principal across all roles.
+
+| column         | type           | notes                                                       |
+| -------------- | -------------- | ----------------------------------------------------------- |
+| id             | uuid PK        |                                                             |
+| cognito_sub    | text UNIQUE    | Cognito user `sub`                                          |
+| email          | citext         | nullable if user signed up with phone                       |
+| phone          | text           | E.164                                                       |
+| role           | text NOT NULL  | CHECK in ('CUSTOMER','BUSINESS_OWNER','ADMIN')              |
+| status         | text NOT NULL  | CHECK in ('ACTIVE','SUSPENDED','DELETED'), default 'ACTIVE' |
+| display_name   | text           |                                                             |
+| created_at     | timestamptz    |                                                             |
+| updated_at     | timestamptz    |                                                             |
+
+### `customer_profiles`
+
+| column           | type        | notes                                  |
+| ---------------- | ----------- | -------------------------------------- |
+| id               | uuid PK     |                                        |
+| user_id          | uuid FK     | -> users.id ON DELETE CASCADE, UNIQUE  |
+| preferred_city   | text        |                                        |
+| created_at       | timestamptz |                                        |
+| updated_at       | timestamptz |                                        |
+
+### `business_categories`
+
+Marketplace categories. Beauty-related entries only in MVP.
+
+| column      | type        | notes                                       |
+| ----------- | ----------- | ------------------------------------------- |
+| id          | uuid PK     |                                             |
+| slug        | text UNIQUE | machine-friendly key, e.g. `salon`          |
+| name        | jsonb       | localized                                   |
+| sort_order  | int         |                                             |
+| is_active   | bool        | default true                                |
+| created_at  | timestamptz |                                             |
+| updated_at  | timestamptz |                                             |
+
+### `business_profiles`
+
+| column          | type        | notes                                                                                  |
+| --------------- | ----------- | -------------------------------------------------------------------------------------- |
+| id              | uuid PK     |                                                                                        |
+| owner_user_id   | uuid FK     | -> users.id ON DELETE RESTRICT                                                         |
+| category_id     | uuid FK     | -> business_categories.id ON DELETE RESTRICT                                           |
+| name            | text        |                                                                                        |
+| description     | jsonb       | localized                                                                              |
+| city            | text        |                                                                                        |
+| address_line    | text        |                                                                                        |
+| latitude        | double precision |                                                                                   |
+| longitude       | double precision |                                                                                   |
+| phone           | text        |                                                                                        |
+| telegram_handle | text        |                                                                                        |
+| whatsapp_phone  | text        |                                                                                        |
+| status          | text        | CHECK in ('DRAFT','PENDING_REVIEW','APPROVED','REJECTED','SUSPENDED'), default 'DRAFT' |
+| featured_until  | timestamptz | nullable; admin-set                                                                    |
+| rating_avg      | numeric(3,2)| denormalized                                                                           |
+| rating_count    | int         | denormalized                                                                           |
+| created_at      | timestamptz |                                                                                        |
+| updated_at      | timestamptz |                                                                                        |
+
+Indexes: `(status)`, `(category_id, status)`, `(city, status)`, GIN on `description` if we add full-text search later.
+
+### `services`
+
+| column            | type        | notes                                              |
+| ----------------- | ----------- | -------------------------------------------------- |
+| id                | uuid PK     |                                                    |
+| business_id       | uuid FK     | -> business_profiles.id ON DELETE CASCADE          |
+| name              | jsonb       | localized                                          |
+| description       | jsonb       | localized                                          |
+| duration_minutes  | int         | CHECK > 0                                          |
+| price_etb         | numeric(12,2)|                                                   |
+| is_active         | bool        | default true                                       |
+| created_at        | timestamptz |                                                    |
+| updated_at        | timestamptz |                                                    |
+
+### `staff_members`
+
+| column        | type        | notes                                              |
+| ------------- | ----------- | -------------------------------------------------- |
+| id            | uuid PK     |                                                    |
+| business_id   | uuid FK     | -> business_profiles.id ON DELETE CASCADE          |
+| display_name  | text        |                                                    |
+| role          | text        | free-text role title (e.g., "Stylist")             |
+| is_active     | bool        | default true                                       |
+| created_at    | timestamptz |                                                    |
+| updated_at    | timestamptz |                                                    |
+
+### `staff_availability`
+
+Weekly recurring availability plus date-specific overrides.
+
+| column        | type        | notes                                                                                |
+| ------------- | ----------- | ------------------------------------------------------------------------------------ |
+| id            | uuid PK     |                                                                                      |
+| staff_id      | uuid FK     | -> staff_members.id ON DELETE CASCADE                                                |
+| kind          | text        | CHECK in ('WEEKLY','OVERRIDE')                                                       |
+| weekday       | int         | 0..6, NULL for OVERRIDE                                                              |
+| specific_date | date        | NULL for WEEKLY                                                                      |
+| start_time    | time        |                                                                                      |
+| end_time      | time        | CHECK end_time > start_time                                                          |
+| is_closed     | bool        | true means staff is unavailable in this window (used for OVERRIDE blackouts)         |
+| created_at    | timestamptz |                                                                                      |
+
+### `appointments`
+
+| column          | type        | notes                                                                                       |
+| --------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| id              | uuid PK     |                                                                                             |
+| customer_id     | uuid FK     | -> users.id ON DELETE RESTRICT                                                              |
+| business_id     | uuid FK     | -> business_profiles.id ON DELETE RESTRICT                                                  |
+| service_id      | uuid FK     | -> services.id ON DELETE RESTRICT                                                           |
+| staff_id        | uuid FK     | -> staff_members.id ON DELETE RESTRICT                                                      |
+| starts_at       | timestamptz |                                                                                             |
+| ends_at         | timestamptz |                                                                                             |
+| status          | text        | CHECK in ('REQUESTED','ACCEPTED','REJECTED','CANCELLED','COMPLETED','NO_SHOW')              |
+| payment_method  | text        | CHECK in ('CASH','ONLINE_PENDING')                                                          |
+| price_etb       | numeric(12,2)| snapshotted at booking time                                                                |
+| notes           | text        |                                                                                             |
+| cancelled_by    | text        | CHECK in ('CUSTOMER','BUSINESS','ADMIN') nullable                                           |
+| cancel_reason   | text        |                                                                                             |
+| created_at      | timestamptz |                                                                                             |
+| updated_at      | timestamptz |                                                                                             |
+| deleted_at      | timestamptz |                                                                                             |
+
+Indexes: `(business_id, starts_at)`, `(customer_id, starts_at)`, `(staff_id, starts_at)`, `(status)`.
+
+### `reviews`
+
+| column         | type        | notes                                                                                |
+| -------------- | ----------- | ------------------------------------------------------------------------------------ |
+| id             | uuid PK     |                                                                                      |
+| appointment_id | uuid FK     | -> appointments.id ON DELETE RESTRICT, UNIQUE — one review per completed appointment |
+| customer_id    | uuid FK     | -> users.id ON DELETE RESTRICT                                                       |
+| business_id    | uuid FK     | -> business_profiles.id ON DELETE RESTRICT                                           |
+| rating         | int         | CHECK 1..5                                                                           |
+| comment        | text        |                                                                                      |
+| created_at     | timestamptz |                                                                                      |
+| updated_at     | timestamptz |                                                                                      |
+| deleted_at     | timestamptz |                                                                                      |
+
+### `media_assets`
+
+| column        | type        | notes                                                                                |
+| ------------- | ----------- | ------------------------------------------------------------------------------------ |
+| id            | uuid PK     |                                                                                      |
+| owner_type    | text        | CHECK in ('BUSINESS','STAFF','USER')                                                 |
+| owner_id      | uuid        | logical FK, validated in service layer                                               |
+| s3_key        | text UNIQUE |                                                                                      |
+| content_type  | text        |                                                                                      |
+| width         | int         |                                                                                      |
+| height        | int         |                                                                                      |
+| is_public     | bool        | default false                                                                        |
+| created_at    | timestamptz |                                                                                      |
+| deleted_at    | timestamptz |                                                                                      |
+
+### `admin_actions`
+
+Audit log for admin operations.
+
+| column         | type        | notes                                                                       |
+| -------------- | ----------- | --------------------------------------------------------------------------- |
+| id             | uuid PK     |                                                                             |
+| admin_user_id  | uuid FK     | -> users.id ON DELETE RESTRICT                                              |
+| action         | text        | e.g. 'APPROVE_BUSINESS', 'REJECT_BUSINESS', 'FEATURE_BUSINESS'              |
+| target_type    | text        | e.g. 'business_profile', 'user'                                             |
+| target_id      | uuid        |                                                                             |
+| notes          | text        |                                                                             |
+| created_at     | timestamptz |                                                                             |
+
+### `payment_intents`
+
+Placeholder table for the future online-payment flow. Cash bookings do not write here.
+
+| column          | type        | notes                                                                                |
+| --------------- | ----------- | ------------------------------------------------------------------------------------ |
+| id              | uuid PK     |                                                                                      |
+| appointment_id  | uuid FK     | -> appointments.id ON DELETE CASCADE                                                 |
+| provider        | text        | CHECK in ('MOCK','TELEBIRR','CHAPA','CBE_BIRR'), default 'MOCK'                       |
+| amount_etb      | numeric(12,2)|                                                                                     |
+| status          | text        | CHECK in ('PENDING','SUCCEEDED','FAILED','CANCELLED'), default 'PENDING'             |
+| provider_ref    | text        | external reference                                                                   |
+| raw_response    | jsonb       |                                                                                      |
+| created_at      | timestamptz |                                                                                      |
+| updated_at      | timestamptz |                                                                                      |
+
+### `notification_logs`
+
+Persisted record of outbound notifications.
+
+| column          | type        | notes                                                                                       |
+| --------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| id              | uuid PK     |                                                                                             |
+| recipient_user_id| uuid FK    | -> users.id ON DELETE SET NULL                                                              |
+| channel         | text        | CHECK in ('SMS','EMAIL','TELEGRAM','PUSH','MOCK')                                           |
+| template_key    | text        | logical template name, e.g. 'booking.confirmation.customer'                                  |
+| payload         | jsonb       | template variables                                                                          |
+| status          | text        | CHECK in ('QUEUED','SENT','DELIVERED','FAILED')                                             |
+| provider        | text        | actual provider used                                                                        |
+| provider_ref    | text        |                                                                                             |
+| error_message   | text        |                                                                                             |
+| created_at      | timestamptz |                                                                                             |
+| updated_at      | timestamptz |                                                                                             |
+
+## Migrations
+
+Migrations are stored under `backend/db/migrations/` with the naming pattern `NNNN_description.sql`. Each migration is forward-only; rollbacks are handled by writing a new compensating migration.
+
+The first migration (`0001_init.sql`) is created at the start of Phase 1 and creates the `pgcrypto` and `citext` extensions plus the `users` table.

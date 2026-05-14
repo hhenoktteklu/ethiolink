@@ -1,0 +1,73 @@
+# Phase 8 — Production Hardening
+
+## Goal
+
+Make the platform something we can confidently leave running. Close observability gaps, verify backups and DR, complete the security review, and document the operational runbooks.
+
+## Scope
+
+In scope:
+
+- WAF tuning beyond the Phase 7 baseline: bot control, IP reputation list, custom rate limits per route.
+- Secret rotation: rotate RDS master password and any third-party API keys via Secrets Manager managed rotation.
+- RDS backup verification: monthly automated restore test to a scratch RDS instance, comparing schema and row counts.
+- DR runbook in `docs/operations/DR_RUNBOOK.md` covering RDS restore, Lambda redeploy, Cognito recreation guidance.
+- Load testing: scripted scenarios for browse, book, accept, complete, with assertions on p95 latency.
+- Security review:
+  - All endpoint authorization matrix reviewed against `API_SPEC.md`.
+  - All Lambda IAM roles audited for least privilege.
+  - Public S3 access limited strictly to the `media-public` bucket.
+  - Cognito password policy hardened; account lockout reviewed.
+  - CSP and security headers on the admin SPA.
+- Observability gaps:
+  - Structured request logs with correlation ids.
+  - X-Ray tracing on every Lambda.
+  - Per-endpoint latency and error dashboards.
+  - SLO definitions: 99.5% availability on booking creation, p95 < 800ms on browse.
+
+Out of scope:
+
+- Marketplace expansion modules — covered in later post-MVP phases.
+- Native Amharic UI rollout.
+
+## Files involved
+
+- `infra/terraform/modules/waf/*` (extended)
+- `infra/terraform/modules/secrets/*` (rotation configuration)
+- `infra/terraform/modules/cloudwatch/*` (additional dashboards and alarms)
+- `backend/shared/observability/{logger,tracing,correlationId}.ts`
+- `docs/operations/DR_RUNBOOK.md`
+- `docs/operations/RUNBOOK.md`
+- `docs/operations/SLOs.md`
+- `docs/operations/SECURITY_REVIEW.md`
+
+## Checklist
+
+- [ ] WAF rules tuned and tested.
+- [ ] Secret rotation enabled for RDS and third-party providers.
+- [ ] Backup restore test scripted and passing.
+- [ ] DR runbook validated by a tabletop exercise.
+- [ ] Load test passes target p95 latency.
+- [ ] Security review checklist completed and signed off.
+- [ ] All Lambdas emit structured logs with correlation ids.
+- [ ] X-Ray enabled across all Lambdas.
+- [ ] SLO dashboards live and pinned in CloudWatch.
+
+## Acceptance criteria
+
+- A DR drill completes within 60 minutes from "RDS lost" to "API serving from restored database".
+- Load test sustained at 100 RPS on read paths and 20 RPS on booking creation with error rate < 1% and p95 latency within targets.
+- Security review checklist has zero outstanding criticals.
+
+## Test plan
+
+- DR drill: scheduled exercise restoring RDS from the most recent snapshot into a scratch environment.
+- Load test: `k6` scripts targeting browse, book, accept flows.
+- Synthetic monitoring: Route 53 / CloudWatch synthetics for the public listing endpoint, alarming if it fails for two consecutive checks.
+- Pen-test pass on auth, ownership, and authorization boundaries.
+
+## Rollback notes
+
+- WAF rule changes are reversible by Terraform.
+- Secret rotation can be paused via Secrets Manager.
+- Observability changes (log structure, tracing) are additive and non-breaking.

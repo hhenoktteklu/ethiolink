@@ -1,0 +1,17 @@
+{
+  "name": "ethiolink",
+  "version": "0.0.0",
+  "private": true,
+  "description": "EthioLink monorepo root. Backend (AWS Lambda) and admin (React) are NPM workspaces; mobile (Flutter) is managed separately.",
+  "workspaces": [
+    "backend",
+    "admin"
+  ],
+  "scripts": {
+    "format": "echo \"Run package-level format in backend/ and admin/\"",
+    "lint": "echo \"Run package-level lint in backend/ and admin/\""
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
