@@ -33,12 +33,31 @@ export interface CognitoConfig {
     readonly region: string;
 }
 
+/**
+ * S3 configuration for the storage adapter. Bucket names are intentionally
+ * optional at config load — loadConfig must succeed even on Lambdas that
+ * never construct `S3StorageGateway` (e.g. the auth handlers). Validation
+ * that the buckets are non-empty happens at gateway construction time,
+ * where it can throw a descriptive `StorageError`.
+ */
+export interface S3Config {
+    /** Bucket for public-readable media. Empty when unset; gateway validates. */
+    readonly publicBucket: string;
+    /** Bucket for private media served via presigned GETs. Empty when unset. */
+    readonly privateBucket: string;
+    /** Lifetime of issued upload (PUT) URLs. Defaults to 900 seconds. */
+    readonly uploadUrlExpiresSeconds: number;
+    /** Lifetime of issued read (GET) URLs. Defaults to 3600 seconds. */
+    readonly readUrlExpiresSeconds: number;
+}
+
 export interface AppConfig {
     readonly nodeEnv: NodeEnv;
     readonly logLevel: LogLevel;
     readonly region: string;
     readonly pg: PgConfig;
     readonly cognito: CognitoConfig;
+    readonly s3: S3Config;
 }
 
 /** Raised when required config is missing. Carries the full list of names. */
@@ -117,6 +136,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
             appClientIdAdmin: env.COGNITO_APP_CLIENT_ID_ADMIN!.trim(),
             region: env.COGNITO_REGION!.trim(),
         }),
+        s3: Object.freeze<S3Config>({
+            publicBucket: env.S3_BUCKET_MEDIA_PUBLIC?.trim() ?? '',
+            privateBucket: env.S3_BUCKET_MEDIA_PRIVATE?.trim() ?? '',
+            uploadUrlExpiresSeconds: parsePositiveInteger(
+                'S3_UPLOAD_URL_EXPIRES_SECONDS',
+                env.S3_UPLOAD_URL_EXPIRES_SECONDS,
+                900,
+            ),
+            readUrlExpiresSeconds: parsePositiveInteger(
+                'S3_READ_URL_EXPIRES_SECONDS',
+                env.S3_READ_URL_EXPIRES_SECONDS,
+                3600,
+            ),
+        }),
     });
 }
 
@@ -147,6 +180,21 @@ function parseInt32(name: string, raw: string | undefined, fallback: number): nu
     const parsed = Number.parseInt(raw, 10);
     if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
         throw new InvalidConfigError(name, `expected a positive integer port, got "${raw}"`);
+    }
+    return parsed;
+}
+
+function parsePositiveInteger(
+    name: string,
+    raw: string | undefined,
+    fallback: number,
+): number {
+    if (raw === undefined || raw.trim() === '') {
+        return fallback;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new InvalidConfigError(name, `expected a positive integer, got "${raw}"`);
     }
     return parsed;
 }
