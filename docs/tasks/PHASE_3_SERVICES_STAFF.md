@@ -49,7 +49,7 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 - [x] Staff CRUD ownership-gated.<!-- STAFF media unlock in MediaService still pending. -->
 - [x] Weekly availability `PUT` accepts a 7-day schedule with one or more windows per day.
 - [x] Override `POST` can mark a day or window closed, or add a special open window.
-- [ ] `GET …/slots` returns slots that are inside availability, not within any existing appointment, and not in the past.<!-- schedule read (weekly + overrides) shipped in this commit; slot computation algorithm + handler are a separate focused commit -->
+- [x] `GET …/slots` returns slots that are inside availability, not within any existing appointment, and not in the past.<!-- appointment-conflict check wired against a stub `StubAppointmentsRepository`; Phase 4 swaps in the real implementation against the `appointments` table -->
 
 ## Acceptance criteria
 

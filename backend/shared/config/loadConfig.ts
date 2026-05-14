@@ -51,6 +51,20 @@ export interface S3Config {
     readonly readUrlExpiresSeconds: number;
 }
 
+/**
+ * Booking-side configuration. Used by slot computation (Phase 3) and
+ * appointment-state guards (Phase 4+). Defaults come from
+ * `backend/.env.example`.
+ */
+export interface BookingConfig {
+    /** Granularity at which bookable slot starts are emitted. Positive integer. */
+    readonly slotStepMinutes: number;
+    /** Minimum gap between adjacent appointments. Non-negative integer. */
+    readonly bufferMinutes: number;
+    /** IANA timezone for the marketplace (e.g. `Africa/Addis_Ababa`). */
+    readonly defaultTimezone: string;
+}
+
 export interface AppConfig {
     readonly nodeEnv: NodeEnv;
     readonly logLevel: LogLevel;
@@ -58,6 +72,7 @@ export interface AppConfig {
     readonly pg: PgConfig;
     readonly cognito: CognitoConfig;
     readonly s3: S3Config;
+    readonly booking: BookingConfig;
 }
 
 /** Raised when required config is missing. Carries the full list of names. */
@@ -150,6 +165,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
                 3600,
             ),
         }),
+        booking: Object.freeze<BookingConfig>({
+            slotStepMinutes: parsePositiveInteger(
+                'BOOKING_SLOT_STEP_MINUTES',
+                env.BOOKING_SLOT_STEP_MINUTES,
+                15,
+            ),
+            bufferMinutes: parseNonNegativeInteger(
+                'BOOKING_BUFFER_MINUTES',
+                env.BOOKING_BUFFER_MINUTES,
+                5,
+            ),
+            defaultTimezone:
+                env.DEFAULT_TIMEZONE?.trim() || 'Africa/Addis_Ababa',
+        }),
     });
 }
 
@@ -195,6 +224,24 @@ function parsePositiveInteger(
     const parsed = Number.parseInt(raw, 10);
     if (!Number.isInteger(parsed) || parsed <= 0) {
         throw new InvalidConfigError(name, `expected a positive integer, got "${raw}"`);
+    }
+    return parsed;
+}
+
+function parseNonNegativeInteger(
+    name: string,
+    raw: string | undefined,
+    fallback: number,
+): number {
+    if (raw === undefined || raw.trim() === '') {
+        return fallback;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+        throw new InvalidConfigError(
+            name,
+            `expected a non-negative integer, got "${raw}"`,
+        );
     }
     return parsed;
 }

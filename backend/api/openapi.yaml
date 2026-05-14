@@ -663,6 +663,77 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/staff/{staffId}/slots:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: staffId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [catalog]
+      operationId: computeStaffSlots
+      summary: Compute bookable slots for a staff member.
+      description: |
+        Public endpoint. Walks `[from, to]` one day at a time in the
+        business timezone, assembles open windows from the staff
+        member's WEEKLY availability plus OVERRIDE rows (open overrides
+        extend, closed overrides remove), and emits bookable slots
+        respecting:
+
+        * the service's `durationMinutes` (slot length),
+        * the system-wide `BOOKING_SLOT_STEP_MINUTES` cadence,
+        * the `BOOKING_BUFFER_MINUTES` separation against existing
+          appointments,
+        * a "no slots in the past" filter.
+
+        Phase 3 stubs the appointment-conflict lookup (always empty);
+        Phase 4 wires the real `appointments` table without changing
+        this contract.
+
+        Returns slots as UTC ISO timestamp pairs. Date range capped at
+        31 days; exceeding the cap returns `VALIDATION_ERROR`.
+      security: []
+      parameters:
+        - name: serviceId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The service the customer wants to book.
+        - name: from
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DateOnly'
+          description: Inclusive start of the date range in the business timezone.
+        - name: to
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/DateOnly'
+          description: Inclusive end of the date range in the business timezone.
+      responses:
+        '200':
+          description: The list of bookable slots.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SlotList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -1388,6 +1459,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AvailabilityWindowView'
+    Slot:
+      type: object
+      required: [startUtc, endUtc]
+      properties:
+        startUtc:
+          type: string
+          format: date-time
+          description: UTC ISO-8601 timestamp of the slot's start.
+        endUtc:
+          type: string
+          format: date-time
+          description: UTC ISO-8601 timestamp of the slot's end (start + service duration).
+    SlotList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Slot'
     MediaView:
       type: object
       required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]

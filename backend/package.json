@@ -18,10 +18,12 @@
     "@aws-sdk/client-s3": "^3.600.0",
     "@aws-sdk/s3-request-presigner": "^3.600.0",
     "aws-jwt-verify": "^4.0.1",
+    "luxon": "^3.4.4",
     "pg": "^8.11.5"
   },
   "devDependencies": {
     "@types/aws-lambda": "^8.10.137",
+    "@types/luxon": "^3.4.2",
     "@types/node": "^20.12.7",
     "@types/pg": "^8.11.5",
     "tsx": "^4.7.2"
