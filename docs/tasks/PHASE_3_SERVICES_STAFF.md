@@ -24,6 +24,8 @@ Out of scope:
 - `backend/db/migrations/0006_services.sql`
 - `backend/db/migrations/0007_staff_members.sql`
 - `backend/db/migrations/0008_staff_availability.sql`
+- `backend/shared/http/validation.ts` (extracted from Phase 2 `_validators.ts` files as a Phase 3 prerequisite — generic body parsers shared across handler folders)
+- `backend/shared/http/pagination.ts` (extracted from Phase 2 `businessService.ts` cursor codec — generic encode/decode/clampLimit for any paginated listing)
 - `backend/shared/domains/services/*`
 - `backend/shared/domains/staff/*`
 - `backend/shared/domains/availability/*`
@@ -31,6 +33,14 @@ Out of scope:
 - `backend/lambdas/staff/{list,create,patch,delete}.ts`
 - `backend/lambdas/availability/{get,replace,addOverride,slots}.ts`
 - `backend/tests/services/*`, `backend/tests/staff/*`, `backend/tests/availability/*`
+
+## Pre-implementation cleanup
+
+Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns three more times:
+
+- Generic body parsers (`ValidationFailure`, `UUID_RE`, `parseJsonObjectBody`, `parseRequiredUuid`, `parseRequiredString`, `parseOptionalString`, `parseStringOrNull`, `parseOptionalNonNegInt`) moved to `backend/shared/http/validation.ts`. Phase 2's `lambdas/businesses/_validators.ts` and `lambdas/media/_validators.ts` are now thin shims that re-export the generics and keep only domain-specific helpers (`FieldLimits`, `parseDescriptionOrNull`, `parseLatitude`/`parseLongitude`; `parseOwnerType`, `parseStorageKey`).
+- Opaque cursor codec moved to `backend/shared/http/pagination.ts`: `InvalidCursorError`, `encodeCursor<P>(payload)`, `decodeCursor<P>(encoded, isValid)`, `clampLimit(requested, opts)`. `businessService.ts` keeps its business-specific `ParsedCursor` shape, the `isParsedCursor` type guard, and an `encodeBusinessCursor` wrapper; it re-exports `InvalidCursorError` so existing handler/test imports keep working.
+- Pure refactor: no API behavior changed; existing Phase 1 + Phase 2 tests continue to cover the cursor codec via `businessService` tests.
 
 ## Checklist
 

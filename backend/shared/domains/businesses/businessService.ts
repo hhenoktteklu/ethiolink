@@ -32,6 +32,16 @@ import type {
 } from './businessRepository.js';
 
 import type { UserRole } from '../../adapters/auth/AuthProvider.js';
+import {
+    clampLimit,
+    decodeCursor,
+    encodeCursor,
+    InvalidCursorError,
+} from '../../http/pagination.js';
+
+// Re-export for backwards compatibility: handlers and tests import
+// `InvalidCursorError` from this module since Phase 2.
+export { InvalidCursorError };
 
 const DEFAULT_LIST_LIMIT = 20;
 const MAX_LIST_LIMIT = 100;
@@ -100,13 +110,6 @@ export class BusinessIncompleteForSubmitError extends Error {
     }
 }
 
-export class InvalidCursorError extends Error {
-    constructor() {
-        super('Cursor is malformed.');
-        this.name = 'InvalidCursorError';
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -125,15 +128,20 @@ export class BusinessService {
         encodedCursor?: string,
         requestedLimit?: number,
     ): Promise<BusinessListPage> {
-        const limit = clampLimit(requestedLimit);
-        const cursor = encodedCursor ? decodeCursor(encodedCursor) : null;
+        const limit = clampLimit(requestedLimit, {
+            default: DEFAULT_LIST_LIMIT,
+            max: MAX_LIST_LIMIT,
+        });
+        const cursor = encodedCursor
+            ? decodeCursor<ParsedCursor>(encodedCursor, isParsedCursor)
+            : null;
 
         // Ask for one extra row to detect "is there another page".
         const rows = await this.repository.listPublic(filters, cursor, limit + 1);
         const items = rows.slice(0, limit);
         const hasMore = rows.length > limit;
         const last = items[items.length - 1];
-        const nextCursor = hasMore && last ? encodeCursor(last) : null;
+        const nextCursor = hasMore && last ? encodeBusinessCursor(last) : null;
 
         return Object.freeze<BusinessListPage>({
             items: Object.freeze([...items]),
@@ -242,15 +250,15 @@ function hasNonEmptyDescription(
 }
 
 // ---------------------------------------------------------------------------
-// Cursor codec
+// Cursor — business-specific shape + type guard
 //
-// Wire format: base64url(JSON.stringify({ id, sortKey })) where sortKey is
-// the row's `{ featuredUntil, ratingAvg, createdAt }` tuple. The repository
-// uses these fields to build the row-value comparison predicate.
+// The opaque encode/decode/clamp helpers live in shared/http/pagination.ts.
+// This file only owns the business-specific payload shape (`ParsedCursor`)
+// and its runtime validator.
 // ---------------------------------------------------------------------------
 
-function encodeCursor(business: Business): string {
-    const payload: ParsedCursor = {
+function encodeBusinessCursor(business: Business): string {
+    return encodeCursor<ParsedCursor>({
         id: business.id,
         sortKey: {
             featuredUntil: business.featuredUntil
@@ -259,20 +267,7 @@ function encodeCursor(business: Business): string {
             ratingAvg: business.ratingAvg,
             createdAt: business.createdAt.toISOString(),
         },
-    };
-    return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
-}
-
-function decodeCursor(encoded: string): ParsedCursor {
-    let parsed: unknown;
-    try {
-        const json = Buffer.from(encoded, 'base64url').toString('utf8');
-        parsed = JSON.parse(json);
-    } catch {
-        throw new InvalidCursorError();
-    }
-    if (!isParsedCursor(parsed)) throw new InvalidCursorError();
-    return parsed;
+    });
 }
 
 function isParsedCursor(value: unknown): value is ParsedCursor {
@@ -286,11 +281,4 @@ function isParsedCursor(value: unknown): value is ParsedCursor {
     const ratingAvgOk = typeof sk.ratingAvg === 'number';
     const createdAtOk = typeof sk.createdAt === 'string';
     return featuredUntilOk && ratingAvgOk && createdAtOk;
-}
-
-function clampLimit(requested: number | undefined): number {
-    if (requested === undefined || !Number.isFinite(requested)) return DEFAULT_LIST_LIMIT;
-    const integer = Math.trunc(requested);
-    if (integer <= 0) return DEFAULT_LIST_LIMIT;
-    return Math.min(integer, MAX_LIST_LIMIT);
 }
