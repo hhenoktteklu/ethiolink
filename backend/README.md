@@ -51,12 +51,23 @@ Prerequisites: Docker, Node.js 20+, and a clone of this repo.
 
    Default connection parameters match docker-compose — no `.env` file is required for the happy path. To point at a different database, set the matching `PG_*` env vars before running (see `backend/.env.example`). The runner tracks applied migrations in a `schema_migrations` table; re-running is a no-op when nothing is new.
 
+4. Apply seed data:
+
+   ```bash
+   npm run db:seed
+   ```
+
+   Runs every `.sql` file under `backend/db/seeds/` exactly once, tracked in a `schema_seeds` table. Currently this inserts the four MVP business categories (Salon, Barber, Spa, Beauty Professional). The seeds are written to be idempotent on their own (`INSERT ... ON CONFLICT`) and the runner additionally skips files that have already been applied — re-running is a fast no-op.
+
+   Migrations and seeds are tracked independently. Use `npm run db:migrate` for schema changes and `npm run db:seed` for reference data; either can be re-run safely without the other.
+
 To wipe the local database and start over:
 
 ```bash
 docker-compose down -v   # drops the data volume
 docker-compose up -d
 npm run db:migrate
+npm run db:seed
 ```
 
 ## Running tests
