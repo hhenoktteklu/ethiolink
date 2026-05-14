@@ -87,7 +87,9 @@ Captured during the Phase 3 verification pass. None are blockers for ticking the
 
 - **Tests for the new domains:**
   - `slot computer` — in place (`backend/tests/availability/slotComputer.test.ts`). The pure function is exercised directly with deterministic `now` injection; no DB, no fakes. Covers empty inputs, weekly windows, override add/remove/merge/clip, duration-vs-window math, past filter, timezone correctness (09:00 Addis → 06:00 UTC), 31-day range cap, `24:00:00` end-of-day sentinel, appointment conflicts with buffer.
-  - `services`, `staff`, `availabilityService`, `slotService` (orchestrator) — still deferred. Patterns are set by Phase 2.
+  - `services` — in place (`backend/tests/services/serviceService.test.ts` + `_fakes/InMemoryServiceRepository.ts`). Create + missing-business 404 + non-owner refusal, update + empty-patch no-op + missing-target 404, deactivate, listing-active-only, `priceEtb` round-trip.
+  - `staff` — in place (`backend/tests/staff/staffService.test.ts` + `_fakes/InMemoryStaffRepository.ts`). Same matrix as services with `role` null-clearing in place of the price round-trip.
+  - `availabilityService`, `slotService` (orchestrators) — still deferred.
 
 - **Luxon was added as a runtime dep.** Justification: IANA timezone math is brittle to hand-roll (DST transitions, zone-changing dates, edge cases around `24:00:00`). Luxon is pure JS, ~70 KB minified+gzipped, zero transitive deps. Scoped to slot computation only — no other file imports it.
 
