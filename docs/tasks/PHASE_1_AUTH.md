@@ -50,9 +50,9 @@ Out of scope:
 - [x] `users` table created in migration 0002.
 - [x] `AuthProvider` interface defined and `CognitoAuthProvider` implemented.
 - [ ] Cognito JWT validation works against the dev user pool (using `aws-jwt-verify` or equivalent).<!-- code wired with aws-jwt-verify; "works against the dev user pool" needs a live pool from `terraform apply` -->
-- [ ] `POST /v1/auth/sync` upserts the calling user, defaulting role from Cognito groups.<!-- userService.syncFromPrincipal + PgUserRepository.upsertFromAuth done; Lambda handler pending -->
-- [ ] `GET /v1/me` returns the synced user.<!-- userService.getByCognitoSub done; Lambda handler pending -->
-- [ ] `PATCH /v1/me` updates display name and customer-profile-preferred-city.<!-- userService.update done for display_name; preferred_city deferred until customer_profiles migration lands -->
+- [x] `POST /v1/auth/sync` upserts the calling user, defaulting role from Cognito groups.
+- [x] `GET /v1/me` returns the synced user.
+- [ ] `PATCH /v1/me` updates display name and customer-profile-preferred-city.<!-- display_name path implemented end-to-end; preferred_city deferred until the customer_profiles migration lands -->
 
 - [ ] Local docker-compose Postgres + migrations runnable with `npm run db:migrate`.
 - [ ] Unit tests for `userService` (sync, get, update) using an in-memory repository fake.
