@@ -20,9 +20,9 @@ backend/
   tests/      unit + integration tests
 ```
 
-## Current state (Phase 1, in progress)
+## Current state (Phase 1)
 
-`npm run db:migrate` is real (see `db/migrate.mjs`). `npm run build`, `npm test`, and `npm run lint` are still Phase 0 placeholders — those land later in Phase 1.
+`npm run db:migrate` (see `db/migrate.mjs`) and `npm test` (Node test runner via `tsx`) are real. `npm run build` and `npm run lint` are still Phase 0 placeholders — they will be wired up in a later phase.
 
 ## Running locally
 
@@ -58,3 +58,13 @@ docker-compose down -v   # drops the data volume
 docker-compose up -d
 npm run db:migrate
 ```
+
+## Running tests
+
+```bash
+cd backend
+npm install
+npm test
+```
+
+The Phase 1 suite covers `UserService` (sync, idempotency, role mapping, get, update, missing-user) and `loadConfig` (defaults, missing/invalid env vars, `PG_SSL` parsing) using an in-memory `UserRepository` fake — no Postgres required.

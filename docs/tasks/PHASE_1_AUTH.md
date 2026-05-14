@@ -28,6 +28,7 @@ Out of scope:
 - `infra/terraform/environments/dev/main.tf` (consumes the Cognito module)
 - `backend/db/migrations/0001_init.sql`
 - `backend/db/migrations/0002_users.sql`
+- `backend/db/migrate.mjs` (local migration runner used by `npm run db:migrate`)
 - `backend/shared/config/loadConfig.ts`
 - `backend/shared/logging/logger.ts`
 - `backend/shared/db/pgClient.ts`
@@ -36,10 +37,15 @@ Out of scope:
 - `backend/shared/adapters/auth/CognitoAuthProvider.ts`
 - `backend/shared/domains/users/userService.ts`
 - `backend/shared/domains/users/userRepository.ts`
+- `backend/shared/domains/users/userView.ts` (wire-shape projection)
+- `backend/shared/http/responses.ts`, `backend/shared/http/principal.ts`
 - `backend/lambdas/auth/sync.ts`
 - `backend/lambdas/me/get.ts`
 - `backend/lambdas/me/patch.ts`
-- `backend/tests/users/*`
+- `backend/tests/users/userService.test.ts`
+- `backend/tests/config/loadConfig.test.ts`
+- `backend/tests/_fakes/InMemoryUserRepository.ts`
+- `backend/api/openapi.yaml` (Phase 1 endpoints documented)
 - `backend/README.md`, `docker-compose.yml`
 
 ## Checklist
@@ -53,7 +59,6 @@ Out of scope:
 - [x] `POST /v1/auth/sync` upserts the calling user, defaulting role from Cognito groups.
 - [x] `GET /v1/me` returns the synced user.
 - [ ] `PATCH /v1/me` updates display name and customer-profile-preferred-city.<!-- display_name path implemented end-to-end; preferred_city deferred until the customer_profiles migration lands -->
-
 - [x] Local docker-compose Postgres + migrations runnable with `npm run db:migrate`.
 - [x] Unit tests for `userService` (sync, get, update) using an in-memory repository fake.
 

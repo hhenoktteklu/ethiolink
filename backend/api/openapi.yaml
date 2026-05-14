@@ -1,22 +1,186 @@
 openapi: 3.1.0
 info:
   title: EthioLink API
-  version: 0.0.0
+  version: 0.1.0
   description: |
-    Stub OpenAPI document for the EthioLink REST API.
-    Filled out endpoint-by-endpoint starting in Phase 1.
-    The canonical contract today is docs/architecture/API_SPEC.md.
+    EthioLink REST API. The canonical narrative contract lives in
+    docs/architecture/API_SPEC.md; this OpenAPI document is filled out
+    endpoint-by-endpoint as each phase ships. Phase 1 covers the auth/profile
+    sync endpoints below.
 servers:
   - url: https://api-dev.ethiolink.example/v1
-    description: Dev (placeholder)
+    description: Dev (placeholder — replaced after `terraform apply`)
   - url: https://api.ethiolink.example/v1
     description: Prod (placeholder)
+security:
+  - cognito: []
+tags:
+  - name: auth
+    description: Authentication and profile sync.
+paths:
+  /auth/sync:
+    post:
+      tags: [auth]
+      operationId: authSync
+      summary: Sync the calling Cognito user into the users table.
+      description: |
+        Idempotent. Creates a `users` row on the first call, defaulting `role`
+        from the highest-precedence Cognito group (ADMIN > BUSINESS_OWNER >
+        CUSTOMER). Subsequent calls refresh `email`, `phone`, `role`, and
+        `displayName` from the principal — `status` is never modified by sync.
+      responses:
+        '200':
+          description: User row created or refreshed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: Get the calling user's profile.
+      description: |
+        Looks up the user by Cognito sub. Returns 404 if the caller has not
+        yet hit `POST /v1/auth/sync`.
+      responses:
+        '200':
+          description: The current user's profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [auth]
+      operationId: patchMe
+      summary: Update the calling user's profile.
+      description: |
+        Phase 1 scope: only `displayName` is mutable. The `preferredCity`
+        field documented in API_SPEC.md will be added once the
+        `customer_profiles` table is created.
+
+        Body fields are all optional; an empty `{}` is a valid no-op.
+        Unknown fields are tolerated (ignored) for forward compatibility.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchMeRequest'
+      responses:
+        '200':
+          description: The updated user profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
 components:
   securitySchemes:
     cognito:
       type: http
       scheme: bearer
       bearerFormat: JWT
-security:
-  - cognito: []
-paths: {}
+      description: Cognito-issued ID token, verified by `aws-jwt-verify`.
+  schemas:
+    User:
+      type: object
+      required: [id, role, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: [string, 'null']
+          format: email
+        phone:
+          type: [string, 'null']
+          description: E.164 phone number, if the user signed up with phone.
+        displayName:
+          type: [string, 'null']
+        role:
+          type: string
+          enum: [CUSTOMER, BUSINESS_OWNER, ADMIN]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PatchMeRequest:
+      type: object
+      description: |
+        Patch shape for `PATCH /v1/me`. All fields optional.
+        `null` clears a field; a string sets it. Strings are trimmed by
+        the server before validation.
+      properties:
+        displayName:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 100
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              enum:
+                - UNAUTHENTICATED
+                - FORBIDDEN
+                - NOT_FOUND
+                - VALIDATION_ERROR
+                - CONFLICT
+                - SLOT_UNAVAILABLE
+                - RATE_LIMITED
+                - INTERNAL_ERROR
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+  responses:
+    Unauthenticated:
+      description: Missing or invalid Cognito JWT.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Target resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Request body or parameters failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Unexpected server-side failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
