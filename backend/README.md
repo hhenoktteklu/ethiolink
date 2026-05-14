@@ -20,9 +20,38 @@ backend/
   tests/      unit + integration tests
 ```
 
-## Current state (Phase 1)
+## Current state (Phase 2)
 
-`npm run db:migrate` (see `db/migrate.mjs`) and `npm test` (Node test runner via `tsx`) are real. `npm run build` and `npm run lint` are still Phase 0 placeholders — they will be wired up in a later phase.
+The following are wired up:
+
+- `npm run db:migrate` — applies migrations 0001–0005 via `db/migrate.mjs`.
+- `npm run db:seed` — applies seeds (currently the four MVP categories) via `db/seed.mjs`.
+- `npm test` — Node test runner via `tsx`. Current suite covers Phase 1's `UserService` and `loadConfig`; Phase 2 domain tests (`business`, `media`, `category`) are queued for a follow-up commit.
+
+`npm run build` and `npm run lint` are still Phase 0 placeholders.
+
+### Endpoints implemented
+
+| Method | Path | Auth | Notes |
+| ------ | ---- | ---- | ----- |
+| POST   | `/v1/auth/sync`             | yes | Sync Cognito user → `users`. Idempotent. |
+| GET    | `/v1/me`                    | yes | Get caller's user profile. |
+| PATCH  | `/v1/me`                    | yes | Update `displayName`. |
+| GET    | `/v1/categories`            | no  | Active categories, sorted. |
+| GET    | `/v1/businesses`            | no  | APPROVED listing with filters + cursor pagination. |
+| GET    | `/v1/businesses/{id}`       | no  | APPROVED detail. |
+| POST   | `/v1/businesses`            | yes | Create DRAFT. Requires `BUSINESS_OWNER` role. |
+| PATCH  | `/v1/businesses/{id}`       | yes | Owner-only edit (admin path lands in Phase 5). |
+| POST   | `/v1/businesses/{id}/submit`| yes | DRAFT → PENDING_REVIEW. |
+| GET    | `/v1/me/business`           | yes | Owner-view of own business at any status. |
+| POST   | `/v1/media/upload-url`      | yes | Presigned S3 PUT URL. Owner-row-level auth in service. |
+| POST   | `/v1/media`                 | yes | Confirm upload, persist `media_assets` row. |
+
+See `api/openapi.yaml` for the full contract.
+
+### S3 prerequisite for the media handlers
+
+The media handlers construct `S3StorageGateway` at cold-start. They require `S3_BUCKET_MEDIA_PUBLIC` and `S3_BUCKET_MEDIA_PRIVATE` to be set; otherwise the handler fails to initialize with a `StorageError`. Other handlers (auth, business, category, etc.) work without S3 env vars set.
 
 ## Running locally
 
