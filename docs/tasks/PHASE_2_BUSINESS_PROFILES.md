@@ -48,8 +48,8 @@ Out of scope:
 
 - [ ] Migrations 0003–0005 applied to dev.<!-- 0003 + 0004 + 0005 authored; "applied to dev" needs `terraform apply` + run migrations -->
 - [x] Categories seed inserted; `GET /v1/categories` returns the four beauty categories.<!-- end-to-end on local docker-compose: seed file + runner + categories domain + handler all in place; dev-environment deployment still gated on `terraform apply` -->
-- [ ] BUSINESS_OWNER can create a DRAFT business and edit it.<!-- domain done; write handlers (POST/PATCH /v1/businesses) pending -->
-- [ ] BUSINESS_OWNER can submit a draft, moving status to PENDING_REVIEW.<!-- domain done; submit handler (POST /v1/businesses/:id/submit) pending -->
+- [x] BUSINESS_OWNER can create a DRAFT business and edit it.
+- [x] BUSINESS_OWNER can submit a draft, moving status to PENDING_REVIEW.
 - [x] Public `GET /v1/businesses` only returns APPROVED rows.
 - [x] Owner sees their own business at any status via `/v1/me/business`.
 - [ ] Pre-signed PUT URL endpoint enforces caller authorization and acceptable content types.

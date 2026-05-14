@@ -112,6 +112,43 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/InternalError'
+    post:
+      tags: [auth]
+      operationId: createBusiness
+      summary: Create a DRAFT business profile for the calling owner.
+      description: |
+        Authenticated. Requires the caller's role to be `BUSINESS_OWNER`.
+        Creates a fresh DRAFT business owned by the caller; subsequent
+        edits use `PATCH /v1/businesses/{id}`, submission for admin review
+        uses `POST /v1/businesses/{id}/submit`.
+
+        MVP enforces one business per owner. A second create call by the
+        same owner returns 409 CONFLICT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBusinessRequest'
+      responses:
+        '200':
+          description: The created business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /businesses/{id}:
     get:
       tags: [catalog]
@@ -140,6 +177,89 @@ paths:
           $ref: '#/components/responses/ValidationError'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    patch:
+      tags: [auth]
+      operationId: patchBusiness
+      summary: Edit the caller's business.
+      description: |
+        Authenticated. Requires the caller's role to be `BUSINESS_OWNER`
+        and the caller to own the business (the request is rejected with
+        403 otherwise). All fields are optional — `undefined` means "no
+        change", explicit `null` clears the column. Unknown fields are
+        tolerated. An empty `{}` body is a valid no-op.
+
+        Phase 2 scope: owner-only. Admin write paths (API_SPEC notes
+        "owner or ADMIN") land in Phase 5.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchBusinessRequest'
+      responses:
+        '200':
+          description: The updated business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{id}/submit:
+    post:
+      tags: [auth]
+      operationId: submitBusiness
+      summary: Submit a DRAFT business for admin review.
+      description: |
+        Authenticated. Requires the caller's role to be `BUSINESS_OWNER`
+        and ownership of the business. Transitions DRAFT → PENDING_REVIEW.
+        Only valid from `DRAFT`; any other source status returns 409.
+
+        Submission requires `name`, `description` (with non-empty `en`),
+        `city`, and `categoryId` to be set on the business; otherwise the
+        request is rejected with 400 and `details.missing[]` lists the
+        empty fields.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The business with status PENDING_REVIEW.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
   /me/business:
@@ -409,6 +529,59 @@ components:
             Opaque cursor for the next page. `null` when there are no
             more results. Pass the value back as the `cursor` query
             parameter to fetch the next page.
+    BusinessFieldsBase:
+      type: object
+      description: |
+        Common business profile fields shared by create and patch request
+        bodies. All fields are optional from this base schema's perspective
+        — `CreateBusinessRequest` additionally requires `categoryId`.
+      properties:
+        categoryId:
+          type: string
+          format: uuid
+        name:
+          type: [string, 'null']
+          maxLength: 200
+        description:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: 'null'
+        city:
+          type: [string, 'null']
+          maxLength: 100
+        addressLine:
+          type: [string, 'null']
+          maxLength: 500
+        latitude:
+          type: [number, 'null']
+          minimum: -90
+          maximum: 90
+        longitude:
+          type: [number, 'null']
+          minimum: -180
+          maximum: 180
+        phone:
+          type: [string, 'null']
+          maxLength: 50
+        telegramHandle:
+          type: [string, 'null']
+          maxLength: 50
+        whatsappPhone:
+          type: [string, 'null']
+          maxLength: 50
+    CreateBusinessRequest:
+      allOf:
+        - $ref: '#/components/schemas/BusinessFieldsBase'
+        - type: object
+          required: [categoryId]
+    PatchBusinessRequest:
+      allOf:
+        - $ref: '#/components/schemas/BusinessFieldsBase'
+        - type: object
+          description: |
+            Partial update. Each field optional: `undefined` (absent) means
+            "no change", explicit `null` clears the column. Unknown fields
+            are tolerated.
     Error:
       type: object
       required: [error]
@@ -436,6 +609,20 @@ components:
   responses:
     Unauthenticated:
       description: Missing or invalid Cognito JWT.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Authenticated, but caller lacks the required role or ownership.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: |
+        Request conflicts with the current resource state (e.g. invalid
+        status transition, duplicate per-owner business).
       content:
         application/json:
           schema:
