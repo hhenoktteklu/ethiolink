@@ -85,11 +85,12 @@ Captured during the Phase 3 verification pass. None are blockers for ticking the
 
 - **Slot computation max range = 31 days.** Hard cap in `computeSlots` to avoid pathological scans. Customers typically look 7–14 days ahead; the cap is generous. If a real use case hits it, raise via config rather than removing.
 
-- **Tests for the new domains:**
-  - `slot computer` — in place (`backend/tests/availability/slotComputer.test.ts`). The pure function is exercised directly with deterministic `now` injection; no DB, no fakes. Covers empty inputs, weekly windows, override add/remove/merge/clip, duration-vs-window math, past filter, timezone correctness (09:00 Addis → 06:00 UTC), 31-day range cap, `24:00:00` end-of-day sentinel, appointment conflicts with buffer.
-  - `services` — in place (`backend/tests/services/serviceService.test.ts` + `_fakes/InMemoryServiceRepository.ts`). Create + missing-business 404 + non-owner refusal, update + empty-patch no-op + missing-target 404, deactivate, listing-active-only, `priceEtb` round-trip.
-  - `staff` — in place (`backend/tests/staff/staffService.test.ts` + `_fakes/InMemoryStaffRepository.ts`). Same matrix as services with `role` null-clearing in place of the price round-trip.
-  - `availabilityService`, `slotService` (orchestrators) — still deferred.
+- **Tests for the new domains:** all in place.
+  - `slot computer` — `backend/tests/availability/slotComputer.test.ts`. Pure-function tests; covers empty inputs, weekly windows, override add/remove/merge/clip, duration-vs-window math, past filter, timezone correctness, 31-day range cap, `24:00:00` end-of-day sentinel, appointment conflicts with buffer.
+  - `services` — `backend/tests/services/serviceService.test.ts` + `_fakes/InMemoryServiceRepository.ts`.
+  - `staff` — `backend/tests/staff/staffService.test.ts` + `_fakes/InMemoryStaffRepository.ts`.
+  - `availabilityService` — `backend/tests/availability/availabilityService.test.ts` + `_fakes/InMemoryAvailabilityRepository.ts`. Covers `getScheduleForStaff` (active/inactive/missing staff), `replaceWeekly` (strict-7 enforcement, duplicate-weekday rejection, time-range validation, ownership), `addOverride` (open + closed without sibling, malformed date, time-range, ownership).
+  - `slotService` (orchestrator) — `backend/tests/availability/slotService.test.ts` + `_fakes/InMemoryAppointmentsRepository.ts`. Covers `SlotStaffNotFoundError`, `SlotServiceNotFoundError`, `SlotServiceStaffMismatchError`, happy-path delegation to `computeSlots`, and appointment-conflict pipe-through (including the per-staff filter).
 
 - **Luxon was added as a runtime dep.** Justification: IANA timezone math is brittle to hand-roll (DST transitions, zone-changing dates, edge cases around `24:00:00`). Luxon is pure JS, ~70 KB minified+gzipped, zero transitive deps. Scoped to slot computation only — no other file imports it.
 
