@@ -264,6 +264,141 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/services:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [catalog]
+      operationId: listServices
+      summary: List active services for a business.
+      description: |
+        Public endpoint. Returns the business's active services ordered
+        by `created_at ASC, id ASC` — the order the owner added them.
+        Wrapped in `{ items, nextCursor: null }` for symmetry with
+        other listings; service catalogs per business are small and
+        Phase 3 ships without pagination.
+      security: []
+      responses:
+        '200':
+          description: The list of active services.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [auth]
+      operationId: createService
+      summary: Create a new active service for a business.
+      description: |
+        Authenticated. Requires the caller's role to be `BUSINESS_OWNER`
+        and to own the target business (Phase 3 strict-owner; admin
+        write paths land in Phase 5).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '200':
+          description: The created service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/services/{id}:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    patch:
+      tags: [auth]
+      operationId: patchService
+      summary: Edit a service's mutable fields.
+      description: |
+        Authenticated. Requires `BUSINESS_OWNER` role and ownership of
+        the parent business. Each field optional — absent means "no
+        change". `name` and `durationMinutes` cannot be cleared (they
+        are NOT NULL in the DB); `description` and `priceEtb` accept
+        `null` to clear. `isActive` cannot be patched here — use DELETE
+        to deactivate. Unknown fields are tolerated.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchServiceRequest'
+      responses:
+        '200':
+          description: The updated service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [auth]
+      operationId: deleteService
+      summary: Deactivate a service (soft-delete).
+      description: |
+        Authenticated. Requires `BUSINESS_OWNER` role and ownership of
+        the parent business. Flips `is_active` to `false`; never removes
+        the row (`appointments.service_id` is `ON DELETE RESTRICT`).
+        The response body is the service with `isActive: false`.
+      responses:
+        '200':
+          description: The deactivated service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -741,6 +876,85 @@ components:
         height:
           type: integer
           minimum: 0
+    ServiceFieldsBase:
+      type: object
+      description: |
+        Common fields for create / patch request bodies on a service.
+        All fields are optional in this base schema; create / patch add
+        their own required-field constraints via `allOf`.
+      properties:
+        name:
+          $ref: '#/components/schemas/LocalizedText'
+        description:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: 'null'
+        durationMinutes:
+          type: integer
+          minimum: 1
+          maximum: 720
+        priceEtb:
+          type: [number, 'null']
+          minimum: 0
+          maximum: 9999999.99
+          description: ETB price; up to 2 decimal places. `null` clears the price.
+    CreateServiceRequest:
+      allOf:
+        - $ref: '#/components/schemas/ServiceFieldsBase'
+        - type: object
+          required: [name, durationMinutes]
+    PatchServiceRequest:
+      allOf:
+        - $ref: '#/components/schemas/ServiceFieldsBase'
+        - type: object
+          description: |
+            Partial update. Each field optional. `name` and
+            `durationMinutes` cannot be `null` (DB is NOT NULL);
+            `description` and `priceEtb` accept `null` to clear.
+            Unknown fields are tolerated.
+    ServiceView:
+      type: object
+      required: [id, businessId, name, durationMinutes, isActive, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        businessId:
+          type: string
+          format: uuid
+        name:
+          $ref: '#/components/schemas/LocalizedText'
+        description:
+          oneOf:
+            - $ref: '#/components/schemas/LocalizedText'
+            - type: 'null'
+        durationMinutes:
+          type: integer
+          minimum: 1
+        priceEtb:
+          type: [number, 'null']
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ServiceList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ServiceView'
+        nextCursor:
+          type: [string, 'null']
+          description: |
+            Always `null` for `/businesses/{businessId}/services` —
+            present for envelope symmetry; Phase 3 ships without
+            pagination on this listing.
     MediaView:
       type: object
       required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]

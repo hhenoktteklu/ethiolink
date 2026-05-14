@@ -45,7 +45,7 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 ## Checklist
 
 - [ ] Migrations 0006–0008 applied to dev.<!-- 0006 + 0007 + 0008 authored; "applied to dev" needs `terraform apply` + run migrations -->
-- [ ] Services CRUD ownership-gated.<!-- domain done (serviceService.create/update/deactivate enforces ownership via BusinessRepository; PgServiceRepository wired; ServiceView includes isActive); Lambda handlers pending -->
+- [x] Services CRUD ownership-gated.
 - [ ] Staff CRUD ownership-gated.
 - [ ] Weekly availability `PUT` accepts a 7-day schedule with one or more windows per day.
 - [ ] Override `POST` can mark a day or window closed, or add a special open window.
