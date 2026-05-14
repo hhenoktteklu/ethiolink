@@ -85,7 +85,9 @@ Captured during the Phase 3 verification pass. None are blockers for ticking the
 
 - **Slot computation max range = 31 days.** Hard cap in `computeSlots` to avoid pathological scans. Customers typically look 7–14 days ahead; the cap is generous. If a real use case hits it, raise via config rather than removing.
 
-- **Tests deferred.** No `backend/tests/services/`, `backend/tests/staff/`, or `backend/tests/availability/` files exist yet. Pattern is set by Phase 2 (in-memory fakes, `tsx --test`). Scoped for a Phase 3 tests follow-up — the slot computer is the highest-value test target because it's the most non-trivial code in the project.
+- **Tests for the new domains:**
+  - `slot computer` — in place (`backend/tests/availability/slotComputer.test.ts`). The pure function is exercised directly with deterministic `now` injection; no DB, no fakes. Covers empty inputs, weekly windows, override add/remove/merge/clip, duration-vs-window math, past filter, timezone correctness (09:00 Addis → 06:00 UTC), 31-day range cap, `24:00:00` end-of-day sentinel, appointment conflicts with buffer.
+  - `services`, `staff`, `availabilityService`, `slotService` (orchestrator) — still deferred. Patterns are set by Phase 2.
 
 - **Luxon was added as a runtime dep.** Justification: IANA timezone math is brittle to hand-roll (DST transitions, zone-changing dates, edge cases around `24:00:00`). Luxon is pure JS, ~70 KB minified+gzipped, zero transitive deps. Scoped to slot computation only — no other file imports it.
 

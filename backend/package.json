@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "echo \"Build wired up in Phase 1\" && exit 0",
-    "test": "tsx --test tests/users/userService.test.ts tests/config/loadConfig.test.ts tests/businesses/businessService.test.ts tests/media/mediaService.test.ts tests/categories/categoryService.test.ts",
+    "test": "tsx --test tests/users/userService.test.ts tests/config/loadConfig.test.ts tests/businesses/businessService.test.ts tests/media/mediaService.test.ts tests/categories/categoryService.test.ts tests/availability/slotComputer.test.ts",
     "lint": "echo \"Lint wired up in Phase 1\" && exit 0",
     "db:migrate": "node db/migrate.mjs",
     "db:seed": "node db/seed.mjs"
