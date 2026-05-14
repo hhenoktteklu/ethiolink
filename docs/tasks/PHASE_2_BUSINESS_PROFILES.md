@@ -93,5 +93,5 @@ Items captured during the Phase 2 verification pass. None are blockers for ticki
 
 - **Tests for the new domains:**
   - `business` — in place (`backend/tests/businesses/businessService.test.ts` + `_fakes/InMemoryBusinessRepository.ts`).
-  - `media` — still deferred.
+  - `media` — in place (`backend/tests/media/mediaService.test.ts` + `_fakes/InMemoryMediaRepository.ts` + `_fakes/FakeStorageGateway.ts`).
   - `category` — still deferred.
