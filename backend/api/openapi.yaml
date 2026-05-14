@@ -533,6 +533,136 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/staff/{staffId}/availability:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: staffId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      tags: [catalog]
+      operationId: getStaffAvailability
+      summary: Get a staff member's weekly schedule and overrides.
+      description: |
+        Public endpoint. Returns the staff member's WEEKLY windows and
+        OVERRIDE windows as two flat arrays. Returns 404 if the staff
+        member does not exist or is inactive.
+      security: []
+      responses:
+        '200':
+          description: The staff member's schedule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailabilityScheduleView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    put:
+      tags: [auth]
+      operationId: replaceStaffAvailability
+      summary: Replace the staff member's entire weekly schedule.
+      description: |
+        Authenticated. Requires `BUSINESS_OWNER` role and ownership of
+        the parent business. **Strict input:** the request must include
+        all seven weekdays (0–6), each exactly once, even if a day has
+        no windows. An empty `windows` array communicates "closed all
+        day" intent.
+
+        Existing WEEKLY rows are replaced atomically (DELETE + INSERT in
+        a single transaction). OVERRIDE rows are not touched.
+
+        `startTime` and `endTime` accept `HH:MM` or `HH:MM:SS`; the
+        server normalizes to `HH:MM:SS`.
+
+        Returns the full grouped schedule (weekly + overrides) so
+        clients can refresh in one round-trip.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceWeeklyRequest'
+      responses:
+        '200':
+          description: The updated schedule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailabilityScheduleView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/staff/{staffId}/availability/override:
+    parameters:
+      - name: businessId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: staffId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    post:
+      tags: [auth]
+      operationId: addStaffAvailabilityOverride
+      summary: Add a single availability override for a specific date.
+      description: |
+        Authenticated. Requires `BUSINESS_OWNER` role and ownership of
+        the parent business. Adds a single OVERRIDE row to the staff
+        member's schedule — either a special open window or, with
+        `isClosed: true`, a blackout over the weekly schedule on the
+        given date.
+
+        `startTime` and `endTime` accept `HH:MM` or `HH:MM:SS`; the
+        server normalizes to `HH:MM:SS`. `isClosed` defaults to `false`.
+        A closed override does not require a matching open window on the
+        same date.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddOverrideRequest'
+      responses:
+        '200':
+          description: The newly-created override window.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AvailabilityWindowView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -1155,6 +1285,109 @@ components:
             Always `null` for `/businesses/{businessId}/staff` —
             present for envelope symmetry; Phase 3 ships without
             pagination on this listing.
+    TimeOfDay:
+      type: string
+      pattern: '^([01][0-9]|2[0-4]):[0-5][0-9](:[0-5][0-9])?$'
+      description: |
+        Clock time in the business's local timezone. Accepts `HH:MM`
+        or `HH:MM:SS`. Hours range `00..24` (the `24:00:00` sentinel
+        is allowed as an end-of-day marker). Server normalizes input
+        to `HH:MM:SS`.
+      example: '09:00:00'
+    DateOnly:
+      type: string
+      format: date
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      example: '2026-05-14'
+    WeeklyWindowInput:
+      type: object
+      required: [startTime, endTime]
+      properties:
+        startTime:
+          $ref: '#/components/schemas/TimeOfDay'
+        endTime:
+          $ref: '#/components/schemas/TimeOfDay'
+    WeeklyDayInput:
+      type: object
+      required: [weekday, windows]
+      properties:
+        weekday:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: '0 = Sunday … 6 = Saturday.'
+        windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/WeeklyWindowInput'
+    ReplaceWeeklyRequest:
+      type: object
+      required: [days]
+      properties:
+        days:
+          type: array
+          minItems: 7
+          maxItems: 7
+          description: |
+            Exactly seven entries — one per weekday (0..6), each
+            weekday appearing exactly once. An empty `windows` array
+            communicates "closed all day" for that weekday.
+          items:
+            $ref: '#/components/schemas/WeeklyDayInput'
+    AddOverrideRequest:
+      type: object
+      required: [specificDate, startTime, endTime]
+      properties:
+        specificDate:
+          $ref: '#/components/schemas/DateOnly'
+        startTime:
+          $ref: '#/components/schemas/TimeOfDay'
+        endTime:
+          $ref: '#/components/schemas/TimeOfDay'
+        isClosed:
+          type: boolean
+          default: false
+          description: |
+            `true` marks the window as a blackout over the weekly
+            schedule. Defaults to `false`.
+    AvailabilityWindowView:
+      type: object
+      required: [id, kind, startTime, endTime, isClosed]
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [WEEKLY, OVERRIDE]
+        weekday:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 6
+          description: 'Populated for WEEKLY rows; null for OVERRIDE.'
+        specificDate:
+          oneOf:
+            - $ref: '#/components/schemas/DateOnly'
+            - type: 'null'
+          description: 'Populated for OVERRIDE rows; null for WEEKLY.'
+        startTime:
+          $ref: '#/components/schemas/TimeOfDay'
+        endTime:
+          $ref: '#/components/schemas/TimeOfDay'
+        isClosed:
+          type: boolean
+    AvailabilityScheduleView:
+      type: object
+      required: [weekly, overrides]
+      properties:
+        weekly:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvailabilityWindowView'
+        overrides:
+          type: array
+          items:
+            $ref: '#/components/schemas/AvailabilityWindowView'
     MediaView:
       type: object
       required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]
