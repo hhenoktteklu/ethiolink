@@ -47,9 +47,9 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 - [ ] Migrations 0006–0008 applied to dev.<!-- 0006 + 0007 + 0008 authored; "applied to dev" needs `terraform apply` + run migrations -->
 - [x] Services CRUD ownership-gated.
 - [x] Staff CRUD ownership-gated.<!-- STAFF media unlock in MediaService still pending. -->
-- [ ] Weekly availability `PUT` accepts a 7-day schedule with one or more windows per day.
-- [ ] Override `POST` can mark a day or window closed, or add a special open window.
-- [ ] `GET …/slots` returns slots that are inside availability, not within any existing appointment, and not in the past.
+- [ ] Weekly availability `PUT` accepts a 7-day schedule with one or more windows per day.<!-- domain done (availabilityService.replaceWeekly: strict-7-days, weekday 0..6, startTime < endTime, transactional DELETE+INSERT via PgAvailabilityRepository); Lambda handler pending -->
+- [ ] Override `POST` can mark a day or window closed, or add a special open window.<!-- domain done (availabilityService.addOverride accepts isClosed; closed blackouts stand alone without a sibling open window); Lambda handler pending -->
+- [ ] `GET …/slots` returns slots that are inside availability, not within any existing appointment, and not in the past.<!-- schedule read (weekly + overrides) shipped in this commit; slot computation algorithm + handler are a separate focused commit -->
 
 ## Acceptance criteria
 
