@@ -17,7 +17,33 @@ security:
 tags:
   - name: auth
     description: Authentication and profile sync.
+  - name: catalog
+    description: Public-facing catalog (categories, businesses).
 paths:
+  /categories:
+    get:
+      tags: [catalog]
+      operationId: listCategories
+      summary: List active business categories.
+      description: |
+        Returns active categories sorted by `sort_order ASC`, then by the
+        English name. Public endpoint — no authentication required.
+
+        The response always includes `nextCursor: null`. The category set
+        is small (currently four MVP entries: Salon, Barber, Spa, Beauty
+        Professional) and is not paginated; the cursor field is retained
+        for symmetry with other listing endpoints so clients can handle
+        every listing with a single code path.
+      security: []
+      responses:
+        '200':
+          description: The list of active categories.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CategoryList'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /auth/sync:
     post:
       tags: [auth]
@@ -135,6 +161,51 @@ components:
           type: [string, 'null']
           minLength: 1
           maxLength: 100
+    LocalizedText:
+      type: object
+      description: |
+        Localized text. Keys are ISO 639-1 language codes. MVP writes
+        only `en`; `am` (Amharic) is reserved for a later content pass.
+      required: [en]
+      properties:
+        en:
+          type: string
+        am:
+          type: string
+    CategoryView:
+      type: object
+      required: [id, slug, name, sortOrder, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          description: Stable machine-friendly key, e.g. `salon`.
+        name:
+          $ref: '#/components/schemas/LocalizedText'
+        sortOrder:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CategoryList:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CategoryView'
+        nextCursor:
+          type: [string, 'null']
+          description: |
+            Opaque cursor for the next page. Always `null` for
+            `/categories` — included for symmetry with paginated
+            listings elsewhere in the API.
     Error:
       type: object
       required: [error]

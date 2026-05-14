@@ -47,7 +47,7 @@ Out of scope:
 ## Checklist
 
 - [ ] Migrations 0003–0005 applied to dev.<!-- 0003 + 0004 + 0005 authored; "applied to dev" needs `terraform apply` + run migrations -->
-- [ ] Categories seed inserted; `GET /v1/categories` returns the four beauty categories.<!-- seed file + runner authored; categories domain (`shared/domains/categories/*`) authored; "inserted" against dev needs `terraform apply`; `GET /v1/categories` handler pending -->
+- [x] Categories seed inserted; `GET /v1/categories` returns the four beauty categories.<!-- end-to-end on local docker-compose: seed file + runner + categories domain + handler all in place; dev-environment deployment still gated on `terraform apply` -->
 - [ ] BUSINESS_OWNER can create a DRAFT business and edit it.
 - [ ] BUSINESS_OWNER can submit a draft, moving status to PENDING_REVIEW.
 - [ ] Public `GET /v1/businesses` only returns APPROVED rows.
