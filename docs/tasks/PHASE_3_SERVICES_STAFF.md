@@ -49,7 +49,7 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 
 - [ ] Migrations 0006–0008 applied to dev.<!-- 0006 + 0007 + 0008 authored; "applied to dev" needs `terraform apply` + run migrations -->
 - [x] Services CRUD ownership-gated.
-- [x] Staff CRUD ownership-gated.<!-- STAFF media unlock in MediaService still pending. -->
+- [x] Staff CRUD ownership-gated.
 - [x] Weekly availability `PUT` accepts a 7-day schedule with one or more windows per day.
 - [x] Override `POST` can mark a day or window closed, or add a special open window.
 - [x] `GET …/slots` returns slots that are inside availability, not within any existing appointment, and not in the past.<!-- appointment-conflict check wired against a stub `StubAppointmentsRepository`; Phase 4 swaps in the real implementation against the `appointments` table -->
@@ -77,7 +77,7 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 
 Captured during the Phase 3 verification pass. None are blockers for ticking the remaining checklist item (gated on `terraform apply`); each is worth addressing in the appropriate later phase.
 
-- **STAFF media unlock still pending.** `mediaService.assertOwnership` rejects `ownerType: STAFF` with `MediaUnsupportedOwnerTypeError`. Phase 3 now has the `StaffRepository` that the unlock needs: the change is wiring `StaffRepository` into `MediaService` as a third constructor dep and replacing the STAFF branch with a `staffRepo.findById(ownerId) → business → ownerUserId === caller.userId` check. Worth a small follow-up commit so staff portraits can flow. Flagged once in the Phase 3 staff-domain commit; surfacing here as the canonical record.
+- **STAFF media unlock — done.** `MediaService` now takes `StaffRepository` as its third constructor dep. The STAFF branch in `assertOwnership` does the two-hop check `staffRepo.findById(ownerId).businessId → businessRepo.findById(...).ownerUserId === caller.userId`. Both media Lambda handlers (`uploadUrl.ts`, `confirm.ts`) construct `PgStaffRepository` and pass it through. Tests cover STAFF owner-success, non-owner refusal, unknown-staff-id rejection, and `isPublic=true` derivation for STAFF. `MediaUnsupportedOwnerTypeError` is retained as a class for forward compatibility with any future deferred owner type, but `MediaService` no longer throws it.
 
 - **`AppointmentsRepository` is a stub until Phase 4.** `StubAppointmentsRepository.listConflictsForStaff` always returns `[]`. The slot computer threads the result through correctly — emitted slots already respect the conflict shape, so Phase 4 swaps in a `PgAppointmentsRepository` (against the new `appointments` table) without touching `slotComputer.ts` or `slotService.ts`. The seam is fully ready.
 

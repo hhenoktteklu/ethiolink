@@ -23,11 +23,11 @@ import {
     MediaOwnerNotFoundError,
     MediaService,
     MediaStorageKeyMismatchError,
-    MediaUnsupportedOwnerTypeError,
 } from '../../shared/domains/media/mediaService.js';
 
 import { InMemoryBusinessRepository } from '../_fakes/InMemoryBusinessRepository.js';
 import { InMemoryMediaRepository } from '../_fakes/InMemoryMediaRepository.js';
+import { InMemoryStaffRepository } from '../_fakes/InMemoryStaffRepository.js';
 import { FakeStorageGateway } from '../_fakes/FakeStorageGateway.js';
 
 // ---------------------------------------------------------------------------
@@ -69,13 +69,15 @@ function build(): {
     service: MediaService;
     mediaRepo: InMemoryMediaRepository;
     businessRepo: InMemoryBusinessRepository;
+    staffRepo: InMemoryStaffRepository;
     gateway: FakeStorageGateway;
 } {
     const mediaRepo = new InMemoryMediaRepository();
     const businessRepo = new InMemoryBusinessRepository();
+    const staffRepo = new InMemoryStaffRepository();
     const gateway = new FakeStorageGateway();
-    const service = new MediaService(mediaRepo, businessRepo, gateway);
-    return { service, mediaRepo, businessRepo, gateway };
+    const service = new MediaService(mediaRepo, businessRepo, staffRepo, gateway);
+    return { service, mediaRepo, businessRepo, staffRepo, gateway };
 }
 
 // ---------------------------------------------------------------------------
@@ -212,8 +214,68 @@ describe('MediaService.issueUploadUrl — ownership: USER', () => {
 // ---------------------------------------------------------------------------
 
 describe('MediaService.issueUploadUrl — ownership: STAFF', () => {
-    it('returns MediaUnsupportedOwnerTypeError for STAFF', async () => {
-        const { service, gateway } = build();
+    it('owner-of-business can issue an upload URL for one of its staff', async () => {
+        const { service, businessRepo, staffRepo, gateway } = build();
+        businessRepo.seed(makeBusiness({ id: BIZ_A, ownerUserId: OWNER_A }));
+        const staff = await staffRepo.insert({
+            businessId: BIZ_A,
+            displayName: 'Helen',
+            role: null,
+        });
+
+        const result = await service.issueUploadUrl(OWNER_A, {
+            ownerType: 'STAFF',
+            ownerId: staff.id,
+            contentType: 'image/jpeg',
+        });
+
+        assert.strictEqual(gateway.calls.length, 1);
+        assert.strictEqual(gateway.lastCall()?.ownerId, staff.id);
+        assert.ok(result.storageKey.startsWith(`staff/${staff.id}/`));
+    });
+
+    it('passes isPublic=true for STAFF (gallery photos go to the public bucket)', async () => {
+        const { service, businessRepo, staffRepo, gateway } = build();
+        businessRepo.seed(makeBusiness({ id: BIZ_A, ownerUserId: OWNER_A }));
+        const staff = await staffRepo.insert({
+            businessId: BIZ_A,
+            displayName: 'Helen',
+            role: null,
+        });
+
+        await service.issueUploadUrl(OWNER_A, {
+            ownerType: 'STAFF',
+            ownerId: staff.id,
+            contentType: 'image/jpeg',
+        });
+
+        assert.strictEqual(gateway.lastCall()?.isPublic, true);
+    });
+
+    it('non-owner is rejected with MediaNotOwnedError', async () => {
+        const { service, businessRepo, staffRepo, gateway } = build();
+        businessRepo.seed(makeBusiness({ id: BIZ_A, ownerUserId: OWNER_A }));
+        const staff = await staffRepo.insert({
+            businessId: BIZ_A,
+            displayName: 'Helen',
+            role: null,
+        });
+
+        await assert.rejects(
+            () =>
+                service.issueUploadUrl(OWNER_B, {
+                    ownerType: 'STAFF',
+                    ownerId: staff.id,
+                    contentType: 'image/jpeg',
+                }),
+            MediaNotOwnedError,
+        );
+        assert.strictEqual(gateway.calls.length, 0, 'gateway not called on auth failure');
+    });
+
+    it('unknown staff id returns MediaOwnerNotFoundError', async () => {
+        const { service, businessRepo } = build();
+        businessRepo.seed(makeBusiness({ id: BIZ_A, ownerUserId: OWNER_A }));
 
         await assert.rejects(
             () =>
@@ -223,10 +285,10 @@ describe('MediaService.issueUploadUrl — ownership: STAFF', () => {
                     contentType: 'image/jpeg',
                 }),
             (err: unknown) =>
-                err instanceof MediaUnsupportedOwnerTypeError &&
-                err.ownerType === 'STAFF',
+                err instanceof MediaOwnerNotFoundError &&
+                err.ownerType === 'STAFF' &&
+                err.ownerId === STAFF_ID,
         );
-        assert.strictEqual(gateway.calls.length, 0, 'gateway not called for unsupported owner type');
     });
 });
 
@@ -404,18 +466,32 @@ describe('MediaService.confirmUpload', () => {
         );
     });
 
-    it('rejects STAFF owner type', async () => {
-        const { service } = build();
+    it('persists a STAFF media row when the caller owns the staff member\'s business', async () => {
+        const { service, mediaRepo, businessRepo, staffRepo } = build();
+        businessRepo.seed(makeBusiness({ id: BIZ_A, ownerUserId: OWNER_A }));
+        const staff = await staffRepo.insert({
+            businessId: BIZ_A,
+            displayName: 'Helen',
+            role: null,
+        });
 
-        await assert.rejects(
-            () =>
-                service.confirmUpload(OWNER_A, {
-                    ownerType: 'STAFF',
-                    ownerId: STAFF_ID,
-                    storageKey: `staff/${STAFF_ID}/anything.jpg`,
-                    contentType: 'image/jpeg',
-                }),
-            MediaUnsupportedOwnerTypeError,
-        );
+        const issued = await service.issueUploadUrl(OWNER_A, {
+            ownerType: 'STAFF',
+            ownerId: staff.id,
+            contentType: 'image/jpeg',
+        });
+
+        const asset = await service.confirmUpload(OWNER_A, {
+            ownerType: 'STAFF',
+            ownerId: staff.id,
+            storageKey: issued.storageKey,
+            contentType: 'image/jpeg',
+        });
+
+        assert.strictEqual(asset.ownerType, 'STAFF');
+        assert.strictEqual(asset.ownerId, staff.id);
+        // STAFF media goes to the public bucket (defaultIsPublic).
+        assert.strictEqual(asset.isPublic, true);
+        assert.strictEqual(mediaRepo.size(), 1);
     });
 });

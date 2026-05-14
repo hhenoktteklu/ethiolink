@@ -3,8 +3,11 @@
 // Owns the rules around media uploads:
 //
 //   * Content-type allowlist (Phase 2 = images only).
-//   * Owner-authorization checks (caller must own the referenced
-//     business / user; STAFF is deferred until Phase 3).
+//   * Owner-authorization checks. The caller must:
+//       - BUSINESS — own the referenced business (`business.ownerUserId`).
+//       - STAFF    — own the business the staff member belongs to
+//                    (two-hop: staff → business → caller).
+//       - USER     — be the referenced user.
 //   * `isPublic` defaults — derived from `ownerType`, NOT client-supplied.
 //     BUSINESS / STAFF media is public-readable (gallery photos);
 //     USER media is private (avatars).
@@ -23,6 +26,7 @@ import {
     type StorageGateway,
 } from '../../adapters/storage/StorageGateway.js';
 import type { BusinessRepository } from '../businesses/businessRepository.js';
+import type { StaffRepository } from '../staff/staffRepository.js';
 
 import type { MediaAsset, MediaRepository } from './mediaRepository.js';
 
@@ -67,9 +71,12 @@ export class MediaNotOwnedError extends Error {
 }
 
 /**
- * Raised when an owner_type is recognized by the schema but not yet
- * supported by the application. Phase 2 returns this for STAFF media;
- * Phase 3 implements it once `staff_members` ships.
+ * Raised when an `ownerType` is recognized by the schema but not yet
+ * supported by the application. Held in reserve for any future owner
+ * type that lands later than its `media_assets.owner_type` CHECK
+ * value. As of Phase 3, every supported value (BUSINESS, STAFF, USER)
+ * has a working ownership check and this error is no longer thrown by
+ * `MediaService`; handlers retain the mapping for forward compatibility.
  */
 export class MediaUnsupportedOwnerTypeError extends Error {
     public readonly ownerType: MediaOwnerType;
@@ -115,6 +122,7 @@ export class MediaService {
     constructor(
         private readonly mediaRepo: MediaRepository,
         private readonly businessRepo: BusinessRepository,
+        private readonly staffRepo: StaffRepository,
         private readonly storage: StorageGateway,
     ) {}
 
@@ -191,17 +199,30 @@ export class MediaService {
                 }
                 return;
             }
+            case 'STAFF': {
+                // Two-hop check: staff → business → caller. The staff
+                // member doesn't carry an owner directly; the business
+                // they belong to does.
+                const staff = await this.staffRepo.findById(ownerId);
+                if (!staff) {
+                    throw new MediaOwnerNotFoundError(ownerType, ownerId);
+                }
+                const business = await this.businessRepo.findById(staff.businessId);
+                if (!business) {
+                    // Schema FK should prevent this; defensive.
+                    throw new MediaOwnerNotFoundError(ownerType, ownerId);
+                }
+                if (business.ownerUserId !== callerUserId) {
+                    throw new MediaNotOwnedError();
+                }
+                return;
+            }
             case 'USER': {
                 if (ownerId !== callerUserId) {
                     throw new MediaNotOwnedError();
                 }
                 return;
             }
-            case 'STAFF':
-                // Deferred: Phase 3 implements staff_members and the
-                // cross-table ownership check (caller owns the business
-                // that owns the staff member).
-                throw new MediaUnsupportedOwnerTypeError(ownerType);
         }
     }
 }

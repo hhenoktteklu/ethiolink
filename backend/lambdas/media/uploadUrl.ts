@@ -46,6 +46,7 @@ import {
     type IssueUploadUrlServiceInput,
 } from '../../shared/domains/media/mediaService.js';
 import { PgMediaRepository } from '../../shared/domains/media/mediaRepository.js';
+import { PgStaffRepository } from '../../shared/domains/staff/staffRepository.js';
 import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
 import { UserService } from '../../shared/domains/users/userService.js';
 import { extractPrincipal } from '../../shared/http/principal.js';
@@ -80,6 +81,7 @@ const storage = new S3StorageGateway(config.s3, config.region);
 const mediaService = new MediaService(
     new PgMediaRepository(pool),
     new PgBusinessRepository(pool),
+    new PgStaffRepository(pool),
     storage,
 );
 
