@@ -26,13 +26,16 @@ Out of scope:
 - `backend/db/migrations/0008_staff_availability.sql`
 - `backend/shared/http/validation.ts` (extracted from Phase 2 `_validators.ts` files as a Phase 3 prerequisite — generic body parsers shared across handler folders)
 - `backend/shared/http/pagination.ts` (extracted from Phase 2 `businessService.ts` cursor codec — generic encode/decode/clampLimit for any paginated listing)
-- `backend/shared/domains/services/*`
-- `backend/shared/domains/staff/*`
-- `backend/shared/domains/availability/*`
-- `backend/lambdas/services/{list,create,patch,delete}.ts`
-- `backend/lambdas/staff/{list,create,patch,delete}.ts`
-- `backend/lambdas/availability/{get,replace,addOverride,slots}.ts`
-- `backend/tests/services/*`, `backend/tests/staff/*`, `backend/tests/availability/*`
+- `backend/shared/domains/services/*` (repository, service, view)
+- `backend/shared/domains/staff/*` (repository, service, view)
+- `backend/shared/domains/availability/*` — `availabilityRepository.ts`, `availabilityService.ts`, `availabilityView.ts`, plus the slot-computation pair: `slotComputer.ts` (pure function) and `slotService.ts` (orchestrator)
+- `backend/shared/domains/appointments/appointmentsRepository.ts` (Phase 3 stub; Phase 4 ships the Pg implementation against the new `appointments` table)
+- `backend/lambdas/services/{list,create,patch,delete}.ts` + `_validators.ts`
+- `backend/lambdas/staff/{list,create,patch,delete}.ts` + `_validators.ts`
+- `backend/lambdas/availability/{get,replace,addOverride,slots}.ts` + `_validators.ts`
+- `backend/shared/config/loadConfig.ts` — extended with `BookingConfig` (`slotStepMinutes`, `bufferMinutes`, `defaultTimezone`)
+- `backend/package.json` — `luxon ^3.4.4` runtime dep + `@types/luxon` dev dep added for timezone-aware slot computation
+- `backend/tests/services/*`, `backend/tests/staff/*`, `backend/tests/availability/*` (planned for a Phase 3 tests follow-up commit; not present yet)
 
 ## Pre-implementation cleanup
 
@@ -54,9 +57,9 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 ## Acceptance criteria
 
 - Slot computation includes a configurable `slotStepMinutes` (default 15) and `bufferMinutes` (default 5 between bookings).
-- Slot computation respects business timezone (default `Africa/Addis_Ababa`).
-- Slot computation rejects requested service durations longer than any availability window in range.
-- All inputs validated against schema; invalid weekday or impossible time windows return `VALIDATION_ERROR`.
+- Slot computation respects business timezone (default `Africa/Addis_Ababa`) — every `HH:MM:SS` clock value is interpreted in the business zone via Luxon before conversion to UTC.
+- Slot computation returns an empty `items` list when the requested service duration exceeds every open window in the date range — clients render "no times available" rather than a typed validation error. (Phase 3 chose the soft-empty path; tightening to an explicit error is a Phase 5 polish item if customer-facing UX warrants it.)
+- All inputs validated against schema; invalid weekday, impossible time windows, malformed dates, and ranges > 31 days return `VALIDATION_ERROR`.
 
 ## Test plan
 
@@ -68,4 +71,22 @@ Done before any Phase 3 domain code lands, to avoid duplicating Phase 2 patterns
 
 - Migrations forward-only.
 - No external systems beyond RDS are affected.
-- A faulty availability schedule can be cleared by `PUT` with an empty array; no destructive operation required.
+- A faulty availability schedule can be cleared by `PUT` with all-empty windows for every weekday; the schema requires the seven-day shape so an empty array body is rejected by validation.
+
+## Verification notes (Phase 3 audit, 2026-05-14)
+
+Captured during the Phase 3 verification pass. None are blockers for ticking the remaining checklist item (gated on `terraform apply`); each is worth addressing in the appropriate later phase.
+
+- **STAFF media unlock still pending.** `mediaService.assertOwnership` rejects `ownerType: STAFF` with `MediaUnsupportedOwnerTypeError`. Phase 3 now has the `StaffRepository` that the unlock needs: the change is wiring `StaffRepository` into `MediaService` as a third constructor dep and replacing the STAFF branch with a `staffRepo.findById(ownerId) → business → ownerUserId === caller.userId` check. Worth a small follow-up commit so staff portraits can flow. Flagged once in the Phase 3 staff-domain commit; surfacing here as the canonical record.
+
+- **`AppointmentsRepository` is a stub until Phase 4.** `StubAppointmentsRepository.listConflictsForStaff` always returns `[]`. The slot computer threads the result through correctly — emitted slots already respect the conflict shape, so Phase 4 swaps in a `PgAppointmentsRepository` (against the new `appointments` table) without touching `slotComputer.ts` or `slotService.ts`. The seam is fully ready.
+
+- **Admin write paths still owner-only.** `API_SPEC.md` lists services / staff / availability writes as "owner or ADMIN". Phase 3 implements strict-owner only, same as Phase 2 business writes. The `CallerContext.role` carries the role today; the relaxation in each service is `caller.userId === existing.ownerUserId || caller.role === 'ADMIN'` — one line per check. Phase 5 batches all admin write paths in one pass.
+
+- **Slot computation max range = 31 days.** Hard cap in `computeSlots` to avoid pathological scans. Customers typically look 7–14 days ahead; the cap is generous. If a real use case hits it, raise via config rather than removing.
+
+- **Tests deferred.** No `backend/tests/services/`, `backend/tests/staff/`, or `backend/tests/availability/` files exist yet. Pattern is set by Phase 2 (in-memory fakes, `tsx --test`). Scoped for a Phase 3 tests follow-up — the slot computer is the highest-value test target because it's the most non-trivial code in the project.
+
+- **Luxon was added as a runtime dep.** Justification: IANA timezone math is brittle to hand-roll (DST transitions, zone-changing dates, edge cases around `24:00:00`). Luxon is pure JS, ~70 KB minified+gzipped, zero transitive deps. Scoped to slot computation only — no other file imports it.
+
+- **Pre-implementation extraction paid for itself.** The `shared/http/validation.ts` and `shared/http/pagination.ts` files extracted at the start of Phase 3 are used by every Phase 3 handler folder. The `lambdas/staff/_validators.ts` is just 19 lines because of the extraction.

@@ -20,13 +20,13 @@ backend/
   tests/      unit + integration tests
 ```
 
-## Current state (Phase 2)
+## Current state (Phase 3)
 
 The following are wired up:
 
-- `npm run db:migrate` — applies migrations 0001–0005 via `db/migrate.mjs`.
+- `npm run db:migrate` — applies migrations 0001–0008 via `db/migrate.mjs`.
 - `npm run db:seed` — applies seeds (currently the four MVP categories) via `db/seed.mjs`.
-- `npm test` — Node test runner via `tsx`. Current suite covers Phase 1's `UserService` and `loadConfig`; Phase 2 domain tests (`business`, `media`, `category`) are queued for a follow-up commit.
+- `npm test` — Node test runner via `tsx`. Suite covers Phase 1's `UserService` + `loadConfig` and Phase 2's `BusinessService` / `MediaService` / `CategoryService`. Phase 3 domain tests (`services`, `staff`, `availability` + slot computation) are queued for a follow-up commit.
 
 `npm run build` and `npm run lint` are still Phase 0 placeholders.
 
@@ -46,8 +46,26 @@ The following are wired up:
 | GET    | `/v1/me/business`           | yes | Owner-view of own business at any status. |
 | POST   | `/v1/media/upload-url`      | yes | Presigned S3 PUT URL. Owner-row-level auth in service. |
 | POST   | `/v1/media`                 | yes | Confirm upload, persist `media_assets` row. |
+| GET    | `/v1/businesses/{businessId}/services`               | no  | Active services for a business. |
+| POST   | `/v1/businesses/{businessId}/services`               | yes | Create service. `BUSINESS_OWNER`, owner-of-business. |
+| PATCH  | `/v1/businesses/{businessId}/services/{id}`          | yes | Edit service. Owner-only (admin path in Phase 5). |
+| DELETE | `/v1/businesses/{businessId}/services/{id}`          | yes | Soft-delete (`is_active=false`). Owner-only. |
+| GET    | `/v1/businesses/{businessId}/staff`                  | no  | Active staff for a business. |
+| POST   | `/v1/businesses/{businessId}/staff`                  | yes | Create staff member. Owner-only. |
+| PATCH  | `/v1/businesses/{businessId}/staff/{id}`             | yes | Edit staff. Owner-only. |
+| DELETE | `/v1/businesses/{businessId}/staff/{id}`             | yes | Soft-delete staff. Owner-only. |
+| GET    | `/v1/businesses/{businessId}/staff/{staffId}/availability`           | no  | Weekly schedule + overrides. |
+| PUT    | `/v1/businesses/{businessId}/staff/{staffId}/availability`           | yes | Replace weekly schedule (strict 7-day). Owner-only. |
+| POST   | `/v1/businesses/{businessId}/staff/{staffId}/availability/override`  | yes | Add a date-specific override. Owner-only. |
+| GET    | `/v1/businesses/{businessId}/staff/{staffId}/slots`                  | no  | Computed bookable slots. UTC ISO timestamps. |
 
 See `api/openapi.yaml` for the full contract.
+
+### Slot computation prerequisites
+
+The `GET …/slots` handler depends on `BookingConfig` (`BOOKING_SLOT_STEP_MINUTES`, `BOOKING_BUFFER_MINUTES`, `DEFAULT_TIMEZONE`) which is surfaced through `loadConfig` with sane defaults (`15`, `5`, `Africa/Addis_Ababa`). Timezone math is done via [Luxon](https://moment.github.io/luxon/) — a new runtime dependency added in Phase 3 scoped to slot computation only.
+
+Appointment-conflict filtering uses `StubAppointmentsRepository` until Phase 4 ships the `appointments` table; until then, every slot that fits the availability windows is returned regardless of "would-be" bookings.
 
 ### S3 prerequisite for the media handlers
 
@@ -107,4 +125,12 @@ npm install
 npm test
 ```
 
-The Phase 1 suite covers `UserService` (sync, idempotency, role mapping, get, update, missing-user) and `loadConfig` (defaults, missing/invalid env vars, `PG_SSL` parsing) using an in-memory `UserRepository` fake — no Postgres required.
+Current suite (Phase 1 + Phase 2) covers:
+
+- `UserService` — sync, idempotency, role mapping, get, update, missing-user.
+- `loadConfig` — defaults, missing/invalid env vars, `PG_SSL` parsing.
+- `BusinessService` — create, update, submit state machine, ownership, listing filters, cursor-pagination roundtrip, invalid-cursor handling.
+- `MediaService` — content-type allowlist, owner-type matrix (BUSINESS / USER allowed, STAFF deferred), `isPublic` derivation, `confirmUpload` storage-key prefix check.
+- `CategoryService` — listing order, active-only filter, getBySlug/getById hit + miss + inactive-row contract.
+
+All using in-memory fakes — no Postgres required. Phase 3 domain tests (`services`, `staff`, `availability` + slot computation) are queued for a follow-up commit.
