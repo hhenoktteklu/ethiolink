@@ -34,7 +34,7 @@ Out of scope:
 
 ## Checklist
 
-- [ ] Migrations 0006–0008 applied to dev.
+- [ ] Migrations 0006–0008 applied to dev.<!-- 0006 (services) authored; 0007 (staff_members) + 0008 (staff_availability) pending; "applied to dev" needs `terraform apply` + run migrations -->
 - [ ] Services CRUD ownership-gated.
 - [ ] Staff CRUD ownership-gated.
 - [ ] Weekly availability `PUT` accepts a 7-day schedule with one or more windows per day.
