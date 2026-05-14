@@ -1,0 +1,37 @@
+# EthioLink — local development services.
+#
+# This file is for `docker-compose up -d` on a developer laptop only.
+# Production runs on Amazon RDS, provisioned by Terraform under
+# infra/terraform/modules/rds/ (added in Phase 2/7). Nothing here should
+# influence production behavior.
+#
+# Defaults match backend/.env.example, so `npm run db:migrate` works against
+# a freshly started container with no further configuration.
+#
+# Usage
+#   docker-compose up -d        # start Postgres in the background
+#   docker-compose down         # stop and remove the container (data kept)
+#   docker-compose down -v      # stop AND drop the data volume (clean slate)
+#   docker-compose logs -f db   # follow Postgres logs
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ethiolink-postgres
+    environment:
+      POSTGRES_DB: ethiolink
+      POSTGRES_USER: ethiolink
+      POSTGRES_PASSWORD: ethiolink
+    ports:
+      - "5432:5432"
+    volumes:
+      - ethiolink-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ethiolink -d ethiolink"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  ethiolink-postgres-data:
