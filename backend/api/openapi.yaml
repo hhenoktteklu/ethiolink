@@ -19,6 +19,8 @@ tags:
     description: Authentication and profile sync.
   - name: catalog
     description: Public-facing catalog (categories, businesses).
+  - name: media
+    description: Media uploads via S3 presigned URLs.
 paths:
   /categories:
     get:
@@ -260,6 +262,92 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /media/upload-url:
+    post:
+      tags: [media]
+      operationId: issueMediaUploadUrl
+      summary: Issue a presigned S3 PUT URL for a single media upload.
+      description: |
+        Authenticated. Any role may call; ownership of the referenced
+        resource (`ownerType` + `ownerId`) is enforced server-side by
+        `MediaService`:
+
+          - `ownerType: BUSINESS` — caller must own the business.
+          - `ownerType: USER` — `ownerId` must equal the caller's
+            `users.id`.
+          - `ownerType: STAFF` — deferred to Phase 3 (returns 400).
+
+        Content type must be one of the Phase 2 allowlist: `image/jpeg`,
+        `image/png`, `image/webp`. `isPublic` is NOT client-controlled;
+        the service derives it from `ownerType` (BUSINESS/STAFF → public
+        bucket, USER → private bucket).
+
+        The returned URL is single-use and expires by `expiresAt`. The
+        client MUST PUT bytes to it with the headers listed in
+        `requiredHeaders`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueMediaUploadUrlRequest'
+      responses:
+        '200':
+          description: Presigned upload URL and the storage key to confirm with.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IssueMediaUploadUrlResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /media:
+    post:
+      tags: [media]
+      operationId: confirmMediaUpload
+      summary: Confirm a successful S3 upload and persist the media row.
+      description: |
+        Authenticated. Submitted after the client has successfully PUT
+        bytes to the URL returned by `POST /v1/media/upload-url`. Pass
+        back the `storageKey` from that response plus the same
+        `ownerType` / `ownerId` / `contentType`. Optionally include
+        `width` and `height` extracted from the uploaded file.
+
+        `MediaService` re-runs the ownership check and verifies that
+        `storageKey` begins with the prefix the gateway would have
+        issued for the asserted owner (`<ownerType-lowercase>/<ownerId>/`).
+        A mismatch returns 400 — this prevents a caller from claiming
+        someone else's storage key under their own owner id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmMediaUploadRequest'
+      responses:
+        '200':
+          description: The persisted media asset.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MediaView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
   /me/business:
@@ -582,6 +670,102 @@ components:
             Partial update. Each field optional: `undefined` (absent) means
             "no change", explicit `null` clears the column. Unknown fields
             are tolerated.
+    MediaOwnerType:
+      type: string
+      enum: [BUSINESS, STAFF, USER]
+      description: |
+        Polymorphic owner of a media asset. Mirrors the `owner_type`
+        CHECK constraint on `media_assets`.
+    AllowedMediaContentType:
+      type: string
+      enum: [image/jpeg, image/png, image/webp]
+      description: Phase 2 content-type allowlist. PDFs land in Phase 3.
+    IssueMediaUploadUrlRequest:
+      type: object
+      required: [ownerType, ownerId, contentType]
+      properties:
+        ownerType:
+          $ref: '#/components/schemas/MediaOwnerType'
+        ownerId:
+          type: string
+          format: uuid
+        contentType:
+          $ref: '#/components/schemas/AllowedMediaContentType'
+        fileExtension:
+          type: string
+          maxLength: 16
+          description: |
+            Optional filename-extension hint. The gateway may embed it in
+            the storage key for nicer browser-visible filenames. If
+            omitted, the gateway derives an extension from `contentType`.
+    IssueMediaUploadUrlResponse:
+      type: object
+      required: [uploadUrl, storageKey, expiresAt, requiredHeaders]
+      properties:
+        uploadUrl:
+          type: string
+          format: uri
+          description: Single-use S3 PUT URL. Expires by `expiresAt`.
+        storageKey:
+          type: string
+          description: |
+            Stable storage-side key. Pass back as `storageKey` in
+            `POST /v1/media` to confirm the upload.
+        expiresAt:
+          type: string
+          format: date-time
+        requiredHeaders:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            Headers the client MUST send on the PUT for the signature to
+            match. For S3 this typically includes `Content-Type`.
+    ConfirmMediaUploadRequest:
+      type: object
+      required: [ownerType, ownerId, storageKey, contentType]
+      properties:
+        ownerType:
+          $ref: '#/components/schemas/MediaOwnerType'
+        ownerId:
+          type: string
+          format: uuid
+        storageKey:
+          type: string
+          maxLength: 1024
+        contentType:
+          $ref: '#/components/schemas/AllowedMediaContentType'
+        width:
+          type: integer
+          minimum: 0
+        height:
+          type: integer
+          minimum: 0
+    MediaView:
+      type: object
+      required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerType:
+          $ref: '#/components/schemas/MediaOwnerType'
+        ownerId:
+          type: string
+          format: uuid
+        s3Key:
+          type: string
+        contentType:
+          type: [string, 'null']
+        width:
+          type: [integer, 'null']
+        height:
+          type: [integer, 'null']
+        isPublic:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
     Error:
       type: object
       required: [error]
