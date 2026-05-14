@@ -10,15 +10,16 @@
 //   * from      — required YYYY-MM-DD (inclusive)
 //   * to        — required YYYY-MM-DD (inclusive)
 //
-// Phase 3 stubs appointment-conflict lookups (`StubAppointmentsRepository`
-// returns `[]`); Phase 4 will swap in the real implementation once
-// the appointments table exists.
+// Appointment-conflict lookups go through `PgAppointmentsRepository`
+// against the `appointments` table created in migration 0009. Slots
+// that overlap an ACCEPTED, not-soft-deleted booking on the same
+// staff member are filtered out by `SlotService`.
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
 import { loadConfig } from '../../shared/config/loadConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
-import { StubAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
+import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import {
     SlotInvalidRangeError,
@@ -47,7 +48,7 @@ const slotService = new SlotService(
     new PgAvailabilityRepository(pool),
     new PgStaffRepository(pool),
     new PgServiceRepository(pool),
-    new StubAppointmentsRepository(),
+    new PgAppointmentsRepository(pool),
     {
         slotStepMinutes: config.booking.slotStepMinutes,
         bufferMinutes: config.booking.bufferMinutes,

@@ -17,7 +17,7 @@
 
 import { DateTime } from 'luxon';
 
-import type { AppointmentsRepository } from '../appointments/appointmentsRepository.js';
+import type { AppointmentConflictsRepository } from '../appointments/appointmentsRepository.js';
 import type { ServiceRepository } from '../services/serviceRepository.js';
 import type { StaffRepository } from '../staff/staffRepository.js';
 
@@ -81,7 +81,7 @@ export class SlotService {
         private readonly availabilityRepo: AvailabilityRepository,
         private readonly staffRepo: StaffRepository,
         private readonly serviceRepo: ServiceRepository,
-        private readonly appointmentsRepo: AppointmentsRepository,
+        private readonly appointmentsRepo: AppointmentConflictsRepository,
         private readonly options: SlotServiceOptions,
     ) {}
 

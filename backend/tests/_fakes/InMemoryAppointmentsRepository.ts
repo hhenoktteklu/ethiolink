@@ -7,14 +7,14 @@
 
 import type {
     AppointmentConflict,
-    AppointmentsRepository,
+    AppointmentConflictsRepository,
 } from '../../shared/domains/appointments/appointmentsRepository.js';
 
 interface SeededConflict extends AppointmentConflict {
     readonly staffId: string;
 }
 
-export class InMemoryAppointmentsRepository implements AppointmentsRepository {
+export class InMemoryAppointmentsRepository implements AppointmentConflictsRepository {
     private readonly conflicts: SeededConflict[] = [];
 
     /** Seed a conflict for a specific staff member. */

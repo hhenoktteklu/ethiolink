@@ -65,7 +65,7 @@ See `api/openapi.yaml` for the full contract.
 
 The `GET …/slots` handler depends on `BookingConfig` (`BOOKING_SLOT_STEP_MINUTES`, `BOOKING_BUFFER_MINUTES`, `DEFAULT_TIMEZONE`) which is surfaced through `loadConfig` with sane defaults (`15`, `5`, `Africa/Addis_Ababa`). Timezone math is done via [Luxon](https://moment.github.io/luxon/) — a new runtime dependency added in Phase 3 scoped to slot computation only.
 
-Appointment-conflict filtering uses `StubAppointmentsRepository` until Phase 4 ships the `appointments` table; until then, every slot that fits the availability windows is returned regardless of "would-be" bookings.
+Appointment-conflict filtering uses `PgAppointmentsRepository` against the `appointments` table (migration 0009). ACCEPTED, not-soft-deleted bookings for the staff member block any overlapping slot; REQUESTED rows do not block slot emission — the exclusion constraint catches a true double-book at insert time. `StubAppointmentsRepository` is retained as an in-memory seam for tests and local tooling that exercise slot computation without a database.
 
 ### S3 prerequisite for the media handlers
 
