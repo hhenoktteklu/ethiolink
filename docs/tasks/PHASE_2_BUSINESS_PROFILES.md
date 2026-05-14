@@ -91,7 +91,7 @@ Items captured during the Phase 2 verification pass. None are blockers for ticki
 
 - **STAFF media uploads return 400 today.** `mediaService` raises `MediaUnsupportedOwnerTypeError` for `ownerType: STAFF` until Phase 3 implements `staff_members`. The error code is `VALIDATION_ERROR` with `details.ownerType` — clients can distinguish from a true validation failure on the message text, but a dedicated code (`NOT_IMPLEMENTED`?) would be cleaner. Not a Phase 2 fix — flagged for Phase 3.
 
-- **Tests for the new domains:**
-  - `business` — in place (`backend/tests/businesses/businessService.test.ts` + `_fakes/InMemoryBusinessRepository.ts`).
-  - `media` — in place (`backend/tests/media/mediaService.test.ts` + `_fakes/InMemoryMediaRepository.ts` + `_fakes/FakeStorageGateway.ts`).
-  - `category` — still deferred.
+- **Tests for the new domains:** all in place.
+  - `business` — `backend/tests/businesses/businessService.test.ts` + `_fakes/InMemoryBusinessRepository.ts`.
+  - `media` — `backend/tests/media/mediaService.test.ts` + `_fakes/InMemoryMediaRepository.ts` + `_fakes/FakeStorageGateway.ts`.
+  - `category` — `backend/tests/categories/categoryService.test.ts` + `_fakes/InMemoryCategoryRepository.ts`.
