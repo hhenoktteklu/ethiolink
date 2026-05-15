@@ -302,3 +302,78 @@ export function deactivateCategory(
         { notes: notes ?? null },
     );
 }
+
+// ---------------------------------------------------------------------------
+// Admin users
+// ---------------------------------------------------------------------------
+
+export type UserRole = 'CUSTOMER' | 'BUSINESS_OWNER' | 'ADMIN';
+export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED';
+
+export interface AdminUserView {
+    readonly id: string;
+    readonly email: string | null;
+    readonly phone: string | null;
+    readonly displayName: string | null;
+    readonly role: UserRole;
+    readonly status: UserStatus;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+}
+
+export interface AdminUserListResponse {
+    readonly items: readonly AdminUserView[];
+}
+
+export function listAdminUsers(
+    params: { status?: UserStatus; role?: UserRole; limit?: number } = {},
+): Promise<AdminUserListResponse> {
+    const search = new URLSearchParams();
+    if (params.status !== undefined) search.set('status', params.status);
+    if (params.role !== undefined) search.set('role', params.role);
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<AdminUserListResponse>(
+        'GET',
+        `/v1/admin/users${query ? `?${query}` : ''}`,
+    );
+}
+
+/**
+ * Move an ACTIVE user to SUSPENDED. The backend emits a
+ * `SUSPEND_USER` audit row carrying the optional `notes`. SUSPENDED
+ * and DELETED users return 409 CONFLICT (DELETED is terminal in
+ * MVP).
+ *
+ * Suspension marks the row only — Cognito tokens stay valid until
+ * expiration; the API authorizer rejects suspended users on the
+ * next request. Token-side revocation is a Phase 7/8 hardening
+ * item, not an MVP concern.
+ */
+export function suspendUser(
+    id: string,
+    notes?: string | null,
+): Promise<AdminUserView> {
+    return request<AdminUserView>(
+        'POST',
+        `/v1/admin/users/${encodeURIComponent(id)}/suspend`,
+        { notes: notes ?? null },
+    );
+}
+
+/**
+ * Move a SUSPENDED user to ACTIVE. The backend emits a
+ * `RESTORE_USER` audit row. ACTIVE and DELETED users return 409
+ * CONFLICT; DELETED is terminal and can't be restored through this
+ * path in MVP.
+ */
+export function restoreUser(
+    id: string,
+    notes?: string | null,
+): Promise<AdminUserView> {
+    return request<AdminUserView>(
+        'POST',
+        `/v1/admin/users/${encodeURIComponent(id)}/restore`,
+        { notes: notes ?? null },
+    );
+}

@@ -61,6 +61,15 @@ Out of scope:
 - Frontend unit: route guards, API client error handling.
 - Manual: log in as ADMIN, approve a pending business, see it appear on the public listing endpoint.
 
+### Phase 5 React pages landed so far
+
+- `LoginPage` — Cognito hosted-UI redirect + PKCE callback handling.
+- `DashboardPage` — pending-review business count tile.
+- `BusinessesPage` + `BusinessDetailPage` — status-filtered list + per-row approve / reject / suspend / feature / unfeature with optional notes.
+- `CategoriesPage` — single-page CRUD with isActive filter, create form, per-row Edit / Deactivate. Field-level errors via `details.field`.
+- `UsersPage` — status + role filters, per-row Suspend (ACTIVE only) / Restore (SUSPENDED only); DELETED rows show no action. Optional notes captured via `window.prompt`.
+- Bookings page is the remaining React deliverable (read-only cross-business listing against `GET /v1/admin/appointments`).
+
 ### Phase 5 unit-test coverage landed so far
 
 - `adminBusinessService.test.ts` — happy paths for approve / reject / suspend (APPROVED + PENDING_REVIEW) / setFeaturedUntil (feature + unfeature), each verifying both the mutation and the audit-row contents (adminUserId / action / targetType / targetId / notes). Authorization matrix over CUSTOMER + BUSINESS_OWNER callers for every method. Not-found (`AdminBusinessNotFoundError`). Invalid-transition matrix (approve / reject / suspend / feature / unfeature from every wrong fromStatus). Audit-row invariant: exactly one row per successful action, zero rows when validation fails before any mutation. Uses `InMemoryBusinessRepository` (already widened with `setFeaturedUntil`) + new `InMemoryAdminActionRepository` (append-only, with `size` / `all` / `rowsForTarget` / `rowsByAdmin` test helpers).

@@ -22,6 +22,7 @@ import { BusinessesPage } from './pages/BusinessesPage';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
+import { UsersPage } from './pages/UsersPage';
 
 export function App() {
     return (
@@ -38,6 +39,7 @@ export function App() {
                 <Route path="/businesses" element={<BusinessesPage />} />
                 <Route path="/businesses/:id" element={<BusinessDetailPage />} />
                 <Route path="/categories" element={<CategoriesPage />} />
+                <Route path="/users" element={<UsersPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
