@@ -93,24 +93,104 @@ The app resolves four required + two optional values from compile-time constants
 
 Missing any of the three required values throws `MissingConfigError` at boot — the app fails loud rather than booting half-wired.
 
+## Cognito PKCE — platform deep-link setup
+
+`CognitoAuthService` drives the PKCE flow via [`flutter_appauth`](https://pub.dev/packages/flutter_appauth). The callback URI `ethiolink://auth/callback` (and logout URI `ethiolink://auth/logout`) must be registered on **both** Cognito (handled by Terraform) and the native platforms (handled per-OS below). Skipping the platform step results in the system browser opening Cognito's hosted UI on sign-in but never returning to the app after the user signs in — the redirect succeeds at the IdP and then nothing happens.
+
+Both platforms regenerate their scaffolding via `flutter create .`; the edits below are layered on top of the generated files.
+
+### Android — `android/app/src/main/AndroidManifest.xml`
+
+Add an intent filter to the launcher `Activity` so Android routes `ethiolink://auth/...` deep links back to the app:
+
+```xml
+<activity
+    android:name=".MainActivity"
+    ...
+    android:launchMode="singleTask">
+    <!-- existing MAIN / LAUNCHER intent filter stays as-is -->
+
+    <intent-filter android:autoVerify="false">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data
+            android:scheme="ethiolink"
+            android:host="auth" />
+    </intent-filter>
+</activity>
+```
+
+`android:launchMode="singleTask"` is important — without it the Custom Tab launches a new activity instance on every sign-in attempt, and the redirect breaks.
+
+In `android/app/build.gradle`, set the `appAuthRedirectScheme` manifest placeholder so `flutter_appauth` registers its own intent receiver:
+
+```gradle
+android {
+    defaultConfig {
+        ...
+        manifestPlaceholders = [appAuthRedirectScheme: 'ethiolink']
+    }
+}
+```
+
+The scheme `ethiolink` is lowercase — Android matches schemes case-insensitively but the convention is lowercase + no version suffix.
+
+### iOS — `ios/Runner/Info.plist`
+
+Register the `ethiolink://` URL scheme so iOS routes deep links into the app:
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleURLName</key>
+        <string>app.ethiolink.callback</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>ethiolink</string>
+        </array>
+    </dict>
+</array>
+```
+
+Cognito's `/oauth2/authorize` redirects to `ethiolink://auth/callback`; iOS dispatches that URL to the registered scheme and `flutter_appauth` resumes the token exchange.
+
+iOS 11+ uses `ASWebAuthenticationSession` under the hood (system-managed; no `Info.plist` entitlement needed). On iOS 12+, the alternative `SFSafariViewController` path is auto-selected by `flutter_appauth` when the user has disabled the browser-session controller — both work without extra config.
+
+### Verifying the deep link
+
+After applying the edits + running `flutter run`, exercise the loop:
+
+```
+launch app → tap "Sign in" → hosted-UI in system browser → enter test credentials → browser closes → app lands on Browse tab
+```
+
+If the browser closes but the app stays on the LoginScreen, the deep link didn't resolve. Common causes:
+
+- Intent filter or `CFBundleURLSchemes` missing or scheme typo.
+- `appAuthRedirectScheme` manifest placeholder not set in Android.
+- `redirectUri` env value doesn't match Cognito's `callback_urls` exactly (Cognito is strict — `ethiolink://auth/callback/` with trailing slash is a different URL).
+- Cognito client ID typo — the IdP returns an error page in the browser; check the URL bar before the browser closes.
+
 ## What the scaffold ships
 
 - ✅ Material 3 themed root app with a single navigator stack.
-- ✅ Placeholder login screen — tap "Sign in", land on the home tab.
+- ✅ Branded login screen — Cognito PKCE sign-in via `flutter_appauth` against the configured hosted-UI domain.
+- ✅ Secure token cache via `flutter_secure_storage` (Keychain / Keystore). Refresh-on-near-expiry built into `CognitoAuthService.currentSession()`.
 - ✅ Three-tab bottom navigation: Browse, Bookings, Profile.
 - ✅ Browse tab — 4 placeholder category cards (Salons / Barbers / Spas / Beauty Pros).
-- ✅ Profile tab — fake session info + env display + sign-out button.
+- ✅ Profile tab — session info + env display + working sign-out (clears secure storage + best-effort hosted-UI logout).
 - ✅ `AppConfig` + `AppConfigScope` inherited-widget pattern.
-- ✅ `AuthService` port + `FakeAuthService` placeholder.
+- ✅ `AuthService` port with two implementations: `CognitoAuthService` (production) + `FakeAuthService` (tests + offline demo). `LoginScreen` accepts an optional override so widget tests stay platform-channel-free.
 - ✅ `ApiClient` skeleton with a stable `baseUrl` getter and `UnimplementedError`-throwing method stubs.
 - ✅ `flutter_lints` + strict analyzer settings.
-- ✅ Widget smoke test confirming the login screen renders.
+- ✅ Widget tests covering login render + fake-auth sign-in routing + missing-config detection; unit tests covering id-token claim decoding + role precedence.
 
 ## What the scaffold deliberately does NOT ship
 
 Each item below is on the immediate Phase 9 Track 3 backlog. The scaffold leaves a typed seam so the follow-up commits drop in cleanly.
 
-- ❌ Real Cognito auth (PKCE via `flutter_appauth` or `amplify_auth_cognito`). The next mobile commit.
 - ❌ Real HTTP client (Dio + auth-token interceptor + retry). Pairs with the OpenAPI-generated client.
 - ❌ OpenAPI-generated Dart client from `backend/api/openapi.yaml`. Lands once the auth path is real so generated requests can be authenticated end-to-end.
 - ❌ State management (Riverpod). Adopted when the first feature with non-trivial state lands — likely the slot picker or the booking funnel.
@@ -138,4 +218,4 @@ flutter analyze
 
 ## Next recommended mobile commit
 
-**"Phase 9: wire Cognito PKCE auth"** — replace `FakeAuthService` with a real implementation that drives the `https://${cognitoDomain}/oauth2/authorize` flow via `flutter_appauth`, captures the `code` on the `ethiolink://auth/callback` deep-link redirect, exchanges it for tokens at `/oauth2/token`, stores the refresh token in `flutter_secure_storage`, and exposes the session to the `LoginScreen` via the existing `AuthService` port. Includes the iOS `Info.plist` URL-scheme entry and the Android `AndroidManifest.xml` intent filter. ~1–2 days of work.
+**"Phase 9: add Dio + auth-token interceptor + first browse fetch"** — replace `ApiClient`'s `UnimplementedError` stubs with a real Dio-backed implementation. The interceptor pulls the current `idToken` from `flutter_secure_storage` (the same `_kIdToken` key `CognitoAuthService` writes) and attaches it as the `Authorization: Bearer <idToken>` header on every request; on a 401, retry once after `CognitoAuthService.currentSession()` refreshes the token. Land the first real fetch as part of the same commit — `GET /v1/categories` against the live dev API — so the browse tab's 4 placeholder cards become the real four MVP categories. Sets up the foundation for every subsequent feature track (booking funnel, /v1/me/appointments, business-owner flows). ~2–3 days of work.

@@ -9,13 +9,23 @@
 import 'package:flutter/material.dart';
 
 import '../../core/auth/auth_service.dart';
+import '../../core/auth/cognito_auth_service.dart';
 import '../../core/config/app_config_scope.dart';
 import '../auth/login_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
-  const ProfileScreen({required this.session, super.key});
+  const ProfileScreen({
+    required this.session,
+    this.authServiceOverride,
+    super.key,
+  });
 
   final AuthSession session;
+
+  /// Phase 9 — `BrowseScreen` forwards the same `authServiceOverride`
+  /// down so tests can short-circuit the real Cognito service. The
+  /// sign-out button below uses this when present.
+  final AuthService? authServiceOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -62,10 +72,22 @@ class ProfileScreen extends StatelessWidget {
             _ConfigRow(label: 'Cognito domain', value: config.cognitoDomain),
             const Spacer(),
             OutlinedButton.icon(
-              onPressed: () {
+              onPressed: () async {
+                final auth = authServiceOverride ??
+                    CognitoAuthService(config: config);
+                try {
+                  await auth.signOut();
+                } catch (_) {
+                  // Sign-out is best-effort — the cache is cleared
+                  // even if the hosted-UI logout call fails. The
+                  // user still lands on the LoginScreen below.
+                }
+                if (!context.mounted) return;
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute<void>(
-                    builder: (_) => const LoginScreen(),
+                    builder: (_) => LoginScreen(
+                      authServiceOverride: authServiceOverride,
+                    ),
                   ),
                   (_) => false,
                 );

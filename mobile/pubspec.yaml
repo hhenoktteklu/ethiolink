@@ -33,6 +33,14 @@ dependencies:
   # via flutter_localizations.
   intl: ^0.19.0
 
+  # Phase 9 — Cognito PKCE auth. `flutter_appauth` is the standard
+  # AppAuth wrapper covering authorize + token-exchange + refresh
+  # + end-session. `flutter_secure_storage` backs the token cache
+  # via Keychain (iOS) / Keystore (Android), so the refresh token
+  # never lands on the device file system in plaintext.
+  flutter_appauth: ^7.0.0
+  flutter_secure_storage: ^9.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

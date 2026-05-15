@@ -16,32 +16,63 @@
 import 'package:flutter/material.dart';
 
 import '../../core/auth/auth_service.dart';
+import '../../core/auth/cognito_auth_service.dart';
 import '../../core/config/app_config_scope.dart';
 import '../browse/browse_screen.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  /// Phase 9 — accepts an optional `AuthService` override so widget
+  /// tests inject a `FakeAuthService` without booting the
+  /// `flutter_appauth` platform channel. Production runs leave
+  /// this `null`; the State initializes `CognitoAuthService` from
+  /// `AppConfigScope` on `didChangeDependencies`.
+  const LoginScreen({this.authServiceOverride, super.key});
+
+  final AuthService? authServiceOverride;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final AuthService _auth = FakeAuthService();
+  AuthService? _auth;
   bool _signingIn = false;
   String? _error;
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_auth != null) return;
+    if (widget.authServiceOverride != null) {
+      _auth = widget.authServiceOverride;
+    } else {
+      // Production wiring: real Cognito service constructed from
+      // the inherited `AppConfig`. The `AppConfigScope` lookup
+      // belongs inside a build-context aware hook (init or
+      // didChange…), not in the field initialiser — `context` is
+      // not safe to read there.
+      _auth = CognitoAuthService(
+        config: AppConfigScope.of(context),
+      );
+    }
+  }
+
   Future<void> _onSignInTapped() async {
+    final auth = _auth;
+    if (auth == null) return;
     setState(() {
       _signingIn = true;
       _error = null;
     });
     try {
-      final session = await _auth.signIn();
+      final session = await auth.signIn();
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
-          builder: (_) => BrowseScreen(session: session),
+          builder: (_) => BrowseScreen(
+            session: session,
+            authServiceOverride: widget.authServiceOverride,
+          ),
         ),
       );
     } catch (e) {

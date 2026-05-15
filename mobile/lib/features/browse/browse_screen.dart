@@ -17,9 +17,18 @@ import '../bookings/bookings_screen.dart';
 import '../profile/profile_screen.dart';
 
 class BrowseScreen extends StatefulWidget {
-  const BrowseScreen({required this.session, super.key});
+  const BrowseScreen({
+    required this.session,
+    this.authServiceOverride,
+    super.key,
+  });
 
   final AuthSession session;
+
+  /// Forwarded to `ProfileScreen` so the sign-out button can use
+  /// the same (potentially test-injected) `AuthService` as the
+  /// surrounding `LoginScreen`.
+  final AuthService? authServiceOverride;
 
   @override
   State<BrowseScreen> createState() => _BrowseScreenState();
@@ -31,7 +40,10 @@ class _BrowseScreenState extends State<BrowseScreen> {
   late final List<Widget> _tabs = <Widget>[
     _BrowseTab(session: widget.session),
     BookingsScreen(session: widget.session),
-    ProfileScreen(session: widget.session),
+    ProfileScreen(
+      session: widget.session,
+      authServiceOverride: widget.authServiceOverride,
+    ),
   ];
 
   @override
