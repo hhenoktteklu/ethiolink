@@ -17,6 +17,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { AdminLayout } from './components/AdminLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { AppointmentsPage } from './pages/AppointmentsPage';
 import { BusinessDetailPage } from './pages/BusinessDetailPage';
 import { BusinessesPage } from './pages/BusinessesPage';
 import { CategoriesPage } from './pages/CategoriesPage';
@@ -40,6 +41,7 @@ export function App() {
                 <Route path="/businesses/:id" element={<BusinessDetailPage />} />
                 <Route path="/categories" element={<CategoriesPage />} />
                 <Route path="/users" element={<UsersPage />} />
+                <Route path="/appointments" element={<AppointmentsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

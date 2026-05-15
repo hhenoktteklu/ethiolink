@@ -377,3 +377,90 @@ export function restoreUser(
         { notes: notes ?? null },
     );
 }
+
+// ---------------------------------------------------------------------------
+// Admin appointments (read-only cross-business listing)
+// ---------------------------------------------------------------------------
+
+export type AppointmentStatus =
+    | 'REQUESTED'
+    | 'ACCEPTED'
+    | 'REJECTED'
+    | 'CANCELLED'
+    | 'COMPLETED'
+    | 'NO_SHOW';
+
+export type PaymentMethod = 'CASH' | 'ONLINE_PENDING';
+
+export type CancelledBy = 'CUSTOMER' | 'BUSINESS' | 'ADMIN';
+
+/**
+ * Wire shape returned by every appointment endpoint — the
+ * `AppointmentView` from the backend's appointmentView module.
+ * Hides `deletedAt` (soft-delete filter is server-side).
+ */
+export interface AppointmentView {
+    readonly id: string;
+    readonly customerId: string;
+    readonly businessId: string;
+    readonly serviceId: string;
+    readonly staffId: string;
+    readonly startsAt: string;
+    readonly endsAt: string;
+    readonly status: AppointmentStatus;
+    readonly paymentMethod: PaymentMethod;
+    readonly priceEtb: number;
+    readonly notes: string | null;
+    readonly cancelledBy: CancelledBy | null;
+    readonly cancelReason: string | null;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+}
+
+export interface AppointmentListResponse {
+    readonly items: readonly AppointmentView[];
+}
+
+/**
+ * Cross-business appointment listing. All filters optional;
+ * passing none returns every active appointment up to `limit`.
+ * `fromUtc` / `toUtc` accept either a `Date` or an ISO-8601
+ * string — Dates are converted via `.toISOString()` before
+ * landing in the URL query.
+ *
+ * No cursor pagination in MVP; the backend caps at 100.
+ */
+export function listAdminAppointments(
+    params: {
+        status?: AppointmentStatus;
+        businessId?: string;
+        customerId?: string;
+        fromUtc?: Date | string;
+        toUtc?: Date | string;
+        limit?: number;
+    } = {},
+): Promise<AppointmentListResponse> {
+    const search = new URLSearchParams();
+    if (params.status !== undefined) search.set('status', params.status);
+    if (params.businessId !== undefined)
+        search.set('businessId', params.businessId);
+    if (params.customerId !== undefined)
+        search.set('customerId', params.customerId);
+    if (params.fromUtc !== undefined) {
+        search.set('from', toIsoString(params.fromUtc));
+    }
+    if (params.toUtc !== undefined) {
+        search.set('to', toIsoString(params.toUtc));
+    }
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<AppointmentListResponse>(
+        'GET',
+        `/v1/admin/appointments${query ? `?${query}` : ''}`,
+    );
+}
+
+function toIsoString(value: Date | string): string {
+    if (typeof value === 'string') return value;
+    return value.toISOString();
+}

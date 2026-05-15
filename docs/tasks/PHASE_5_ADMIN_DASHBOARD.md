@@ -68,7 +68,7 @@ Out of scope:
 - `BusinessesPage` + `BusinessDetailPage` — status-filtered list + per-row approve / reject / suspend / feature / unfeature with optional notes.
 - `CategoriesPage` — single-page CRUD with isActive filter, create form, per-row Edit / Deactivate. Field-level errors via `details.field`.
 - `UsersPage` — status + role filters, per-row Suspend (ACTIVE only) / Restore (SUSPENDED only); DELETED rows show no action. Optional notes captured via `window.prompt`.
-- Bookings page is the remaining React deliverable (read-only cross-business listing against `GET /v1/admin/appointments`).
+- `AppointmentsPage` — read-only cross-business listing. Five filters (status, businessId, customerId, from, to) using `<input type="datetime-local">` for the date inputs (local → UTC via `.toISOString()` in the API helper). Table renders short-UUID columns with `title` tooltips for the full id, locale-formatted dates, status / payment badges, and ETB price. Caps at 100 rows with an inline hint when the cap is hit.
 
 ### Phase 5 unit-test coverage landed so far
 
