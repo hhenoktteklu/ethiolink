@@ -1,0 +1,47 @@
+# Flutter / Dart build artifacts.
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+build/
+
+# IDE / editor.
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Generated / per-platform scaffolding.
+# The `flutter create` artifacts for each native target (android/, ios/,
+# linux/, macos/, web/, windows/) are NOT committed in this scaffold —
+# `flutter create .` regenerates them locally on the operator's machine
+# alongside the platform SDK they target. Commit only when a
+# platform-specific override is required (e.g. iOS Info.plist edits for
+# Cognito deep-link callbacks; that lives in a follow-up commit).
+android/
+ios/
+linux/
+macos/
+web/
+windows/
+
+# Local env files. The `dart-define-from-file` JSON files at
+# `env/*.json` carry secrets-shaped values (Cognito client id) and
+# stay out of git. `env/dev.example.json` is committed as the
+# template.
+env/dev.json
+env/staging.json
+env/prod.json
+
+# Per-developer pubspec lock — Flutter convention is to commit
+# pubspec.lock for apps. We commit it once the dependency tree
+# stabilizes; until then keep it out so devs aren't churning the
+# lockfile on every commit during the scaffold phase.
+pubspec.lock
+
+# Coverage / test reports.
+coverage/
+test/.test_coverage.dart

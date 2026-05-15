@@ -1,0 +1,49 @@
+# EthioLink Mobile — Flutter app pubspec.
+#
+# Phase 9 Track 3 scaffold. This is the working pubspec authored
+# in the "Phase 9: scaffold Flutter mobile app" commit; it
+# replaces the Phase 0 `pubspec.placeholder.yaml`. The dependency
+# set is intentionally minimal — only the runtime libraries the
+# scaffold's placeholder screens need. Real auth (Cognito /
+# Amplify), HTTP client (Dio + OpenAPI-generated client), state
+# management (Riverpod), and routing (go_router) land in later
+# Phase 9 mobile commits as each feature track lights up.
+
+name: ethiolink
+description: "EthioLink mobile app — beauty appointment booking for Ethiopia."
+publish_to: "none"
+version: 0.0.1+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # Material icons + standard widget set come with Flutter; no
+  # extra widget libs needed for the placeholder screens.
+
+  # English-only at scaffold time; `am.arb` lands in the
+  # localization track. The `intl` package is the standard
+  # foundation Flutter uses for formatted output and is bundled
+  # via flutter_localizations.
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # Lint ruleset. `flutter_lints` is the official Flutter team
+  # baseline; we adopt it directly rather than `very_good_analysis`
+  # (the placeholder doc's suggestion) until we have a concrete
+  # reason to diverge.
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  # Asset declarations land here once the design pass adds
+  # images. Empty today.

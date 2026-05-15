@@ -1,0 +1,11 @@
+{
+  "_comment": "EthioLink Mobile — dev environment template for --dart-define-from-file.",
+  "_comment_2": "Copy to `env/dev.json` (gitignored) and fill the empty values with the dev environment outputs from `terraform output -json` in `infra/terraform/environments/dev`.",
+
+  "API_BASE_URL": "https://abc123.execute-api.eu-west-1.amazonaws.com/dev",
+  "COGNITO_DOMAIN": "ethiolink-dev.auth.eu-west-1.amazoncognito.com",
+  "COGNITO_CLIENT_ID": "<mobile-app-client-id-from-cognito-output>",
+  "COGNITO_REDIRECT_URI": "ethiolink://auth/callback",
+  "COGNITO_LOGOUT_URI": "ethiolink://auth/logout",
+  "APP_ENV": "dev"
+}

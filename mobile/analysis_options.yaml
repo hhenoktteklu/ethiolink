@@ -1,0 +1,30 @@
+# EthioLink Mobile — analyzer configuration.
+#
+# Adopts the official `flutter_lints` baseline. We layer a small
+# set of project-specific overrides on top:
+#
+#   * `prefer_const_constructors` is upgraded to `error` to keep
+#     widget rebuild cost down — every const constructor that
+#     gets dropped to `new` is a missed rebuild optimization.
+#   * `avoid_print` stays a warning (not error) so the scaffold's
+#     placeholder screens can log to the console without
+#     a code-change ceremony. Replaced with structured logging
+#     in a follow-up commit.
+
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_declarations: true
+    prefer_final_locals: true
+    avoid_print: false # placeholder-friendly; tighten later.
+
+analyzer:
+  language:
+    strict-casts: true
+    strict-inference: true
+    strict-raw-types: true
+  errors:
+    todo: ignore

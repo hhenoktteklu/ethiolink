@@ -1,31 +1,15 @@
-# Placeholder for the Flutter pubspec.yaml that will be generated in Phase 1.
-# Do not consume this file directly — `flutter create` will produce the real one.
+# SUPERSEDED — see `pubspec.yaml`.
+#
+# This file documented the intended Flutter dependency set for the
+# Phase 0 scaffold milestone. The Phase 9 Track 3 scaffold ships a
+# working `pubspec.yaml` alongside the real `lib/` tree; that file
+# is the authoritative project manifest going forward.
+#
+# Kept in tree as a paper-trail anchor — `pubspec.placeholder.yaml`
+# is the file the Phase 0 docs reference when explaining the
+# Flutter rollout plan. Future cleanup commits may delete it; the
+# real `pubspec.yaml` is the binding artifact.
 
-name: ethiolink
-description: EthioLink mobile app — beauty appointment booking for Ethiopia.
+name: ethiolink-superseded-placeholder
+description: "Superseded by pubspec.yaml. See mobile/README.md."
 publish_to: "none"
-version: 0.0.1+1
-
-environment:
-  sdk: ">=3.4.0 <4.0.0"
-  flutter: ">=3.22.0"
-
-# Intended runtime dependencies (subject to confirmation in Phase 1):
-#   flutter_riverpod   - state management
-#   go_router          - routing
-#   dio                - HTTP client with interceptors
-#   amplify_flutter    - Cognito integration
-#   amplify_auth_cognito
-#   cached_network_image
-#   intl               - localization, ETB formatting
-#   flutter_localizations
-#   shared_preferences
-#   url_launcher       - Telegram/WhatsApp share-outs
-
-# Intended dev dependencies:
-#   flutter_test
-#   mocktail
-#   build_runner
-#   freezed
-#   json_serializable
-#   very_good_analysis - lint ruleset
