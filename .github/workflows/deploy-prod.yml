@@ -1,0 +1,226 @@
+# EthioLink — prod deploy + smoke test.
+#
+# Triggered ONLY by manual `workflow_dispatch` with a required
+# `tag` input. Three independent gates protect prod:
+#
+#   1. **Tag-shape regex.** The first step rejects any input that
+#      doesn't match `vX.Y.Z`. Operators can't accidentally type a
+#      branch name and end up deploying it.
+#   2. **GitHub Actions `environment: prod`.** The job is paused
+#      pending manual approval from a designated reviewer. The
+#      reviewer sees the requested tag in the dispatch metadata
+#      before approving.
+#   3. **OIDC role trust condition.** The `ethiolink-terraform-deploy-prod`
+#      role's trust policy filters the `sub` claim to
+#      `repo:<owner>/<repo>:ref:refs/tags/v*`. GitHub Actions
+#      only mints a `sub` claim of that shape when the workflow
+#      runs in the context of a tag ref — `actions/checkout@v4`
+#      with `ref: ${{ inputs.tag }}` is what puts the workflow in
+#      that ref. A workflow dispatch that omits the tag input
+#      checkout falls back to the default branch, which produces
+#      `:ref:refs/heads/main` and gets rejected by the role.
+#
+# Any one of the three failing blocks the apply. All three working
+# together means: tag + human approval + tagged ref.
+#
+# Steps mirror `deploy-dev.yml` exactly. The only differences are:
+#   * the role assumed (prod-specific, tag-ref-scoped),
+#   * the env stack directory (`environments/prod`),
+#   * the secret names for the Vite build (`PROD_VITE_*`).
+
+name: deploy-prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to deploy (must match `vX.Y.Z`).'
+        required: true
+        type: string
+
+# Serialize prod deploys: only one apply at a time. `cancel-in-progress: false`
+# is important — a cancelled apply mid-flight would leave Terraform in a
+# weird state.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: build + apply + smoke (prod)
+    runs-on: ubuntu-22.04
+
+    # `environment: prod` is the manual-approval gate. The job is
+    # paused pending approval from a designated reviewer
+    # configured under Settings → Environments → prod.
+    environment:
+      name: prod
+      # Surfaces a clickable link in the deploy summary after
+      # smoke passes. Operators set this via the env-level
+      # Settings → Environments → prod → Environment URL field.
+
+    env:
+      AWS_REGION: eu-west-1
+      TF_VERSION: '1.6.6'
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      NODE_VERSION: '20'
+
+    steps:
+      # -----------------------------------------------------------------
+      # 1. Validate the tag input format BEFORE any AWS calls.
+      # -----------------------------------------------------------------
+
+      - name: Validate tag format
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag }}"
+          if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '${tag}' does not match vX.Y.Z. Refusing to deploy."
+            exit 1
+          fi
+          echo "==> Deploying tag ${tag}"
+
+      # -----------------------------------------------------------------
+      # 2. Checkout at the requested tag. This is what puts the
+      #    workflow run in the tag's ref so the OIDC `sub` claim
+      #    matches the role's trust condition.
+      # -----------------------------------------------------------------
+
+      - name: Checkout at tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # -----------------------------------------------------------------
+      # 3. Assume the prod-specific deploy role.
+      # -----------------------------------------------------------------
+
+      - name: Configure AWS credentials (OIDC, prod role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # Separate role from the dev workflows. Trust condition
+          # filters `sub` to `:ref:refs/tags/v*`.
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ethiolink-terraform-deploy-prod
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-prod-${{ inputs.tag }}-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # -----------------------------------------------------------------
+      # 4. Build the Lambda + admin artifacts.
+      # -----------------------------------------------------------------
+
+      - name: Build Lambda deployment package
+        working-directory: backend
+        run: |
+          npm ci --no-audit --no-fund
+          bash scripts/package.sh
+
+      - name: Build admin SPA
+        working-directory: admin
+        env:
+          # `PROD_VITE_*` secrets, set by the operator after the
+          # first manual prod terraform apply surfaces the Cognito
+          # + API Gateway outputs. Same shape as `DEV_VITE_*` for
+          # `deploy-dev.yml`.
+          VITE_COGNITO_DOMAIN: ${{ secrets.PROD_VITE_COGNITO_DOMAIN }}
+          VITE_COGNITO_ADMIN_CLIENT_ID: ${{ secrets.PROD_VITE_COGNITO_ADMIN_CLIENT_ID }}
+          VITE_ADMIN_REDIRECT_URI: ${{ secrets.PROD_VITE_ADMIN_REDIRECT_URI }}
+          VITE_API_BASE_URL: ${{ secrets.PROD_VITE_API_BASE_URL }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # -----------------------------------------------------------------
+      # 5. Terraform apply against prod.
+      # -----------------------------------------------------------------
+
+      - name: terraform init
+        working-directory: infra/terraform/environments/prod
+        run: terraform init -lockfile=readonly
+
+      - name: terraform apply
+        working-directory: infra/terraform/environments/prod
+        run: terraform apply -auto-approve -input=false
+
+      # -----------------------------------------------------------------
+      # 6. Capture outputs needed for the post-apply steps.
+      # -----------------------------------------------------------------
+
+      - name: Capture Terraform outputs
+        id: tfout
+        working-directory: infra/terraform/environments/prod
+        run: |
+          {
+            echo "invoke_url=$(terraform output -raw api_gateway_invoke_url)"
+            echo "db_migrate_function_name=$(terraform output -raw lambda_db_migrate_function_name)"
+            echo "reminder_function_name=$(terraform output -raw lambda_scheduled_reminders_function_name)"
+            echo "admin_distribution_id=$(terraform output -raw admin_frontend_distribution_id)"
+          } >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------
+      # 7. Apply pending migrations against prod RDS.
+      # -----------------------------------------------------------------
+
+      - name: Invoke migration Lambda
+        run: |
+          set -euo pipefail
+          aws lambda invoke \
+            --function-name "${{ steps.tfout.outputs.db_migrate_function_name }}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{}' \
+            /tmp/migrate-response.json
+          echo "==> Migration response:"
+          jq . /tmp/migrate-response.json
+          status=$(jq -r '.status' /tmp/migrate-response.json)
+          if [[ "$status" != "success" ]]; then
+            echo "::error::Migration runner returned status=$status — failing the deploy."
+            exit 1
+          fi
+
+      # -----------------------------------------------------------------
+      # 8. CloudFront invalidation — only `/index.html` needs it.
+      # -----------------------------------------------------------------
+
+      - name: Invalidate CloudFront /index.html
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tfout.outputs.admin_distribution_id }}" \
+            --paths "/index.html" \
+            --no-cli-pager > /dev/null
+          echo "==> CloudFront invalidation submitted for /index.html"
+
+      # -----------------------------------------------------------------
+      # 9. Smoke test against the deployed prod surface.
+      # -----------------------------------------------------------------
+
+      - name: Smoke test
+        env:
+          INVOKE_URL: ${{ steps.tfout.outputs.invoke_url }}
+          REMINDER_FUNCTION_NAME: ${{ steps.tfout.outputs.reminder_function_name }}
+        run: bash backend/scripts/smoke.sh
+
+      - name: Deploy summary
+        if: always()
+        run: |
+          {
+            echo "## Prod deploy"
+            echo
+            echo "* Tag: \`${{ inputs.tag }}\`"
+            echo "* Invoke URL: ${{ steps.tfout.outputs.invoke_url }}"
+            echo "* Outcome: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"

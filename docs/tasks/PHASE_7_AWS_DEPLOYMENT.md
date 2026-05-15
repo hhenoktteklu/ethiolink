@@ -41,7 +41,7 @@ Out of scope:
 - [ ] Prod environment provisioned with Multi-AZ RDS, RDS Proxy, WAF. *(Modules wired into `infra/terraform/environments/prod/main.tf`; first apply pending operator wiring of `admin_custom_domain` + `admin_acm_certificate_arn`.)*
 - [ ] GitHub Actions OIDC role assumes a least-privilege Terraform role. *(OIDC + role exist via the bootstrap; the role currently carries `AdministratorAccess` as a deliberate temporary choice — tighten once a clean dev apply has been captured in CloudTrail.)*
 - [x] `deploy-dev.yml` deploys Lambdas and runs a smoke test on push to `main`. *(`.github/workflows/deploy-dev.yml` + `backend/scripts/smoke.sh`.)*
-- [ ] `deploy-prod.yml` requires manual approval and a `vX.Y.Z` tag. *(Pending follow-up commit.)*
+- [x] `deploy-prod.yml` requires manual approval and a `vX.Y.Z` tag. *(Phase 8 commit `deploy-prod.yml` workflow + `ethiolink-terraform-deploy-prod` role in the bootstrap stack with `sub` claim filter `:ref:refs/tags/v*`. Three independent gates: tag regex + `environment: prod` approval + OIDC trust filter.)*
 - [x] CloudWatch dashboards exist for the four resource groups.
 - [x] Alarms send to a verified SNS topic with an on-call email. *(SNS topic + subscription created; the email confirmation link is a manual operator step.)*
 

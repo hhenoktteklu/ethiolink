@@ -89,13 +89,15 @@ data "aws_partition" "current" {}
 locals {
   # Shared across the state bucket and lock table. Single bucket
   # holds every environment's state at `env/<name>/terraform.tfstate`.
-  state_bucket_name = "${var.name_prefix}-terraform-state"
-  lock_table_name   = "${var.name_prefix}-terraform-locks"
-  deploy_role_name  = "${var.name_prefix}-terraform-deploy"
+  state_bucket_name     = "${var.name_prefix}-terraform-state"
+  lock_table_name       = "${var.name_prefix}-terraform-locks"
+  deploy_role_name      = "${var.name_prefix}-terraform-deploy"
+  deploy_prod_role_name = "${var.name_prefix}-terraform-deploy-prod"
 
-  github_oidc_url       = "https://token.actions.githubusercontent.com"
-  github_oidc_audience  = "sts.amazonaws.com"
-  github_repository_sub = "repo:${var.github_owner}/${var.github_repository}:*"
+  github_oidc_url            = "https://token.actions.githubusercontent.com"
+  github_oidc_audience       = "sts.amazonaws.com"
+  github_repository_sub      = "repo:${var.github_owner}/${var.github_repository}:*"
+  github_repository_tag_sub  = "repo:${var.github_owner}/${var.github_repository}:ref:refs/tags/v*"
 }
 
 # -----------------------------------------------------------------------------
@@ -265,5 +267,78 @@ resource "aws_iam_role" "terraform_deploy" {
 # a clean dev apply.
 resource "aws_iam_role_policy_attachment" "terraform_deploy_admin" {
   role       = aws_iam_role.terraform_deploy.name
+  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
+}
+
+# -----------------------------------------------------------------------------
+# Production deploy role — assumed by `deploy-prod.yml` only.
+#
+# The dev role (above) trusts every ref in the repository (`:*`)
+# because the dev `terraform-plan` + `deploy-dev` workflows fire
+# on PRs and `main` pushes respectively. The prod role tightens
+# this to TAGGED PUSHES ONLY (`refs/tags/v*`). GitHub Actions
+# only mints an OIDC token whose `sub` claim matches `refs/tags/<TAG>`
+# when the workflow itself is triggered by a tag — the
+# `deploy-prod.yml` workflow uses `workflow_dispatch` with a tag
+# input and then checks out that tag via `actions/checkout@v4`,
+# which means the workflow runs in the context of the tag's
+# ref. The combination of:
+#
+#   * workflow_dispatch + required tag input
+#   * GitHub Actions `environment: prod` for manual approval
+#   * OIDC `sub` claim filter `:ref:refs/tags/v*`
+#
+# means a prod apply requires (a) a tag, (b) a human approval, and
+# (c) the tag matches the `v<semver>` pattern. Three independent
+# gates, any one of which alone fails the apply.
+#
+# Permissions: same `AdministratorAccess` as the dev role for now —
+# the prod stack creates the same shape of resources as dev, so
+# the call set is identical. Tightening BOTH roles to per-service
+# least-privilege policies is the next Phase 8 commit; deferring
+# it here keeps this commit single-focus.
+# -----------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "github_assume_prod" {
+  statement {
+    sid     = "GitHubActionsOIDCAssumeProd"
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:aud"
+      values   = [local.github_oidc_audience]
+    }
+
+    # Tag-ref filter: the workflow's `sub` claim must look like
+    # `repo:<owner>/<repo>:ref:refs/tags/v<semver>`. Push-to-`main`
+    # workflows produce `:ref:refs/heads/main` and are rejected.
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = [local.github_repository_tag_sub]
+    }
+  }
+}
+
+resource "aws_iam_role" "terraform_deploy_prod" {
+  name               = local.deploy_prod_role_name
+  assume_role_policy = data.aws_iam_policy_document.github_assume_prod.json
+
+  description = "Assumed by `deploy-prod.yml` from a `vX.Y.Z` tag ref in ${var.github_owner}/${var.github_repository}. Trust condition restricts the OIDC `sub` claim to `:ref:refs/tags/v*` so push-to-main runs cannot assume this role. Permissions are deliberately broad during bootstrap; the follow-up commit tightens to per-service least-privilege."
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "terraform_deploy_prod_admin" {
+  role       = aws_iam_role.terraform_deploy_prod.name
   policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/AdministratorAccess"
 }

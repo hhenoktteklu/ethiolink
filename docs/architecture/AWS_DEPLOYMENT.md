@@ -340,7 +340,7 @@ GitHub Actions workflows:
 - `lint-test.yml` on every PR — runs ESLint, unit tests for backend, Flutter analyze + test, React lint + test. *(Phase 8 follow-up.)*
 - `terraform-plan.yml` on PRs touching `infra/` — runs `terraform plan` against dev and posts the plan. *(Lives in the repo; activated by the bootstrap commit.)*
 - `deploy-dev.yml` on merge to `main` — builds the Lambda zip, builds the admin SPA, applies dev Terraform, invokes the migration runner Lambda, invalidates the CloudFront `/index.html`, then runs the smoke test. *(Lives in the repo.)*
-- `deploy-prod.yml` on manual dispatch with a release tag — same as dev applied to prod with an approval gate. *(Phase 7 / Phase 8 follow-up; intentionally separate role with tighter ref scoping.)*
+- `deploy-prod.yml` on manual dispatch with a `vX.Y.Z` tag — same step sequence as dev applied to prod with three independent gates (tag-shape regex, GitHub Actions `environment: prod` manual approval, OIDC role trust-condition filter on `:ref:refs/tags/v*`). Uses a separate `ethiolink-terraform-deploy-prod` IAM role.
 
 ### `deploy-dev.yml` flow
 
@@ -366,8 +366,33 @@ Set under **Settings → Secrets and variables → Actions → Repository secret
 | `DEV_VITE_COGNITO_ADMIN_CLIENT_ID`    | From `terraform output cognito_admin_app_client_id`.                                         |
 | `DEV_VITE_ADMIN_REDIRECT_URI`         | The CloudFront URL with `/login` appended (e.g. `https://<id>.cloudfront.net/login`).        |
 | `DEV_VITE_API_BASE_URL`               | From `terraform output api_gateway_invoke_url`.                                              |
+| `PROD_VITE_COGNITO_DOMAIN`            | Same shape as the dev secret, sourced from the prod env's `terraform output`.                |
+| `PROD_VITE_COGNITO_ADMIN_CLIENT_ID`   | From the prod env's `terraform output cognito_admin_app_client_id`.                          |
+| `PROD_VITE_ADMIN_REDIRECT_URI`        | `https://admin.ethiolink.app/login` once the alias is wired, else the CloudFront URL.        |
+| `PROD_VITE_API_BASE_URL`              | From the prod env's `terraform output api_gateway_invoke_url`.                               |
 
 The `VITE_*` values come from a previous Terraform apply — the operator captures them once after the initial bootstrap and stores them as secrets. CI bakes them into every subsequent admin bundle.
+
+### `deploy-prod.yml` flow
+
+Triggered manually via **Actions → deploy-prod → Run workflow** with a required `tag` input. The workflow validates the tag matches `vX.Y.Z` before any AWS calls and refuses to proceed otherwise. After validation:
+
+| Step                                  | Notes                                                                                              |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Validate tag format                   | Regex `^v[0-9]+\.[0-9]+\.[0-9]+$`. Fails fast on bad input.                                          |
+| Checkout at the tag                   | `actions/checkout@v4` with `ref: ${{ inputs.tag }}` — puts the workflow in the tag's ref, which is what the OIDC trust condition requires. |
+| Configure AWS via OIDC                | Assumes `ethiolink-terraform-deploy-prod`. The role's trust policy filters `sub` to `:ref:refs/tags/v*` — push-to-main runs are rejected. |
+| Build Lambda + admin                  | Same scripts as dev; admin uses `PROD_VITE_*` secrets.                                              |
+| `terraform init` + `apply`            | Against `infra/terraform/environments/prod`.                                                       |
+| Invoke migration Lambda               | Against the prod RDS via the migration runner; fails the deploy on `status != "success"`.          |
+| CloudFront `/index.html` invalidation | Same as dev.                                                                                       |
+| Smoke test                            | `backend/scripts/smoke.sh` against the prod invoke URL + reminder function name.                   |
+
+Three independent gates protect prod: (1) the tag-shape regex inside the workflow, (2) the GitHub Actions `environment: prod` manual-approval prompt that pauses the job pending a designated reviewer, (3) the OIDC `sub` claim filter on the deploy role. Any one of the three failing blocks the apply.
+
+### Tightening the prod role
+
+The `ethiolink-terraform-deploy-prod` role currently carries `AdministratorAccess` as a deliberate temporary choice. The follow-up commit captures the call set from the first clean prod apply via CloudTrail and replaces the managed-policy attachment with a generated least-privilege policy. The dev role gets the same treatment in the same commit.
 
 ### Smoke test
 

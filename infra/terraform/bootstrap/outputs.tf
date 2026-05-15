@@ -26,8 +26,13 @@ output "github_oidc_provider_arn" {
 }
 
 output "terraform_deploy_role_arn" {
-  description = "ARN of the IAM role assumed by GitHub Actions workflows. Pass this to `aws-actions/configure-aws-credentials@v4` via the `role-to-assume` input. The current role carries AdministratorAccess — temporarily, while Phase 7 modules land. The follow-up commit tightens this once the dev environment has applied cleanly."
+  description = "ARN of the IAM role assumed by `terraform-plan.yml` + `deploy-dev.yml`. Trust condition: `repo:<owner>/<repo>:*` (any ref). Pass this to `aws-actions/configure-aws-credentials@v4` via the `role-to-assume` input. The current role carries AdministratorAccess — temporarily, while Phase 7 + early Phase 8 modules land."
   value       = aws_iam_role.terraform_deploy.arn
+}
+
+output "terraform_deploy_prod_role_arn" {
+  description = "ARN of the IAM role assumed by `deploy-prod.yml` only. Trust condition: `repo:<owner>/<repo>:ref:refs/tags/v*` — push-to-main runs cannot assume it. The `deploy-prod.yml` workflow's `role-to-assume` input takes this ARN; pair with the `environment: prod` manual-approval gate inside the workflow for defense in depth."
+  value       = aws_iam_role.terraform_deploy_prod.arn
 }
 
 output "region" {
