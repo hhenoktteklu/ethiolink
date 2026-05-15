@@ -381,26 +381,33 @@ Provisioned by `infra/terraform/modules/cloudwatch/`. The integration point that
 
 **Alarms** (every threshold is variabled so a real on-call event can tune without a module change):
 
-| Alarm                              | Source                          | Default threshold           | Rationale                                                                              |
-| ---------------------------------- | ------------------------------- | --------------------------- | -------------------------------------------------------------------------------------- |
-| API Gateway 5xx                    | `AWS/ApiGateway` `5XXError`     | ≥ 5 per 5 min               | Catches Lambda failures that surface to clients as 5xx.                                |
-| Lambda errors (aggregate)          | `AWS/Lambda` `Errors` (no dim)  | ≥ 5 per 5 min               | One alarm for "something is wrong"; the dashboard's per-function widgets are drilldown. |
-| RDS CPU                            | `AWS/RDS` `CPUUtilization`      | > 80% for 2× 5 min          | Usually the precursor to connection exhaustion.                                        |
-| RDS connections                    | `AWS/RDS` `DatabaseConnections` | ≥ 80 for 2× 5 min           | Approaches Postgres `max_connections = 100`; tune up when RDS Proxy multiplexes more.  |
-| RDS free storage                   | `AWS/RDS` `FreeStorageSpace`    | < 5 GiB                     | Storage autoscaling should already be growing; this is the fallback alarm.             |
-| EventBridge `FailedInvocations`    | `AWS/Events` `FailedInvocations` | ≥ 1 per 5 min              | Any single failure on the reminder rule is worth investigating.                        |
-| WAF blocked requests               | `AWS/WAFV2` `BlockedRequests`   | ≥ 100 per 5 min             | Real attack (rules working) or managed-rule false-positive (operator tunes).           |
+| Alarm                                            | Source                            | Default threshold           | Rationale                                                                              |
+| ------------------------------------------------ | --------------------------------- | --------------------------- | -------------------------------------------------------------------------------------- |
+| API Gateway 5xx                                  | `AWS/ApiGateway` `5XXError`       | ≥ 5 per 5 min               | Catches Lambda failures that surface to clients as 5xx.                                |
+| Lambda errors (aggregate)                        | `AWS/Lambda` `Errors` (no dim)    | ≥ 5 per 5 min               | One alarm for "something is wrong"; the dashboard's per-function widgets are drilldown. |
+| RDS CPU                                          | `AWS/RDS` `CPUUtilization`        | > 80% for 2× 5 min          | Usually the precursor to connection exhaustion.                                        |
+| RDS connections                                  | `AWS/RDS` `DatabaseConnections`   | ≥ 80 for 2× 5 min           | Approaches Postgres `max_connections = 100`; tune up when RDS Proxy multiplexes more.  |
+| RDS free storage                                 | `AWS/RDS` `FreeStorageSpace`      | < 5 GiB                     | Storage autoscaling should already be growing; this is the fallback alarm.             |
+| EventBridge `FailedInvocations`                  | `AWS/Events` `FailedInvocations`  | ≥ 1 per 5 min               | Any single failure on the reminder rule is worth investigating.                        |
+| WAF blocked requests                             | `AWS/WAFV2` `BlockedRequests`     | ≥ 100 per 5 min             | Real attack (rules working) or managed-rule false-positive (operator tunes).           |
+| **SLO** booking-creation errors *(Phase 8)*       | `AWS/Lambda` `Errors{appointments-create}` | ≥ 3 per 5 min        | Fast-burn proxy for the booking-creation SLO (99.5% / 30 days). See `docs/operations/SLOs.md` §1. |
+| **SLO** browse-latency p95 *(Phase 8)*            | `AWS/Lambda` `Duration{businesses-list}` p95 | > 800 ms for 2× 5 min | Fast-burn proxy for the browse-latency SLO (p95 < 800 ms / 7 days). See `docs/operations/SLOs.md` §2. |
 
-**Dashboards** (four total):
+The two SLO alarms are gated on the underlying function existing in the lambda module's `function_names` output — a renamed handler skips the alarm rather than blocking the apply. The `slo_alarm_names` output exposes the subset so the operator can mute them independently during a planned load test.
 
-| Dashboard             | Widgets                                                                                                                |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `${env}-api-gateway`  | Request volume + 4xx / 5xx counts; p50 / p95 latency.                                                                  |
-| `${env}-lambda`       | Aggregate errors + invocations + throttles; per-function error counts; per-function p95 duration.                      |
-| `${env}-rds`          | CPU + connections (left / right axes); free storage; read/write IOPS + latency.                                        |
-| `${env}-waf-eventbridge` | WAF allowed / blocked counts; EventBridge `Invocations` + `FailedInvocations` on the reminder rule.                 |
+**Dashboards** (five total — Phase 8 adds `${env}-endpoints`):
 
-**Lambda alarm posture.** One aggregate alarm watches namespace-wide Lambda errors rather than 49 per-function alarms — the cost (~$5/env/month for 49 alarms) and notification noise (49 separate SNS pings on a shared-dependency outage) outweigh the per-function precision for MVP. The Lambda dashboard's per-function widgets are the drilldown when the aggregate alarm fires. Per-function alarms on a handful of critical handlers (booking lifecycle, scheduled-reminder) are a Phase 8 follow-up.
+| Dashboard                  | Widgets                                                                                                                                                                                                                                            |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `${env}-api-gateway`       | Request volume + 4xx / 5xx counts; p50 / p95 latency.                                                                                                                                                                                              |
+| `${env}-lambda`            | Aggregate errors + invocations + throttles; per-function error counts; per-function p95 duration.                                                                                                                                                  |
+| `${env}-rds`               | CPU + connections (left / right axes); free storage; read/write IOPS + latency.                                                                                                                                                                    |
+| `${env}-waf-eventbridge`   | WAF allowed / blocked counts; EventBridge `Invocations` + `FailedInvocations` on the reminder rule.                                                                                                                                                |
+| `${env}-endpoints` *(Phase 8)* | Four row-pairs (errors + p95 latency) keyed by route family: **Browse** (`categories-list`, `businesses-list`, `businesses-get`, `services-list`, `staff-list`, `reviews-list-for-business`, `availability-get`, `availability-slots`), **Appointments** (every `appointments-*` handler — 9 functions), **Admin** (every `admin-*` handler — derived by prefix scan, 13 functions today), **Auth-sync** (`auth-sync`, `me-get`, `me-patch`). The Browse row's p95 widget carries a red annotation at the 800 ms SLO target. Maps cleanly onto the SLOs in `docs/operations/SLOs.md`. |
+
+**Lambda alarm posture.** One aggregate alarm watches namespace-wide Lambda errors rather than 49 per-function alarms — the cost (~$5/env/month for 49 alarms) and notification noise (49 separate SNS pings on a shared-dependency outage) outweigh the per-function precision for MVP. The Lambda dashboard's per-function widgets are the drilldown when the aggregate alarm fires. Phase 8 adds **two** per-function alarms (on `appointments-create` and `businesses-list`) — only because they're the binding SLO indicators, not as a general posture shift.
+
+**SLO surface.** `docs/operations/SLOs.md` is the authoritative source for SLO definitions, error-budget policy, and the operator review cadence. The two SLO-burn CloudWatch alarms above are the fast-burn proxies; the long-window numbers (99.5% / 30 days for booking creation, p95 < 800 ms / 7 days for browse, 99.9% / 30 days for categories, 99% / 30 days for reminders) are the post-hoc reckoning rather than the alerting surface.
 
 ### IAM
 

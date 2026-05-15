@@ -118,6 +118,28 @@ variable "waf_blocked_requests_threshold" {
   default     = 100
 }
 
+# -----------------------------------------------------------------------------
+# Phase 8 — SLO-burn alarm thresholds.
+#
+# Both alarms below are fast-burn proxies for the long-window SLOs
+# in `docs/operations/SLOs.md`. They fire well before the actual
+# 30-day budget is in danger so the operator gets a real-time
+# signal; the long-window SLO numbers are the post-hoc reckoning
+# rather than the alerting surface.
+# -----------------------------------------------------------------------------
+
+variable "slo_booking_creation_errors_threshold" {
+  description = "Lambda `Errors` count on the `appointments-create` function per 5 minutes before the booking-creation SLO-burn alarm fires. Default 3 — at ~10 RPS sustained booking attempts, 3 errors / 5 min is ~1% error rate, twice the 0.5% SLO miss rate. See `docs/operations/SLOs.md` §1."
+  type        = number
+  default     = 3
+}
+
+variable "slo_browse_latency_p95_ms" {
+  description = "Lambda `Duration` p95 (milliseconds) on the `businesses-list` function above which the browse-latency SLO-burn alarm fires. Default 800 — same value as the SLO target so a sustained breach (2 consecutive 5-min windows) trips the alarm before the rolling-7-day p95 itself slips. See `docs/operations/SLOs.md` §2."
+  type        = number
+  default     = 800
+}
+
 variable "log_retention_days" {
   description = "Days to retain alarm SNS delivery logs (when CloudTrail captures them later). Not currently used; reserved for a future expansion that also retains SNS subscription event logs."
   type        = number

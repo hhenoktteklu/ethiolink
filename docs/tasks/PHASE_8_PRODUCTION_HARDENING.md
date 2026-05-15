@@ -22,8 +22,8 @@ In scope:
 - Observability gaps:
   - Structured request logs with correlation ids. *(Phase 8 commit "observability tracing": `backend/shared/observability/correlationId.ts` ships the ALS scope + `getCurrentRequestContextRecord` adapter. Logger picks up the dynamic context via the new `contextProvider` hook on `LoggerOptions`. The mechanical per-handler refactor adopting `withRequestContext` is a small follow-up.)*
   - X-Ray tracing on every Lambda. *(Phase 8 commit "observability tracing": Terraform Lambda module sets `tracing_config.mode = "Active"` on every function; baseline IAM policy adds `xray:PutTraceSegments` + `xray:PutTelemetryRecords`. Lambda-level traces light up immediately. SDK-call sub-segments via `aws-xray-sdk-core` + `captureAwsClient` are deferred to a follow-up.)*
-  - Per-endpoint latency and error dashboards.
-  - SLO definitions: 99.5% availability on booking creation, p95 < 800ms on browse.
+  - Per-endpoint latency and error dashboards. *(Phase 8 commit "add SLOs and endpoint dashboards": new `${env}-endpoints` CloudWatch dashboard with four row-pairs — Browse / Appointments / Admin / Auth-sync — each row carrying an errors widget + a Lambda p95-duration widget. The Browse latency widget shows a red annotation at the 800 ms SLO target.)*
+  - SLO definitions: 99.5% availability on booking creation, p95 < 800ms on browse. *(Phase 8 commit "add SLOs and endpoint dashboards": full SLO doc at `docs/operations/SLOs.md` covering booking-creation availability (99.5% / 30 days), browse-latency p95 (<800 ms / 7 days), categories availability (99.9% / 30 days), and reminder success (99% / 30 days). Error-budget policy + monthly + quarterly review cadence defined. Two CloudWatch fast-burn alarms wired — `slo-booking-creation-errors` + `slo-browse-latency-p95`.)*
 
 Out of scope:
 
@@ -51,7 +51,7 @@ Out of scope:
 - [ ] Security review checklist completed and signed off. *(Engineering sign-off shipped in `docs/operations/SECURITY_REVIEW.md` alongside the Phase 8 "add security hardening review" commit. Ops + external security sign-offs are the post-prod-deploy items still to schedule — recorded inline in the doc.)*
 - [ ] All Lambdas emit structured logs with correlation ids.
 - [ ] X-Ray enabled across all Lambdas.
-- [ ] SLO dashboards live and pinned in CloudWatch.
+- [ ] SLO dashboards live and pinned in CloudWatch. *(Dashboards + SLO-burn alarms shipped — Phase 8 commit "add SLOs and endpoint dashboards". Pinning the `${env}-endpoints` dashboard in the operator's console is the manual step still to do post-apply.)*
 
 ## Acceptance criteria
 
