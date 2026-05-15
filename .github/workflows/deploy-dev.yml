@@ -1,0 +1,181 @@
+# EthioLink — dev deploy + smoke test.
+#
+# Runs on every push to `main` that touches the application code
+# or infrastructure. Steps:
+#
+#   1. Build the Lambda deployment package (`backend/scripts/package.sh`).
+#   2. Build the admin SPA (`cd admin && npm run build`). The
+#      `VITE_*` env vars come from GitHub Actions secrets, set by
+#      the operator after the first manual `terraform apply` so
+#      Cognito + API Gateway identifiers are known.
+#   3. `terraform init && terraform apply -auto-approve` against
+#      `infra/terraform/environments/dev` — the Terraform deploy
+#      role (created by the bootstrap stack) has the permissions
+#      needed to apply every Phase 7 module.
+#   4. Invoke the `maintenance-db-migrate` Lambda to apply any
+#      pending migrations against the dev RDS instance.
+#   5. Run `backend/scripts/smoke.sh` against the deployed API
+#      and the scheduled-reminder Lambda to assert the deploy
+#      reached steady-state.
+#
+# Why no prod deploy here:
+#   Prod ships through a separate `deploy-prod.yml` (future
+#   commit) gated on a `vX.Y.Z` tag + a manual-approval
+#   environment. The role assumed by this dev workflow is
+#   permissive enough to clobber dev; prod needs the tighter,
+#   ref-scoped role documented in `AWS_DEPLOYMENT.md` "Tightening
+#   the deploy-role policy".
+#
+# Why both `backend/**` and `admin/**` triggers:
+#   The admin SPA bundle lands in S3+CloudFront via Terraform,
+#   so changes to `admin/` need a re-apply (the `aws_s3_object`
+#   resources for the admin bundle re-upload on file hash change).
+
+name: deploy-dev
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'admin/**'
+      - 'infra/**'
+      - '.github/workflows/deploy-dev.yml'
+      - '.github/workflows/terraform-plan.yml'
+
+# Serialize deploys: only one apply against dev at a time.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: build + apply + smoke
+    runs-on: ubuntu-22.04
+
+    env:
+      AWS_REGION: eu-west-1
+      TF_VERSION: '1.6.6'
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      NODE_VERSION: '20'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ethiolink-terraform-deploy
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-deploy-dev-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      # -----------------------------------------------------------------
+      # Build steps — both produce artifacts referenced by Terraform.
+      # -----------------------------------------------------------------
+
+      - name: Build Lambda deployment package
+        working-directory: backend
+        run: |
+          npm ci --no-audit --no-fund
+          bash scripts/package.sh
+
+      - name: Build admin SPA
+        working-directory: admin
+        env:
+          # VITE_* values are baked into the bundle at build time
+          # — they live as GitHub Actions secrets, set by the
+          # operator after the first manual terraform apply
+          # surfaces the Cognito + API Gateway outputs.
+          VITE_COGNITO_DOMAIN: ${{ secrets.DEV_VITE_COGNITO_DOMAIN }}
+          VITE_COGNITO_ADMIN_CLIENT_ID: ${{ secrets.DEV_VITE_COGNITO_ADMIN_CLIENT_ID }}
+          VITE_ADMIN_REDIRECT_URI: ${{ secrets.DEV_VITE_ADMIN_REDIRECT_URI }}
+          VITE_API_BASE_URL: ${{ secrets.DEV_VITE_API_BASE_URL }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      # -----------------------------------------------------------------
+      # Terraform apply against dev.
+      # -----------------------------------------------------------------
+
+      - name: terraform init
+        working-directory: infra/terraform/environments/dev
+        run: terraform init -lockfile=readonly
+
+      - name: terraform apply
+        working-directory: infra/terraform/environments/dev
+        run: terraform apply -auto-approve -input=false
+
+      # -----------------------------------------------------------------
+      # Capture outputs needed by the post-deploy steps.
+      # -----------------------------------------------------------------
+
+      - name: Capture Terraform outputs
+        id: tfout
+        working-directory: infra/terraform/environments/dev
+        run: |
+          {
+            echo "invoke_url=$(terraform output -raw api_gateway_invoke_url)"
+            echo "db_migrate_function_name=$(terraform output -raw lambda_db_migrate_function_name)"
+            echo "reminder_function_name=$(terraform output -raw lambda_scheduled_reminders_function_name)"
+            echo "admin_distribution_id=$(terraform output -raw admin_frontend_distribution_id)"
+          } >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------
+      # Apply pending migrations.
+      # -----------------------------------------------------------------
+
+      - name: Invoke migration Lambda
+        run: |
+          set -euo pipefail
+          aws lambda invoke \
+            --function-name "${{ steps.tfout.outputs.db_migrate_function_name }}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{}' \
+            /tmp/migrate-response.json
+          echo "==> Migration response:"
+          jq . /tmp/migrate-response.json
+          status=$(jq -r '.status' /tmp/migrate-response.json)
+          if [[ "$status" != "success" ]]; then
+            echo "Migration runner returned status=$status — failing the deploy."
+            exit 1
+          fi
+
+      # -----------------------------------------------------------------
+      # CloudFront invalidation — only `/index.html` needs it.
+      # -----------------------------------------------------------------
+
+      - name: Invalidate CloudFront /index.html
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ steps.tfout.outputs.admin_distribution_id }}" \
+            --paths "/index.html" \
+            --no-cli-pager > /dev/null
+          echo "==> CloudFront invalidation submitted for /index.html"
+
+      # -----------------------------------------------------------------
+      # Smoke test.
+      # -----------------------------------------------------------------
+
+      - name: Smoke test
+        env:
+          INVOKE_URL: ${{ steps.tfout.outputs.invoke_url }}
+          REMINDER_FUNCTION_NAME: ${{ steps.tfout.outputs.reminder_function_name }}
+        run: bash backend/scripts/smoke.sh

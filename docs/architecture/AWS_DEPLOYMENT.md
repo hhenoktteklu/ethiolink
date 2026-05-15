@@ -333,14 +333,57 @@ Provisioned by `infra/terraform/modules/cloudwatch/`. The integration point that
 
 Application config is provided to Lambdas via environment variables sourced from Terraform variables and Secrets Manager. The application reads its config from a single `loadConfig()` function in `backend/shared/config/` that validates required keys at startup. No hard-coded environment values anywhere in the code.
 
-## Deployment pipeline (target state, built out in Phase 7)
+## Deployment pipeline
 
 GitHub Actions workflows:
 
-- `lint-test.yml` on every PR — runs ESLint, unit tests for backend, Flutter analyze + test, React lint + test.
-- `terraform-plan.yml` on PRs touching `infra/` — runs `terraform plan` against dev and posts the plan.
-- `deploy-dev.yml` on merge to `main` — `terraform apply` to dev, deploy Lambdas, run smoke tests.
-- `deploy-prod.yml` on manual dispatch with a release tag — same as dev, applied to prod with an approval gate.
+- `lint-test.yml` on every PR — runs ESLint, unit tests for backend, Flutter analyze + test, React lint + test. *(Phase 8 follow-up.)*
+- `terraform-plan.yml` on PRs touching `infra/` — runs `terraform plan` against dev and posts the plan. *(Lives in the repo; activated by the bootstrap commit.)*
+- `deploy-dev.yml` on merge to `main` — builds the Lambda zip, builds the admin SPA, applies dev Terraform, invokes the migration runner Lambda, invalidates the CloudFront `/index.html`, then runs the smoke test. *(Lives in the repo.)*
+- `deploy-prod.yml` on manual dispatch with a release tag — same as dev applied to prod with an approval gate. *(Phase 7 / Phase 8 follow-up; intentionally separate role with tighter ref scoping.)*
+
+### `deploy-dev.yml` flow
+
+| Step                                | Notes                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Checkout + Node 20 + Terraform 1.6.6 | Standard CI runner setup.                                                                      |
+| Configure AWS via OIDC              | Assumes the `ethiolink-terraform-deploy` role created by the bootstrap stack.                  |
+| Build Lambda package                | `backend/scripts/package.sh` → `backend/dist/lambda.zip`.                                       |
+| Build admin SPA                     | `cd admin && npm ci && npm run build`. `VITE_*` baked in from GitHub Actions secrets (see below). |
+| `terraform init` + `apply`          | Against `infra/terraform/environments/dev` with `-auto-approve`.                               |
+| Invoke migration Lambda             | `aws lambda invoke` on `maintenance-db-migrate`. Fails the deploy if `status != "success"`.    |
+| CloudFront invalidation             | `aws cloudfront create-invalidation --paths "/index.html"`.                                     |
+| Smoke test                          | `backend/scripts/smoke.sh` — three assertions, fails the deploy on any miss.                   |
+
+### Required GitHub Actions secrets
+
+Set under **Settings → Secrets and variables → Actions → Repository secrets**:
+
+| Secret                                | Value                                                                                       |
+| ------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `AWS_ACCOUNT_ID`                      | 12-digit AWS account id (from the bootstrap apply).                                          |
+| `DEV_VITE_COGNITO_DOMAIN`             | `https://<hosted-ui-domain>.auth.eu-west-1.amazoncognito.com` (from `terraform output cognito_hosted_ui_domain`). |
+| `DEV_VITE_COGNITO_ADMIN_CLIENT_ID`    | From `terraform output cognito_admin_app_client_id`.                                         |
+| `DEV_VITE_ADMIN_REDIRECT_URI`         | The CloudFront URL with `/login` appended (e.g. `https://<id>.cloudfront.net/login`).        |
+| `DEV_VITE_API_BASE_URL`               | From `terraform output api_gateway_invoke_url`.                                              |
+
+The `VITE_*` values come from a previous Terraform apply — the operator captures them once after the initial bootstrap and stores them as secrets. CI bakes them into every subsequent admin bundle.
+
+### Smoke test
+
+`backend/scripts/smoke.sh` is the post-deploy validation surface. Three assertions:
+
+1. `GET ${INVOKE_URL}/v1/categories` returns HTTP 200 with a JSON `items` array — exercises API Gateway routing, the categories Lambda, RDS connectivity, and the seed data.
+2. `POST ${INVOKE_URL}/v1/auth/sync` without an `Authorization` header returns HTTP 401 — asserts the Cognito authorizer is wired correctly.
+3. `aws lambda invoke` against the scheduled-reminder Lambda returns a JSON response with `scanned` / `sent` / `skipped` / `failed` keys — validates the scheduled lambda's cold-start + DB connection + return shape without waiting for the 15-minute cron.
+
+A non-zero exit fails the deploy workflow. Operators can invoke the same script locally:
+
+```bash
+INVOKE_URL=https://<api-id>.execute-api.eu-west-1.amazonaws.com/dev \
+REMINDER_FUNCTION_NAME=ethiolink-dev-scheduled-send-reminders \
+    bash backend/scripts/smoke.sh
+```
 
 ## Disaster recovery (target state, Phase 8)
 

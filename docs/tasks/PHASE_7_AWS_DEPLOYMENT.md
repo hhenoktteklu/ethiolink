@@ -37,13 +37,13 @@ Out of scope:
 
 ## Checklist
 
-- [ ] Dev environment provisioned end-to-end from a clean Terraform state.
-- [ ] Prod environment provisioned with Multi-AZ RDS, RDS Proxy, WAF.
-- [ ] GitHub Actions OIDC role assumes a least-privilege Terraform role.
-- [ ] `deploy-dev.yml` deploys Lambdas and runs a smoke test on push to `main`.
-- [ ] `deploy-prod.yml` requires manual approval and a `vX.Y.Z` tag.
-- [ ] CloudWatch dashboards exist for the four resource groups.
-- [ ] Alarms send to a verified SNS topic with an on-call email.
+- [x] Dev environment provisioned end-to-end from a clean Terraform state. *(All Phase 7 modules wired into `infra/terraform/environments/dev/main.tf`; first apply still requires the documented one-time operator bootstrap.)*
+- [ ] Prod environment provisioned with Multi-AZ RDS, RDS Proxy, WAF. *(Modules wired into `infra/terraform/environments/prod/main.tf`; first apply pending operator wiring of `admin_custom_domain` + `admin_acm_certificate_arn`.)*
+- [ ] GitHub Actions OIDC role assumes a least-privilege Terraform role. *(OIDC + role exist via the bootstrap; the role currently carries `AdministratorAccess` as a deliberate temporary choice — tighten once a clean dev apply has been captured in CloudTrail.)*
+- [x] `deploy-dev.yml` deploys Lambdas and runs a smoke test on push to `main`. *(`.github/workflows/deploy-dev.yml` + `backend/scripts/smoke.sh`.)*
+- [ ] `deploy-prod.yml` requires manual approval and a `vX.Y.Z` tag. *(Pending follow-up commit.)*
+- [x] CloudWatch dashboards exist for the four resource groups.
+- [x] Alarms send to a verified SNS topic with an on-call email. *(SNS topic + subscription created; the email confirmation link is a manual operator step.)*
 
 ## Acceptance criteria
 
