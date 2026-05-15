@@ -19,6 +19,17 @@ const PATCH_KEYS: ReadonlyArray<keyof UpdateStaffFields> = ['displayName', 'role
 export class InMemoryStaffRepository implements StaffRepository {
     private readonly rowsById = new Map<string, StaffMember>();
 
+    /**
+     * Test seed: bypass `insert` to fix the id / timestamps / isActive.
+     * Useful when a test needs a deterministic `createdAt` (e.g. asserting
+     * the `createdAt ASC, id ASC` listing order — two back-to-back
+     * `insert` calls can collapse onto the same millisecond and then
+     * fall through to the random-UUID tiebreaker).
+     */
+    seed(staff: StaffMember): void {
+        this.rowsById.set(staff.id, Object.freeze({ ...staff }));
+    }
+
     size(): number {
         return this.rowsById.size;
     }

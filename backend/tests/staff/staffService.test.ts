@@ -256,25 +256,44 @@ describe('StaffService.deactivate', () => {
 
 describe('StaffService.listActiveForBusiness', () => {
     it('returns active staff in created-order for the business', async () => {
-        const { service, businessRepo } = build();
+        const { service, repo, businessRepo } = build();
         businessRepo.seed(makeBusiness());
 
-        const first = await service.create(
-            caller(OWNER_A),
-            BIZ_A,
-            makeCreateInput({ displayName: 'Aaron' }),
-        );
-        const second = await service.create(
-            caller(OWNER_A),
-            BIZ_A,
-            makeCreateInput({ displayName: 'Bekele' }),
-        );
+        // Seed with explicit, distinct `createdAt` timestamps so the
+        // `createdAt ASC, id ASC` listing order is deterministic. Going
+        // through `service.create` was previously flaky here: two
+        // back-to-back `new Date()` calls inside
+        // `InMemoryStaffRepository.insert` can collapse onto the same
+        // millisecond, after which the sort falls through to the random
+        // UUID tiebreaker. Seeding directly pins the timestamps.
+        const earlier = new Date('2026-05-14T08:00:00.000Z');
+        const later = new Date('2026-05-14T08:00:01.000Z');
+        const firstId = '00000000-0000-4000-8000-000000000001';
+        const secondId = '00000000-0000-4000-8000-000000000002';
+        repo.seed({
+            id: firstId,
+            businessId: BIZ_A,
+            displayName: 'Aaron',
+            role: null,
+            isActive: true,
+            createdAt: earlier,
+            updatedAt: earlier,
+        });
+        repo.seed({
+            id: secondId,
+            businessId: BIZ_A,
+            displayName: 'Bekele',
+            role: null,
+            isActive: true,
+            createdAt: later,
+            updatedAt: later,
+        });
 
         const items = await service.listActiveForBusiness(BIZ_A);
 
         assert.deepStrictEqual(
             items.map((s) => s.id),
-            [first.id, second.id],
+            [firstId, secondId],
         );
     });
 
