@@ -1,13 +1,12 @@
 // EthioLink — category repository.
 //
-// Read-only access to the `business_categories` table for Phase 2. The
-// admin write paths (create / update / deactivate categories) come in
-// Phase 5 alongside the rest of the admin dashboard surface.
+// Read paths shipped in Phase 2; admin write paths (insert / update /
+// setIsActive) added in Phase 5 to back `AdminCategoryService`.
 //
 // Notes:
 //   * "Active by default" is a service-level decision: `listActive()`
 //     filters `is_active = true`. `listAll()` is exported so the
-//     interface is complete for future admin endpoints; public-facing
+//     interface is complete for admin endpoints; public-facing
 //     callers should use `listActive()`.
 //   * Sort order: `sort_order ASC, name->>'en' ASC`. Within a sort_order
 //     bucket the alphabetical English name is the tiebreaker, which
@@ -17,8 +16,16 @@
 //     auto-parses jsonb into a JavaScript object, so no JSON.parse
 //     ceremony is needed here.
 //   * Column lists are spelled out — no `SELECT *` in production code.
+//   * `slug` is `UNIQUE`. Duplicate inserts / updates raise SQLSTATE
+//     23505; the admin service catches and translates to
+//     `AdminCategorySlugTakenError`. The repository does NOT
+//     translate — same pattern used elsewhere for unique-violation
+//     handling.
+//   * `is_active` is mutated through `setIsActive`, not via `update`.
+//     The dedicated path keeps the soft-delete intent explicit at
+//     every call site and matches the `services` / `staff` repos.
 
-import { BaseRepository } from '../../repositories/baseRepository.js';
+import { BaseRepository, RepositoryError } from '../../repositories/baseRepository.js';
 
 /**
  * JSONB localized-text shape used by every multilingual column in the
@@ -41,11 +48,33 @@ export interface Category {
     readonly updatedAt: Date;
 }
 
+/** Fields written by `insert`. `sortOrder` defaults to `0` per migration 0003. */
+export interface InsertCategoryInput {
+    readonly slug: string;
+    readonly name: LocalizedText;
+    readonly sortOrder?: number;
+}
+
+/**
+ * Fields mutable through `update`. `undefined` = no change; an
+ * all-undefined patch is a no-op that returns the existing row
+ * unchanged. `isActive` is mutated through `setIsActive`, not patched,
+ * so the soft-delete intent stays explicit at every call site.
+ */
+export interface UpdateCategoryFields {
+    readonly slug?: string;
+    readonly name?: LocalizedText;
+    readonly sortOrder?: number;
+}
+
 export interface CategoryRepository {
     listActive(): Promise<readonly Category[]>;
     listAll(): Promise<readonly Category[]>;
     findById(id: string): Promise<Category | null>;
     findBySlug(slug: string): Promise<Category | null>;
+    insert(input: InsertCategoryInput): Promise<Category>;
+    update(id: string, patch: UpdateCategoryFields): Promise<Category>;
+    setIsActive(id: string, isActive: boolean): Promise<Category>;
 }
 
 // ---------------------------------------------------------------------------
@@ -107,6 +136,77 @@ export class PgCategoryRepository extends BaseRepository implements CategoryRepo
             [slug],
         );
         return row ? mapRow(row) : null;
+    }
+
+    async insert(input: InsertCategoryInput): Promise<Category> {
+        // `sort_order` defaults to 0 at the DB; we pass undefined → null
+        // and let the column default apply when the caller omits it.
+        const row = await this.one<CategoryRow>(
+            `
+            INSERT INTO business_categories (slug, name, sort_order)
+            VALUES ($1, $2::jsonb, COALESCE($3, 0))
+            RETURNING ${CATEGORY_COLUMNS};
+            `,
+            [input.slug, JSON.stringify(input.name), input.sortOrder ?? null],
+        );
+        return mapRow(row);
+    }
+
+    async update(id: string, patch: UpdateCategoryFields): Promise<Category> {
+        const sets: string[] = [];
+        const params: unknown[] = [];
+        let idx = 1;
+
+        if (patch.slug !== undefined) {
+            sets.push(`slug = $${idx}`);
+            params.push(patch.slug);
+            idx += 1;
+        }
+        if (patch.name !== undefined) {
+            sets.push(`name = $${idx}::jsonb`);
+            params.push(JSON.stringify(patch.name));
+            idx += 1;
+        }
+        if (patch.sortOrder !== undefined) {
+            sets.push(`sort_order = $${idx}`);
+            params.push(patch.sortOrder);
+            idx += 1;
+        }
+
+        if (sets.length === 0) {
+            // No-op patch: return current row, matching the same
+            // convention as services / staff / business repos.
+            const current = await this.findById(id);
+            if (!current) throw new RepositoryError(`Category ${id} not found.`);
+            return current;
+        }
+
+        params.push(id);
+        const row = await this.oneOrNone<CategoryRow>(
+            `
+            UPDATE business_categories
+               SET ${sets.join(', ')}
+             WHERE id = $${idx}
+            RETURNING ${CATEGORY_COLUMNS};
+            `,
+            params,
+        );
+        if (!row) throw new RepositoryError(`Category ${id} not found.`);
+        return mapRow(row);
+    }
+
+    async setIsActive(id: string, isActive: boolean): Promise<Category> {
+        const row = await this.oneOrNone<CategoryRow>(
+            `
+            UPDATE business_categories
+               SET is_active = $2
+             WHERE id = $1
+            RETURNING ${CATEGORY_COLUMNS};
+            `,
+            [id, isActive],
+        );
+        if (!row) throw new RepositoryError(`Category ${id} not found.`);
+        return mapRow(row);
     }
 }
 
