@@ -483,3 +483,36 @@ output "cloudwatch_dashboard_names" {
   description = "Map of dashboard key → dashboard name. Open via `aws cloudwatch get-dashboard --dashboard-name <name>` or the AWS console."
   value       = module.cloudwatch.dashboard_names
 }
+
+# -----------------------------------------------------------------------------
+# Phase 8 — Secrets rotation
+#
+# AWS-managed RDS password rotation via SAR. Dev keeps the
+# default 30-day cadence; first rotation fires immediately after
+# the module is applied (validates the rotation Lambda actually
+# works before the steady-state window).
+# -----------------------------------------------------------------------------
+
+module "secrets_rotation" {
+  source = "../../modules/secrets"
+
+  environment = "dev"
+  region      = var.region
+
+  rds_master_secret_arn    = module.rds.master_secret_arn
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  lambda_security_group_id = module.vpc.lambda_security_group_id
+
+  rotation_days = 30
+  enabled       = true
+}
+
+output "secrets_rotation_enabled" {
+  description = "Whether RDS password rotation is provisioned. Mirrors the module input — exposed for the smoke-test workflow to verify post-apply."
+  value       = module.secrets_rotation.rotation_enabled
+}
+
+output "secrets_rotation_lambda_name" {
+  description = "Name of the SAR-deployed rotation Lambda. Useful for `aws logs tail` during incident response."
+  value       = module.secrets_rotation.rotation_lambda_name
+}

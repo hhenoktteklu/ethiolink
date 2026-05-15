@@ -275,6 +275,22 @@ Provisioned by `infra/terraform/modules/eventbridge/`. One scheduled rule per en
 
 A CloudWatch alarm on the rule's `FailedInvocations` metric lands alongside the rest of the alarms in the `cloudwatch` module commit.
 
+### Secrets rotation
+
+Provisioned by `infra/terraform/modules/secrets/`. The RDS master secret created in the `rds` module gets automatic 30-day rotation via the AWS-published `SecretsManagerRDSPostgreSQLRotationSingleUser` Lambda from the Serverless Application Repository (SAR).
+
+**Mechanism.** `aws_serverlessapplicationrepository_cloudformation_stack` deploys AWS's published rotation Lambda into the application VPC (private subnets, `sg-lambda` security group — exactly the same network posture as the application Lambdas, because the rotation Lambda needs Postgres-wire access to `ALTER USER`). `aws_secretsmanager_secret_rotation` binds the RDS master secret to the rotation Lambda's ARN and schedules `automatically_after_days = 30`. The first rotation fires immediately after the module is applied — this validates the rotation Lambda actually works before the steady-state window opens.
+
+**Cache caveat.** The application Lambdas cache the resolved secret at module scope (one cache per warm container, populated by `loadSecretsThenConfig` on cold start). When a rotation runs:
+
+- AWS's rotation flow keeps the **previous** password valid until the next rotation (`AWSPREVIOUS` stage), so warm containers that still hold the old password continue to authenticate against RDS without errors.
+- New cold starts pick up the rotated value automatically because `loadSecretsThenConfig` re-resolves on every cold start.
+- The transition window where some containers have the old password and some have the new is therefore safe end-to-end. No application code changes needed.
+
+**Disable knob.** `var.enabled = false` removes every resource the module creates. Useful for an environment temporarily holding rotation off while debugging an upstream issue.
+
+**IAM scope.** The SAR template's rotation Lambda gets exactly the secret-specific permissions it needs (`secretsmanager:DescribeSecret` / `GetSecretValue` / `PutSecretValue` / `UpdateSecretVersionStage` scoped to the single secret ARN). The lone `secretsmanager:GetRandomPassword` action is on `*` because the API doesn't support resource-level scoping for that one.
+
 ### WAF
 
 Provisioned by `infra/terraform/modules/waf/`. One regional WAFv2 Web ACL per environment, associated with the API Gateway stage ARN.

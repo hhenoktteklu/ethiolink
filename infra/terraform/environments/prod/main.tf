@@ -524,3 +524,35 @@ output "cloudwatch_dashboard_names" {
   description = "Map of dashboard key → dashboard name."
   value       = module.cloudwatch.dashboard_names
 }
+
+# -----------------------------------------------------------------------------
+# Phase 8 — Secrets rotation
+#
+# Same 30-day cadence as dev. First rotation fires immediately
+# after the module is applied; subsequent rotations follow the
+# `automatically_after_days` schedule from the previous rotation.
+# -----------------------------------------------------------------------------
+
+module "secrets_rotation" {
+  source = "../../modules/secrets"
+
+  environment = "prod"
+  region      = var.region
+
+  rds_master_secret_arn    = module.rds.master_secret_arn
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  lambda_security_group_id = module.vpc.lambda_security_group_id
+
+  rotation_days = 30
+  enabled       = true
+}
+
+output "secrets_rotation_enabled" {
+  description = "Whether RDS password rotation is provisioned in prod."
+  value       = module.secrets_rotation.rotation_enabled
+}
+
+output "secrets_rotation_lambda_name" {
+  description = "Name of the rotation Lambda — operator uses for `aws logs tail` during incident response."
+  value       = module.secrets_rotation.rotation_lambda_name
+}

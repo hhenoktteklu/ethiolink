@@ -9,7 +9,7 @@ Make the platform something we can confidently leave running. Close observabilit
 In scope:
 
 - WAF tuning beyond the Phase 7 baseline: bot control, IP reputation list, custom rate limits per route.
-- Secret rotation: rotate RDS master password and any third-party API keys via Secrets Manager managed rotation.
+- Secret rotation: rotate RDS master password and any third-party API keys via Secrets Manager managed rotation. *(Phase 8 commit "enable RDS secret rotation": AWS-managed `SecretsManagerRDSPostgreSQLRotationSingleUser` Lambda deployed via SAR; `aws_secretsmanager_secret_rotation` schedules 30-day cadence; first rotation fires immediately after apply. Third-party API keys land alongside the real SMS/Telegram provider integration follow-ups.)*
 - RDS backup verification: monthly automated restore test to a scratch RDS instance, comparing schema and row counts.
 - DR runbook in `docs/operations/DR_RUNBOOK.md` covering RDS restore, Lambda redeploy, Cognito recreation guidance.
 - Load testing: scripted scenarios for browse, book, accept, complete, with assertions on p95 latency.
