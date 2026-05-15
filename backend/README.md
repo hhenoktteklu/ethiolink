@@ -20,13 +20,15 @@ backend/
   tests/      unit + integration tests
 ```
 
-## Current state (Phase 4)
+## Current state (Phase 5 — backend)
 
 The following are wired up:
 
-- `npm run db:migrate` — applies migrations 0001–0011 via `db/migrate.mjs`. Migrations 0009–0011 (appointments, reviews, payment_intents) are authored and reviewed; the apply against the dev RDS instance is gated on the next `terraform apply` for the Phase 4 infrastructure tickets.
+- `npm run db:migrate` — applies migrations 0001–0012 via `db/migrate.mjs`. Migrations 0009–0011 (appointments, reviews, payment_intents) and 0012 (admin_actions) are authored and applied against local docker-compose Postgres. The same migrations against an AWS-hosted dev RDS instance are gated on Phase 7 (the dev Terraform stack currently provisions only Cognito).
 - `npm run db:seed` — applies seeds (currently the four MVP categories) via `db/seed.mjs`.
-- `npm test` — Node test runner via `tsx`. Suite covers Phase 1 (`UserService` + `loadConfig`), Phase 2 (`BusinessService` / `MediaService` / `CategoryService`), Phase 3 (`services`, `staff`, `availabilityService`, `slotComputer`, `slotService`), and Phase 4 (`appointmentStateMachine`, `appointmentService`, `paymentGateways`, `reviewService`). All use in-memory fakes — no Postgres required.
+- `npm test` — Node test runner via `tsx`. Suite covers Phase 1 (`UserService` + `loadConfig`), Phase 2 (`BusinessService` / `MediaService` / `CategoryService`), Phase 3 (`services`, `staff`, `availabilityService`, `slotComputer`, `slotService`), Phase 4 (`appointmentStateMachine`, `appointmentService`, `paymentGateways`, `reviewService`), and Phase 5 backend (`adminBusinessService`, `adminUserService`, `adminCategoryService`). All use in-memory fakes — no Postgres required.
+
+The React admin app under `admin/` is still pending — Phase 5's last deliverable. Every admin endpoint listed below works against the backend; the dashboard UI lands in a follow-up.
 
 `npm run build` and `npm run lint` are still Phase 0 placeholders.
 
@@ -68,6 +70,19 @@ The following are wired up:
 | POST   | `/v1/appointments/{id}/complete`                                     | yes | ACCEPTED → COMPLETED. Business owner or ADMIN. |
 | POST   | `/v1/appointments/{id}/review`                                       | yes | `CUSTOMER`-only. Requires `COMPLETED` appointment; one review per appointment. Refreshes `rating_avg` / `rating_count`. |
 | GET    | `/v1/businesses/{id}/reviews`                                        | no  | Public listing of non-deleted reviews, newest-first. |
+| GET    | `/v1/admin/businesses`                                               | yes | `ADMIN`-only. Cross-status listing with optional `status` filter + limit. |
+| POST   | `/v1/admin/businesses/{id}/approve`                                  | yes | `ADMIN`-only. PENDING_REVIEW → APPROVED + `APPROVE_BUSINESS` audit row. |
+| POST   | `/v1/admin/businesses/{id}/reject`                                   | yes | `ADMIN`-only. PENDING_REVIEW → REJECTED + `REJECT_BUSINESS` audit row (notes are the canonical rejection-reason store). |
+| POST   | `/v1/admin/businesses/{id}/suspend`                                  | yes | `ADMIN`-only. APPROVED or PENDING_REVIEW → SUSPENDED + `SUSPEND_BUSINESS` audit row. |
+| POST   | `/v1/admin/businesses/{id}/feature`                                  | yes | `ADMIN`-only. Set / clear `featured_until` on an APPROVED business; emits `FEATURE_BUSINESS` or `UNFEATURE_BUSINESS`. |
+| GET    | `/v1/admin/users`                                                    | yes | `ADMIN`-only. Cross-status / cross-role listing with optional filters. Returns `AdminUserView` (adds `status`). |
+| POST   | `/v1/admin/users/{id}/suspend`                                       | yes | `ADMIN`-only. ACTIVE → SUSPENDED + `SUSPEND_USER` audit row. |
+| POST   | `/v1/admin/users/{id}/restore`                                       | yes | `ADMIN`-only. SUSPENDED → ACTIVE + `RESTORE_USER` audit row. DELETED is terminal. |
+| GET    | `/v1/admin/categories`                                               | yes | `ADMIN`-only. Lists active + deactivated rows with optional `isActive` filter. Returns `AdminCategoryView` (adds `isActive`). |
+| POST   | `/v1/admin/categories`                                               | yes | `ADMIN`-only. Create a category + `CREATE_CATEGORY` audit row. Slug uniqueness enforced. |
+| PATCH  | `/v1/admin/categories/{id}`                                          | yes | `ADMIN`-only. Patch a category + `UPDATE_CATEGORY` audit row. No-op empty patch still records intent. |
+| DELETE | `/v1/admin/categories/{id}`                                          | yes | `ADMIN`-only. **Soft-delete** — flips `is_active` to `false` + `DEACTIVATE_CATEGORY` audit row. Already-inactive → 409. |
+| GET    | `/v1/admin/appointments`                                             | yes | `ADMIN`-only cross-business listing. Filters: `status`, `businessId`, `customerId`, `from`, `to`, `limit`. Read-only; no audit row. |
 
 See `api/openapi.yaml` for the full contract.
 
@@ -86,6 +101,14 @@ The Phase 4 endpoints compose `AppointmentService` (state machine + repository +
 - **Cancellation cutoff** is `BOOKING_CANCEL_CUTOFF_MINUTES` (default 240). Customer-initiated cancels inside the cutoff return 409 `CONFLICT`; business and admin cancellations bypass the cutoff.
 - **Reviews** require an appointment in `COMPLETED` status. UNIQUE on `reviews.appointment_id` enforces one review per appointment; `business_profiles.rating_avg` / `rating_count` are recomputed from a fresh `AVG`/`COUNT` over reviews on each insert.
 - **Migrations 0009–0011 apply is pending the next `terraform apply`.** Until then, the appointment / review handlers will fail at request time on missing tables — `npm test` exercises the in-memory paths.
+
+### Admin backend prerequisites
+
+Phase 5 ships the admin write surface. Every Phase 5 endpoint is guarded by `backend/lambdas/admin/_authz.ts`, which extracts the Cognito principal, refuses non-`ADMIN` roles with 403, and resolves the principal to an internal `users` row.
+
+- **Audit log.** Every successful admin write persists exactly one row to `admin_actions` (migration 0012) — append-only, no `update` / `delete` paths in the repository. Failed writes (admin forbidden / not found / invalid transition / invalid input / slug taken) record zero rows. The audit row carries `adminUserId`, `action` (one of `APPROVE_BUSINESS` / `REJECT_BUSINESS` / `SUSPEND_BUSINESS` / `FEATURE_BUSINESS` / `UNFEATURE_BUSINESS` / `SUSPEND_USER` / `RESTORE_USER` / `CREATE_CATEGORY` / `UPDATE_CATEGORY` / `DEACTIVATE_CATEGORY`), `targetType` (`business_profile` / `user` / `business_category`), `targetId`, and the optional `notes` field from the request body.
+- **Atomicity caveat.** The mutation and the audit-row insert run as two sequential statements — not yet wrapped in `withTransaction`. A small window exists where the mutation is committed but the audit row never lands. Documented in each admin service's header; the canonical fix threads a `PoolClient` through both repos and lands in a future commit alongside the matching change to the reviews-aggregate flow.
+- **Admin write paths on services / staff / availability are still owner-only.** `API_SPEC.md` lists those as "owner or ADMIN" but the Phase 3 services / staff / availability services enforce strict-owner. Relaxing each is a one-line change (the Phase 5 follow-up list); deferred so the React admin app can ship first.
 
 ### S3 prerequisite for the media handlers
 
@@ -145,11 +168,12 @@ npm install
 npm test
 ```
 
-Current suite (Phase 1 through Phase 4) covers:
+Current suite (Phase 1 through Phase 5 backend) covers:
 
 - **Phase 1.** `UserService` — sync, idempotency, role mapping, get, update, missing-user. `loadConfig` — defaults, missing/invalid env vars, `PG_SSL` parsing.
 - **Phase 2.** `BusinessService` — create, update, submit state machine, ownership, listing filters, cursor-pagination roundtrip, invalid-cursor handling. `MediaService` — content-type allowlist, owner-type matrix (BUSINESS / STAFF / USER), `isPublic` derivation, `confirmUpload` storage-key prefix check. `CategoryService` — listing order, active-only filter, getBySlug/getById hit + miss + inactive-row contract.
 - **Phase 3.** `ServiceService`, `StaffService`, `AvailabilityService`, `slotComputer` (pure-function matrix over weekly + override + conflicts + buffer + 24:00 sentinel + timezone math), `SlotService` orchestrator.
 - **Phase 4.** `appointmentStateMachine` (matrix walk + terminal sealing + integrity), `AppointmentService` (cash create / online → typed error / slot misalignment / 23P01 race-loss / accept / reject / complete / cancel cutoff matrix / reschedule resets / non-owner), `paymentGateways` (CashGateway SUCCEEDED + MockOnlineGateway throws `ONLINE_PAYMENTS_UNAVAILABLE`), `ReviewService` (happy path + recompute trigger + four typed errors + 23505 race-loss + rating validation matrix + listing soft-delete filter + limit).
+- **Phase 5 backend.** `AdminBusinessService` (approve / reject / suspend / setFeaturedUntil happy paths + audit-row contents + auth matrix + invalid-transition matrix + audit invariant), `AdminUserService` (suspend / restore + DELETED-is-terminal + auth + not-found + audit invariant), `AdminCategoryService` (create / update with no-op-still-records-audit / deactivate + slug-uniqueness pre-check on create + cross-row on update + 16-case invalid-input matrix + auth + audit invariant).
 
 All using in-memory fakes — no Postgres required.

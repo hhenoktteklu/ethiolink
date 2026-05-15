@@ -30,9 +30,10 @@ This document is the contract between mobile, admin, and backend. Detailed OpenA
 | Method | Path                       | Roles                | Purpose                          |
 | ------ | -------------------------- | -------------------- | -------------------------------- |
 | GET    | /v1/categories             | public               | List active categories           |
-| POST   | /v1/admin/categories       | ADMIN                | Create category                  |
-| PATCH  | /v1/admin/categories/:id   | ADMIN                | Update category                  |
-| DELETE | /v1/admin/categories/:id   | ADMIN                | Deactivate category              |
+| GET    | /v1/admin/categories       | ADMIN                | List categories across active + deactivated, with optional `isActive` filter |
+| POST   | /v1/admin/categories       | ADMIN                | Create category. Slug unique across all categories. |
+| PATCH  | /v1/admin/categories/:id   | ADMIN                | Update category. `isActive` is NOT patched here — use DELETE to deactivate. |
+| DELETE | /v1/admin/categories/:id   | ADMIN                | **Soft-delete** — flips `is_active` to `false`; preserves FK chain from `business_profiles.category_id`. |
 
 ### Business profiles
 
@@ -47,13 +48,15 @@ This document is the contract between mobile, admin, and backend. Detailed OpenA
 
 ### Admin — businesses
 
+Every admin write below persists exactly one row to `admin_actions` (append-only audit log, migration 0012) carrying `admin_user_id`, `action`, `target_type='business_profile'`, `target_id`, and the optional `notes` body field. Failed writes record no row.
+
 | Method | Path                                          | Roles | Purpose                                       |
 | ------ | --------------------------------------------- | ----- | --------------------------------------------- |
-| GET    | /v1/admin/businesses                          | ADMIN | List businesses, filterable by status         |
-| POST   | /v1/admin/businesses/:id/approve              | ADMIN | PENDING_REVIEW → APPROVED                     |
-| POST   | /v1/admin/businesses/:id/reject               | ADMIN | PENDING_REVIEW → REJECTED                     |
-| POST   | /v1/admin/businesses/:id/suspend              | ADMIN | APPROVED → SUSPENDED                          |
-| POST   | /v1/admin/businesses/:id/feature              | ADMIN | Set/unset `featured_until`                    |
+| GET    | /v1/admin/businesses                          | ADMIN | List businesses, filterable by status. Read-only; no audit row. |
+| POST   | /v1/admin/businesses/:id/approve              | ADMIN | PENDING_REVIEW → APPROVED. `APPROVE_BUSINESS` audit row. |
+| POST   | /v1/admin/businesses/:id/reject               | ADMIN | PENDING_REVIEW → REJECTED. `REJECT_BUSINESS` audit row (notes are the canonical rejection-reason store; the schema has no dedicated column). |
+| POST   | /v1/admin/businesses/:id/suspend              | ADMIN | APPROVED or PENDING_REVIEW → SUSPENDED. `SUSPEND_BUSINESS` audit row. |
+| POST   | /v1/admin/businesses/:id/feature              | ADMIN | Set / unset `featured_until` on an APPROVED business. Body's `featuredUntil: ISO-8601 \| null` controls the action: setting emits `FEATURE_BUSINESS`, clearing emits `UNFEATURE_BUSINESS`. |
 
 ### Services
 
@@ -113,15 +116,15 @@ This document is the contract between mobile, admin, and backend. Detailed OpenA
 
 | Method | Path                          | Roles  | Purpose                                |
 | ------ | ----------------------------- | ------ | -------------------------------------- |
-| GET    | /v1/admin/users               | ADMIN  | List users with filters                |
-| POST   | /v1/admin/users/:id/suspend   | ADMIN  | Suspend a user                         |
-| POST   | /v1/admin/users/:id/restore   | ADMIN  | Restore a suspended user               |
+| GET    | /v1/admin/users               | ADMIN  | List users with optional `status` (ACTIVE / SUSPENDED / DELETED) and `role` (CUSTOMER / BUSINESS_OWNER / ADMIN) filters. Returns `AdminUserView` (adds `status`). Read-only; no audit row. |
+| POST   | /v1/admin/users/:id/suspend   | ADMIN  | ACTIVE → SUSPENDED. `SUSPEND_USER` audit row. DELETED users are terminal and refused with 409. |
+| POST   | /v1/admin/users/:id/restore   | ADMIN  | SUSPENDED → ACTIVE. `RESTORE_USER` audit row. DELETED users cannot be restored through this endpoint. |
 
 ### Admin — bookings (read-only)
 
 | Method | Path                          | Roles  | Purpose                                |
 | ------ | ----------------------------- | ------ | -------------------------------------- |
-| GET    | /v1/admin/appointments        | ADMIN  | Read-only view across all bookings     |
+| GET    | /v1/admin/appointments        | ADMIN  | Cross-business read across all bookings. Optional filters: `status`, `businessId`, `customerId`, `from` (inclusive lower bound on `startsAt`), `to` (exclusive upper bound on `startsAt`), `limit` (1..100, default 50). Sort: `starts_at DESC, id DESC`. Returns standard `AppointmentView` items. |
 
 ## Error codes (initial set)
 
