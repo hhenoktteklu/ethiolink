@@ -44,6 +44,18 @@ module "cognito" {
   source = "../../modules/cognito"
 
   environment = "dev"
+
+  # Admin dashboard runs on `npm run dev` (Vite) for local
+  # development and against the CloudFront-fronted S3 distribution
+  # once the Phase 7 admin-frontend module lands. Both URLs will
+  # need to be registered on the Cognito admin client; the
+  # CloudFront URL is appended to this list alongside the
+  # admin-frontend module commit. For now only the Vite dev URL
+  # is listed. `/login` matches the SPA route at
+  # `admin/src/pages/LoginPage.tsx` that handles the `?code=...`
+  # exchange.
+  admin_callback_urls = ["http://localhost:5173/login"]
+  admin_logout_urls   = ["http://localhost:5173/login"]
 }
 
 output "cognito_user_pool_id" {

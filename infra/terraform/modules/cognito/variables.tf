@@ -33,15 +33,15 @@ variable "mobile_logout_urls" {
 }
 
 variable "admin_callback_urls" {
-  description = "OAuth callback URLs for the admin dashboard. The dev environment includes localhost; production should pass the real domain."
+  description = "OAuth callback URLs for the admin dashboard. MUST end in `/login` — that's the SPA route (`admin/src/pages/LoginPage.tsx`) that handles the `?code=...` exchange. The dev environment passes the localhost URL; production passes the real domain. Mismatches surface as a Cognito hosted-UI 400 (`redirect_mismatch`) when the SPA tries to sign in."
   type        = list(string)
-  default     = ["http://localhost:5173/auth/callback"]
+  default     = ["http://localhost:5173/login"]
 }
 
 variable "admin_logout_urls" {
-  description = "OAuth logout URLs for the admin dashboard."
+  description = "OAuth logout URLs for the admin dashboard. The SPA navigates here after Cognito's `/logout` endpoint clears the session — typically the same `/login` route so the operator lands on a fresh sign-in page."
   type        = list(string)
-  default     = ["http://localhost:5173/auth/logout"]
+  default     = ["http://localhost:5173/login"]
 }
 
 variable "password_minimum_length" {

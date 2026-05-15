@@ -213,14 +213,34 @@ resource "aws_cognito_user_pool_client" "mobile" {
 # -----------------------------------------------------------------------------
 # App client — admin dashboard (React)
 #
-# Confidential client; the dashboard exchanges the code at a backend route.
+# Public PKCE client. The React SPA at `admin/src/lib/auth.ts` runs
+# the authorization-code-with-PKCE flow directly from the browser —
+# no backend code exchange and therefore no place to keep a client
+# secret. `generate_secret = false` is the correct posture for any
+# in-browser OAuth client (a secret embedded in a JS bundle is just
+# a public string).
+#
+# The callback URL on the SPA side is `/login?code=...` (the
+# `LoginPage` component handles the exchange). The Cognito client
+# MUST list the same URL in its `callback_urls`, otherwise the
+# hosted-UI redirect is rejected. Each environment passes its own
+# concrete URL through `var.admin_callback_urls` (dev:
+# `http://localhost:5173/login`; prod:
+# `https://admin.ethiolink.app/login`).
 # -----------------------------------------------------------------------------
 
 resource "aws_cognito_user_pool_client" "admin" {
   name         = "${local.base_name}-admin"
   user_pool_id = aws_cognito_user_pool.this.id
 
-  generate_secret = true
+  # Public PKCE client — no secret. Flipping this on an existing
+  # client requires Terraform to *replace* the resource (Cognito
+  # treats `generate_secret` as immutable). The replacement issues
+  # a new client id, which means the admin SPA's
+  # `VITE_COGNITO_ADMIN_CLIENT_ID` must be re-read from the
+  # Terraform output after the apply. Same posture as the mobile
+  # client, which has always been public.
+  generate_secret = false
 
   explicit_auth_flows = [
     "ALLOW_USER_SRP_AUTH",

@@ -78,8 +78,12 @@ After step 4 succeeds, every subsequent Terraform action on dev or prod runs fro
 - One user pool per environment.
 - Three groups: `CUSTOMER`, `BUSINESS_OWNER`, `ADMIN`.
 - App clients:
-  - `ethiolink-mobile` (public, PKCE).
-  - `ethiolink-admin` (public, PKCE, restricted to ADMIN group at the application layer).
+  - `ethiolink-mobile` (public, PKCE, no client secret) — Flutter app on the `ethiolink://auth/{callback,logout}` deep-link scheme.
+  - `ethiolink-admin` (public, PKCE, no client secret) — React SPA. The dashboard runs the PKCE flow in-browser via `admin/src/lib/auth.ts`; the callback route is `/login?code=...` (the `LoginPage` component handles the exchange). The Cognito client's `callback_urls` and `logout_urls` MUST list the same `/login` path per environment:
+    - Dev: `http://localhost:5173/login`
+    - Prod: `https://admin.ethiolink.app/login`
+
+  Group-level access control (only `ADMIN` group members can use the dashboard) is enforced at the application layer — both client-side (`isAdmin(session)` in `auth.ts` gates routing through `ProtectedRoute`) and server-side (`backend/lambdas/admin/_authz.ts` refuses non-`ADMIN` roles with 403 on every admin endpoint).
 
 ### API Gateway
 
