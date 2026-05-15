@@ -217,6 +217,31 @@ export interface AppointmentsRepository extends AppointmentConflictsRepository {
         filters: AdminAppointmentFilters,
         limit: number,
     ): Promise<readonly Appointment[]>;
+    /**
+     * Reminder-window scan used by the EventBridge-driven reminder
+     * lambda. Returns ACCEPTED appointments whose `starts_at` falls
+     * in the half-open UTC range `[fromUtc, toUtc)`, soft-deleted
+     * rows excluded.
+     *
+     * Sort order is `starts_at ASC, id ASC` — the scan processes
+     * the earliest-firing reminder first, which is the correct
+     * cadence if the lambda runs near its 15-minute budget. The
+     * limit is clamped at the call site; for MVP traffic
+     * (low-thousands of accepted bookings) a 1000-row cap is
+     * plenty.
+     *
+     * Idempotency is the caller's responsibility via
+     * `notification_logs` (see
+     * `NotificationLogRepository.existsForAppointmentSlot`). The
+     * repository is deliberately stateless w.r.t. the reminder
+     * lifecycle — there is no `reminder_sent_at` column and no
+     * write-back here.
+     */
+    listForReminderWindow(
+        fromUtc: Date,
+        toUtc: Date,
+        limit: number,
+    ): Promise<readonly Appointment[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -445,6 +470,31 @@ export class PgAppointmentsRepository
                 filters.toUtc ?? null,
                 limit,
             ],
+        );
+        return rows.map(mapRow);
+    }
+
+    async listForReminderWindow(
+        fromUtc: Date,
+        toUtc: Date,
+        limit: number,
+    ): Promise<readonly Appointment[]> {
+        // ASC sort here, unlike the admin-listing call paths: the
+        // reminder lambda processes the earliest-firing appointment
+        // first so the freshest reminders land before a slow batch
+        // burns through its time budget.
+        const rows = await this.many<AppointmentRow>(
+            `
+            SELECT ${APPOINTMENT_COLUMNS}
+              FROM appointments
+             WHERE deleted_at IS NULL
+               AND status     = 'ACCEPTED'
+               AND starts_at >= $1
+               AND starts_at  < $2
+             ORDER BY starts_at ASC, id ASC
+             LIMIT $3;
+            `,
+            [fromUtc, toUtc, limit],
         );
         return rows.map(mapRow);
     }

@@ -119,6 +119,22 @@ export interface AdminNotificationLogFilters {
     readonly toUtc?: Date;
 }
 
+/**
+ * Lookup key for {@link NotificationLogRepository.existsForAppointmentSlot}.
+ * The reminder lambda uses this triple as the idempotency
+ * fingerprint for a single (template × recipient × appointment-
+ * instance) reminder — two scans that pick up the same
+ * appointment in the same window will not both fire.
+ */
+export interface AppointmentSlotDispatchKey {
+    readonly templateKey: string;
+    readonly recipientUserId: string;
+    /** UTC ISO-8601 string. Matched against
+     *  `notification_logs.payload->>'startsAtUtc'` (see
+     *  `BookingTemplatePayload`). */
+    readonly startsAtUtc: string;
+}
+
 export interface NotificationLogRepository {
     insert(input: InsertNotificationLogInput): Promise<NotificationLogRow>;
     updateStatus(
@@ -130,6 +146,27 @@ export interface NotificationLogRepository {
         filters: AdminNotificationLogFilters,
         limit: number,
     ): Promise<readonly NotificationLogRow[]>;
+    /**
+     * Idempotency check for the EventBridge-driven reminder
+     * lambda. Returns `true` if ANY row already exists for the
+     * given `(template_key, recipient_user_id,
+     * payload->>'startsAtUtc')` triple — regardless of status
+     * (QUEUED / SENT / DELIVERED / FAILED).
+     *
+     * Counting FAILED as "already attempted" is deliberate: the
+     * reminder cadence (15-minute scans of a 15-minute window)
+     * means a permanently-broken provider for one user would
+     * otherwise blast the same row every cycle until the cutoff
+     * passes. The admin can manually clear a failed log row to
+     * force a retry. (See PHASE_6_NOTIFICATIONS.md.)
+     *
+     * Implemented as a `SELECT 1 … LIMIT 1` — no row data is
+     * returned, the call is a `bool` regardless of how many
+     * matching rows exist.
+     */
+    existsForAppointmentSlot(
+        key: AppointmentSlotDispatchKey,
+    ): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +255,23 @@ export class PgNotificationLogRepository
             [id],
         );
         return row ? mapRow(row) : null;
+    }
+
+    async existsForAppointmentSlot(
+        key: AppointmentSlotDispatchKey,
+    ): Promise<boolean> {
+        const row = await this.oneOrNone<{ present: number }>(
+            `
+            SELECT 1 AS present
+              FROM notification_logs
+             WHERE template_key            = $1
+               AND recipient_user_id       = $2
+               AND payload->>'startsAtUtc' = $3
+             LIMIT 1;
+            `,
+            [key.templateKey, key.recipientUserId, key.startsAtUtc],
+        );
+        return row !== null;
     }
 
     async listForAdmin(

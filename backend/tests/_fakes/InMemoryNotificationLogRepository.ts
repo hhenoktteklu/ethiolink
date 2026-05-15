@@ -20,6 +20,7 @@ import { randomUUID } from 'node:crypto';
 import { RepositoryError } from '../../shared/repositories/baseRepository.js';
 import type {
     AdminNotificationLogFilters,
+    AppointmentSlotDispatchKey,
     InsertNotificationLogInput,
     NotificationLogRepository,
     NotificationLogRow,
@@ -80,6 +81,22 @@ export class InMemoryNotificationLogRepository
 
     async findById(id: string): Promise<NotificationLogRow | null> {
         return this.rows.get(id) ?? null;
+    }
+
+    async existsForAppointmentSlot(
+        key: AppointmentSlotDispatchKey,
+    ): Promise<boolean> {
+        for (const row of this.rows.values()) {
+            if (
+                row.templateKey === key.templateKey &&
+                row.recipientUserId === key.recipientUserId &&
+                (row.payload as { startsAtUtc?: unknown }).startsAtUtc ===
+                    key.startsAtUtc
+            ) {
+                return true;
+            }
+        }
+        return false;
     }
 
     async listForAdmin(

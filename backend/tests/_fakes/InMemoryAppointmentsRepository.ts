@@ -242,6 +242,26 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
         return next;
     }
 
+    async listForReminderWindow(
+        fromUtc: Date,
+        toUtc: Date,
+        limit: number,
+    ): Promise<readonly Appointment[]> {
+        const fromTs = fromUtc.getTime();
+        const toTs = toUtc.getTime();
+        return this.rows
+            .filter((r) => r.deletedAt === null)
+            .filter((r) => r.status === 'ACCEPTED')
+            .filter((r) => r.startsAt.getTime() >= fromTs)
+            .filter((r) => r.startsAt.getTime() < toTs)
+            .sort(
+                (a, b) =>
+                    a.startsAt.getTime() - b.startsAt.getTime() ||
+                    (a.id < b.id ? -1 : 1),
+            )
+            .slice(0, limit);
+    }
+
     async listAll(
         filters: AdminAppointmentFilters,
         limit: number,
