@@ -40,7 +40,7 @@ Out of scope:
 
 ## Checklist
 
-- [ ] Migration 0012 applied.
+- [ ] Migration 0012 applied.<!-- `0012_admin_actions.sql` authored: append-only audit log (no updated_at / deleted_at / no UPDATE or DELETE paths), `admin_user_id` FK ON DELETE RESTRICT, no CHECK on `action` (app layer owns the enum), polymorphic `target_id uuid NOT NULL` paired with `target_type`. Indexes on `(admin_user_id, created_at DESC)` and `(target_type, target_id, created_at DESC)` back the two documented read paths. "Applied" needs `npm run db:migrate` locally and `terraform apply` + RDS-side run for AWS-hosted dev (Phase 7). -->
 - [ ] All admin write endpoints persist an `admin_actions` row.
 - [ ] React app initialized; routes set up; protected routes redirect to `/login` if not in `ADMIN` group.
 - [ ] Login uses Cognito hosted UI or AWS Amplify Auth.
