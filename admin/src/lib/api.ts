@@ -464,3 +464,74 @@ function toIsoString(value: Date | string): string {
     if (typeof value === 'string') return value;
     return value.toISOString();
 }
+
+// ---------------------------------------------------------------------------
+// Admin notifications
+// ---------------------------------------------------------------------------
+
+export type NotificationStatus = 'QUEUED' | 'SENT' | 'DELIVERED' | 'FAILED';
+
+export type NotificationChannel =
+    | 'SMS'
+    | 'EMAIL'
+    | 'TELEGRAM'
+    | 'PUSH'
+    | 'MOCK';
+
+export interface NotificationLogView {
+    readonly id: string;
+    readonly recipientUserId: string | null;
+    readonly channel: NotificationChannel;
+    readonly templateKey: string;
+    readonly payload: Record<string, unknown>;
+    readonly status: NotificationStatus;
+    readonly provider: string;
+    readonly providerRef: string | null;
+    readonly errorMessage: string | null;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+}
+
+export interface NotificationLogListResponse {
+    readonly items: readonly NotificationLogView[];
+}
+
+/**
+ * Notification-logs listing for the admin troubleshooting page.
+ * All filters optional; passing none returns the most recent
+ * attempts up to `limit` (default 100, max 100). `fromUtc` /
+ * `toUtc` accept either a `Date` or an ISO-8601 string — Dates
+ * are converted via `.toISOString()` before landing in the URL
+ * query.
+ *
+ * Sort: `created_at DESC, id DESC` — newest attempts first.
+ */
+export function listAdminNotifications(
+    params: {
+        status?: NotificationStatus;
+        channel?: NotificationChannel;
+        recipientUserId?: string;
+        fromUtc?: Date | string;
+        toUtc?: Date | string;
+        limit?: number;
+    } = {},
+): Promise<NotificationLogListResponse> {
+    const search = new URLSearchParams();
+    if (params.status !== undefined) search.set('status', params.status);
+    if (params.channel !== undefined) search.set('channel', params.channel);
+    if (params.recipientUserId !== undefined) {
+        search.set('recipientUserId', params.recipientUserId);
+    }
+    if (params.fromUtc !== undefined) {
+        search.set('from', toIsoString(params.fromUtc));
+    }
+    if (params.toUtc !== undefined) {
+        search.set('to', toIsoString(params.toUtc));
+    }
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<NotificationLogListResponse>(
+        'GET',
+        `/v1/admin/notifications${query ? `?${query}` : ''}`,
+    );
+}

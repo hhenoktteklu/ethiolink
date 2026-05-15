@@ -23,6 +23,7 @@ import { BusinessesPage } from './pages/BusinessesPage';
 import { CategoriesPage } from './pages/CategoriesPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { UsersPage } from './pages/UsersPage';
 
 export function App() {
@@ -42,6 +43,7 @@ export function App() {
                 <Route path="/categories" element={<CategoriesPage />} />
                 <Route path="/users" element={<UsersPage />} />
                 <Route path="/appointments" element={<AppointmentsPage />} />
+                <Route path="/notifications" element={<NotificationsPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

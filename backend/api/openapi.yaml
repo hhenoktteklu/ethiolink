@@ -1732,6 +1732,79 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /admin/notifications:
+    get:
+      tags: [admin]
+      operationId: adminListNotifications
+      summary: List `notification_logs` rows (admin troubleshooting).
+      description: |
+        Authenticated, ADMIN-only. Read-only view across every
+        outbound notification attempt the dispatcher has recorded.
+        Filters: `status`, `channel`, `recipientUserId`,
+        `from` (inclusive lower bound on `createdAt`),
+        `to` (exclusive upper bound on `createdAt`). All optional.
+
+        Sort: `created_at DESC, id DESC` — newest attempts first,
+        matching the admin's "what just went wrong" mental model.
+        No cursor pagination in MVP — `limit` caps at 100,
+        default 100.
+
+        Returns `NotificationLogView` items. The raw `payload`
+        is passed through verbatim for `<pre>` rendering in the
+        admin dashboard.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/NotificationStatus'
+        - name: channel
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/NotificationChannel'
+        - name: recipientUserId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on `createdAt`.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound on `createdAt`.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Admin notification-logs listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationLogList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /admin/appointments:
     get:
       tags: [admin]
@@ -2738,6 +2811,107 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AppointmentView'
+    NotificationStatus:
+      type: string
+      description: |
+        Lifecycle state of a `notification_logs` row. The
+        dispatcher writes the row at `QUEUED` and then flips it
+        to `SENT` (provider acknowledged) or `FAILED` (provider
+        raised an error, or the gateway is not configured).
+        `DELIVERED` is reserved for a future read-receipt flow
+        (SMS DLR callbacks, email opens) — no MVP producer.
+      enum:
+        - QUEUED
+        - SENT
+        - DELIVERED
+        - FAILED
+    NotificationChannel:
+      type: string
+      description: |
+        Transport channel a notification went out on. Matches
+        the `notification_logs.channel` CHECK constraint from
+        migration 0013. `MOCK` is the MVP default — every
+        booking lifecycle event currently lands on a mock
+        gateway until real providers are configured.
+      enum:
+        - SMS
+        - EMAIL
+        - TELEGRAM
+        - PUSH
+        - MOCK
+    NotificationLogView:
+      type: object
+      required:
+        - id
+        - recipientUserId
+        - channel
+        - templateKey
+        - payload
+        - status
+        - provider
+        - providerRef
+        - errorMessage
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        recipientUserId:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            The user the notification was addressed to. `null`
+            iff the row outlived a hard-deleted user
+            (`ON DELETE SET NULL` on the FK).
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        templateKey:
+          type: string
+          description: |
+            Application-layer template identifier (e.g.
+            `booking.accepted.customer`). The set of valid keys
+            is the `BookingTemplateKey` union owned by
+            `templateRegistry.ts`; no DB CHECK.
+        payload:
+          type: object
+          additionalProperties: true
+          description: |
+            Verbatim `payload` jsonb. Passes through unchanged
+            for `<pre>` rendering in the admin dashboard.
+        status:
+          $ref: '#/components/schemas/NotificationStatus'
+        provider:
+          type: string
+          description: |
+            Provider identifier that handled the attempt (e.g.
+            `MOCK`, future `TELEBIRR_SMS`). Free-form string
+            mirroring `notification_logs.provider`.
+        providerRef:
+          type: [string, 'null']
+          description: |
+            External reference returned by the provider on
+            `SENT` (e.g. an upstream message id). `null` on
+            `QUEUED` / `FAILED`.
+        errorMessage:
+          type: [string, 'null']
+          description: |
+            Human-readable failure reason on `FAILED`. `null`
+            otherwise.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    NotificationLogList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationLogView'
     RejectAppointmentRequest:
       type: object
       properties:

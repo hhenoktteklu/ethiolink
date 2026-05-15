@@ -36,6 +36,7 @@ const NAV_ENTRIES: readonly NavEntry[] = [
     { to: '/categories', label: 'Categories' },
     { to: '/users', label: 'Users' },
     { to: '/appointments', label: 'Bookings' },
+    { to: '/notifications', label: 'Notifications' },
 ];
 
 export function AdminLayout() {
