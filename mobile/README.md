@@ -180,6 +180,7 @@ If the browser closes but the app stays on the LoginScreen, the deep link didn't
 - ✅ Secure token cache via `flutter_secure_storage` (Keychain / Keystore). Refresh-on-near-expiry built into `CognitoAuthService.currentSession()`.
 - ✅ Three-tab bottom navigation: Browse, Bookings, Profile.
 - ✅ Browse tab — live `GET /v1/categories` fetch via `HttpCategoriesRepository` over Dio. Loading / success / empty / error states with a pull-to-refresh + retry button.
+- ✅ Businesses listing — tap a category card → `BusinessesScreen` powered by `GET /v1/businesses?category=<slug>`. Loading / success / empty / error states; "Load more" button for cursor-paginated next pages (no infinite scroll yet). Per-business list item shows name, city, rating (or "No reviews yet"), and a "Featured" chip when `featuredUntil` is in the future.
 - ✅ Profile tab — session info + env display + working sign-out (clears secure storage + best-effort hosted-UI logout).
 - ✅ `AppConfig` + `AppConfigScope` inherited-widget pattern.
 - ✅ `AuthService` port with two implementations: `CognitoAuthService` (production) + `FakeAuthService` (tests + offline demo). `LoginScreen` accepts an optional override so widget tests stay platform-channel-free.
@@ -217,4 +218,4 @@ flutter analyze
 
 ## Next recommended mobile commit
 
-**"Phase 9: add mobile businesses search"** — extend `BrowseScreen`'s category cards into a real marketplace list. Tap on `Salons` (or any category) → new `BusinessesScreen` powered by `GET /v1/businesses?category=salon&...`. New `HttpBusinessesRepository` over the existing `ApiClient` (no new HTTP plumbing — the interceptor + retry path are already in place). Adds: business-list item widget, `BusinessSummary` model from the `BusinessPublicView` schema, infinite-scroll pagination via the existing `nextCursor` shape. Sets up the `BusinessDetailScreen` + service / staff / slot picker as the immediate next-but-one commits. ~3 days including the dev-API smoke pass.
+**"Phase 9: add mobile business detail screen"** — tap a row in the new businesses listing → `BusinessDetailScreen` powered by `GET /v1/businesses/{businessId}`. Shows full profile (description, address, social handles, phone), then below it three nested fetches: `GET /v1/businesses/{id}/services` (list of bookable services with price + duration), `GET /v1/businesses/{id}/staff` (list of staff members), `GET /v1/businesses/{id}/reviews` (recent reviews carousel). Each is a new repository following the same pattern this commit established. Sets up the booking funnel — the immediate next-but-one commit replaces the "tap a service" SnackBar with the slot-picker + booking-confirmation flow. ~3 days including the dev-API smoke pass.

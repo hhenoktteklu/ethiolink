@@ -34,6 +34,8 @@ import '../../core/auth/auth_service.dart';
 import '../../core/config/app_config_scope.dart';
 import '../bookings/bookings_screen.dart';
 import '../profile/profile_screen.dart';
+import 'businesses_screen.dart';
+import 'data/businesses_repository.dart';
 import 'data/categories_repository.dart';
 import 'models/category.dart';
 
@@ -42,6 +44,7 @@ class BrowseScreen extends StatefulWidget {
     required this.session,
     this.authServiceOverride,
     this.categoriesRepositoryOverride,
+    this.businessesRepositoryOverride,
     super.key,
   });
 
@@ -56,6 +59,11 @@ class BrowseScreen extends StatefulWidget {
   /// the State constructs `HttpCategoriesRepository` from
   /// `AppConfigScope`.
   final CategoriesRepository? categoriesRepositoryOverride;
+
+  /// Test-injected businesses repository, forwarded to the pushed
+  /// `BusinessesScreen` when the user taps a category card.
+  /// Production leaves this `null`.
+  final BusinessesRepository? businessesRepositoryOverride;
 
   @override
   State<BrowseScreen> createState() => _BrowseScreenState();
@@ -79,7 +87,11 @@ class _BrowseScreenState extends State<BrowseScreen> {
   @override
   Widget build(BuildContext context) {
     final tabs = <Widget>[
-      _BrowseTab(session: widget.session, repository: _repo!),
+      _BrowseTab(
+        session: widget.session,
+        repository: _repo!,
+        businessesRepositoryOverride: widget.businessesRepositoryOverride,
+      ),
       BookingsScreen(session: widget.session),
       ProfileScreen(
         session: widget.session,
@@ -115,10 +127,15 @@ class _BrowseScreenState extends State<BrowseScreen> {
 }
 
 class _BrowseTab extends StatefulWidget {
-  const _BrowseTab({required this.session, required this.repository});
+  const _BrowseTab({
+    required this.session,
+    required this.repository,
+    this.businessesRepositoryOverride,
+  });
 
   final AuthSession session;
   final CategoriesRepository repository;
+  final BusinessesRepository? businessesRepositoryOverride;
 
   @override
   State<_BrowseTab> createState() => _BrowseTabState();
@@ -179,7 +196,11 @@ class _BrowseTabState extends State<_BrowseTab> {
                 if (data.isEmpty) {
                   return _EmptyState(onRetry: _refresh);
                 }
-                return _CategoryGrid(categories: data);
+                return _CategoryGrid(
+                  categories: data,
+                  businessesRepositoryOverride:
+                      widget.businessesRepositoryOverride,
+                );
               },
             ),
           ),
@@ -288,9 +309,13 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _CategoryGrid extends StatelessWidget {
-  const _CategoryGrid({required this.categories});
+  const _CategoryGrid({
+    required this.categories,
+    required this.businessesRepositoryOverride,
+  });
 
   final List<Category> categories;
+  final BusinessesRepository? businessesRepositoryOverride;
 
   // Slug → icon mapping for the placeholder UI. New seeded
   // categories without a slug entry fall back to a generic icon.
@@ -321,6 +346,7 @@ class _CategoryGrid extends StatelessWidget {
           return _CategoryCard(
             category: c,
             icon: _iconBySlug[c.slug] ?? Icons.local_offer_outlined,
+            businessesRepositoryOverride: businessesRepositoryOverride,
           );
         },
       ),
@@ -329,10 +355,15 @@ class _CategoryGrid extends StatelessWidget {
 }
 
 class _CategoryCard extends StatelessWidget {
-  const _CategoryCard({required this.category, required this.icon});
+  const _CategoryCard({
+    required this.category,
+    required this.icon,
+    required this.businessesRepositoryOverride,
+  });
 
   final Category category;
   final IconData icon;
+  final BusinessesRepository? businessesRepositoryOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -343,13 +374,12 @@ class _CategoryCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onTap: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${category.nameEn} — listing screen lands in '
-                'the next mobile commit.',
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => BusinessesScreen(
+                category: category,
+                repositoryOverride: businessesRepositoryOverride,
               ),
-              duration: const Duration(seconds: 2),
             ),
           );
         },

@@ -15,7 +15,10 @@ import 'package:ethiolink/core/auth/auth_service.dart';
 import 'package:ethiolink/core/config/app_config.dart';
 import 'package:ethiolink/core/config/app_config_scope.dart';
 import 'package:ethiolink/features/browse/browse_screen.dart';
+import 'package:ethiolink/features/browse/businesses_screen.dart';
+import 'package:ethiolink/features/browse/data/businesses_repository.dart';
 import 'package:ethiolink/features/browse/data/categories_repository.dart';
+import 'package:ethiolink/features/browse/models/business_summary.dart';
 import 'package:ethiolink/features/browse/models/category.dart';
 
 const _testConfig = AppConfig(
@@ -49,6 +52,21 @@ class FakeCategoriesRepository implements CategoriesRepository {
   Future<List<Category>> list() => _completer.future;
 }
 
+/// Minimal fake for the navigation test. Only needs to swallow
+/// the first `list` call BusinessesScreen issues on mount.
+class _NavTestBusinessesRepo implements BusinessesRepository {
+  String? lastCategory;
+  @override
+  Future<BusinessListPage> list({
+    String? category,
+    String? cursor,
+    int? limit,
+  }) async {
+    lastCategory = category;
+    return const BusinessListPage(items: [], nextCursor: null);
+  }
+}
+
 Category _cat(String slug, String name, {int sortOrder = 1}) {
   return Category(
     id: 'id-$slug',
@@ -62,6 +80,7 @@ Category _cat(String slug, String name, {int sortOrder = 1}) {
 Future<void> _pumpBrowse(
   WidgetTester tester, {
   required CategoriesRepository repository,
+  BusinessesRepository? businessesRepository,
 }) async {
   await tester.pumpWidget(
     AppConfigScope(
@@ -70,6 +89,7 @@ Future<void> _pumpBrowse(
         home: BrowseScreen(
           session: _testSession,
           categoriesRepositoryOverride: repository,
+          businessesRepositoryOverride: businessesRepository,
         ),
       ),
     ),
@@ -137,5 +157,26 @@ void main() {
     expect(find.text("Can't reach the server"), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
     expect(find.textContaining('boom'), findsOneWidget);
+  });
+
+  testWidgets('tapping a category card navigates to BusinessesScreen',
+      (tester) async {
+    final businessesRepo = _NavTestBusinessesRepo();
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value([
+        _cat('salon', 'Salon'),
+      ]),
+      businessesRepository: businessesRepo,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Salon'));
+    await tester.pumpAndSettle();
+
+    // BusinessesScreen is on top of the stack now.
+    expect(find.byType(BusinessesScreen), findsOneWidget);
+    // It issued its initial fetch with the right category slug.
+    expect(businessesRepo.lastCategory, 'salon');
   });
 }
