@@ -23,8 +23,9 @@ In scope:
 
 Out of scope:
 
-- CDN for the admin SPA (works fine as direct S3+CloudFront in MVP, scheduled for Phase 8 polish).
 - Multi-region failover.
+
+> Note: the original scope listed "CDN for the admin SPA" as out of scope, but the implementation pulled it in — Phase 7 now provisions S3 + CloudFront for the admin SPA via `infra/terraform/modules/admin-frontend/`. See `docs/architecture/AWS_DEPLOYMENT.md` "Admin frontend".
 
 ## Files involved
 

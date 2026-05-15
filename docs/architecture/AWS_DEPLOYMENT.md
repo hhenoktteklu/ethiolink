@@ -207,6 +207,43 @@ CORS for the two media buckets is driven by the `admin_allowed_origins` and `mob
 
 `S3StorageGateway` (`backend/shared/adapters/storage/`) is the sole writer for both media buckets and picks the target by `IssueUploadUrlInput.isPublic`. Lambda env vars: `S3_BUCKET_MEDIA_PUBLIC` ← `media_public_bucket_name`, `S3_BUCKET_MEDIA_PRIVATE` ← `media_private_bucket_name`. A gateway-type VPC endpoint to S3 is intentionally not created in this module — it lands once the NAT egress cost on real traffic justifies the change.
 
+### Admin frontend (CloudFront + S3)
+
+Provisioned by `infra/terraform/modules/admin-frontend/`. The React admin SPA (`admin/`) is hosted from a private S3 bucket fronted by CloudFront. Operators pre-build the bundle via `npm run build` before `terraform apply` — the module reads `admin/dist/` with `fileset(...)` at plan time and uploads each file as an `aws_s3_object`.
+
+| Property                     | Dev                                  | Prod                                                                          |
+| ---------------------------- | ------------------------------------ | ----------------------------------------------------------------------------- |
+| S3 bucket                    | `ethiolink-dev-admin-frontend`       | `ethiolink-prod-admin-frontend`                                               |
+| Public access                | fully blocked (OAC only)             | fully blocked (OAC only)                                                      |
+| Bucket SSE                   | AES256                               | AES256                                                                        |
+| CloudFront price class       | `PriceClass_100`                     | `PriceClass_200` (adds Cape Town + Mumbai edges — closer to Ethiopian users)  |
+| Custom domain                | none (default CloudFront URL)        | `admin.ethiolink.app` via `var.admin_custom_domain` + ACM cert in `us-east-1` |
+| SPA fallback                 | 403/404 → `/index.html` 200          | same                                                                          |
+| `index.html` cache           | `no-cache, no-store, must-revalidate` | same                                                                         |
+| Hashed asset cache           | `public, max-age=31536000, immutable` | same                                                                         |
+| Force-TLS bucket policy      | yes                                  | yes                                                                           |
+
+**Origin Access Control.** CloudFront uses `aws_cloudfront_origin_access_control` (OAC, sigv4-signed S3 reads) — the successor to the older Origin Access Identity (OAI). The bucket policy allows `s3:GetObject` only from the `cloudfront.amazonaws.com` service principal with `AWS:SourceArn` matching the distribution ARN, so a leaked bucket name still isn't readable from outside CloudFront.
+
+**Pre-build step.** Operators must run, before `terraform apply`:
+```bash
+cd admin
+# Set VITE_COGNITO_DOMAIN, VITE_COGNITO_ADMIN_CLIENT_ID,
+# VITE_ADMIN_REDIRECT_URI, VITE_API_BASE_URL per environment.
+npm ci
+npm run build
+```
+The Vite bundle bakes the `VITE_*` env vars at build time, so the dev and prod bundles are different artifacts — CI builds twice, once per env, with the right outputs threaded in.
+
+**Post-deploy invalidation.** Only `index.html` needs CloudFront invalidation after a deploy because every other file is content-hashed by Vite. Operators run:
+```bash
+aws cloudfront create-invalidation \
+    --distribution-id $(terraform output -raw admin_frontend_distribution_id) \
+    --paths "/index.html"
+```
+
+**Cognito callback URL coupling.** The Cognito module's `admin_callback_urls` must include the CloudFront URL (`https://<id>.cloudfront.net/login` in dev, `https://admin.ethiolink.app/login` in prod). Until that URL is registered, the hosted-UI redirect after sign-in fails with `redirect_mismatch`. The dev environment uses a two-apply pattern: first apply creates the distribution and surfaces the CloudFront URL via `terraform output admin_frontend_url`; the operator then updates `module.cognito.admin_callback_urls` to include the URL and re-applies.
+
 ### EventBridge
 
 Provisioned by `infra/terraform/modules/eventbridge/`. One scheduled rule per environment driving the `scheduled-send-reminders` Lambda:

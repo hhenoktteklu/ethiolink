@@ -353,7 +353,48 @@ output "eventbridge_rule_arn" {
   value       = module.eventbridge.rule_arn
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — admin frontend
+#
+# Private S3 bucket fronted by CloudFront with OAC. Dev uses the
+# CloudFront-assigned `<id>.cloudfront.net` domain — no custom
+# alias, no ACM cert work needed for dev.
+#
+# Pre-build step:
+#     cd admin
+#     # Set VITE_COGNITO_DOMAIN, VITE_COGNITO_ADMIN_CLIENT_ID,
+#     # VITE_ADMIN_REDIRECT_URI, VITE_API_BASE_URL — see admin/README.md.
+#     npm ci && npm run build
+# -----------------------------------------------------------------------------
+
+module "admin_frontend" {
+  source = "../../modules/admin-frontend"
+
+  environment     = "dev"
+  admin_dist_path = abspath("${path.root}/../../../admin/dist")
+
+  # No custom domain in dev — operators visit the CloudFront URL
+  # directly. The Cognito callback list still needs to include
+  # this URL, but registering the CloudFront-assigned domain
+  # there is a Cognito follow-up the operator does after the
+  # first apply (the domain is only known post-create).
+}
+
+output "admin_frontend_url" {
+  description = "URL operators visit to use the admin dashboard."
+  value       = module.admin_frontend.admin_url
+}
+
+output "admin_frontend_bucket" {
+  description = "Private S3 bucket name."
+  value       = module.admin_frontend.bucket_name
+}
+
+output "admin_frontend_distribution_id" {
+  description = "CloudFront distribution id — pass to `aws cloudfront create-invalidation` after a deploy."
+  value       = module.admin_frontend.cloudfront_distribution_id
+}
+
 # Phase 7 will add:
-#   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
 #   module "waf"            { source = "../../modules/waf"            ... }
 #   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }

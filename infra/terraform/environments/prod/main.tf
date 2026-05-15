@@ -379,7 +379,58 @@ output "eventbridge_rule_arn" {
   value       = module.eventbridge.rule_arn
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — admin frontend
+#
+# Same shape as dev with the real `admin.ethiolink.app` alias
+# attached when a us-east-1 ACM cert is available. Operators pass
+# the cert ARN via `terraform.tfvars`; until then this module
+# applies with empty values and CloudFront falls back to the
+# default certificate (operators access the dashboard via the
+# CloudFront-assigned URL).
+# -----------------------------------------------------------------------------
+
+variable "admin_custom_domain" {
+  description = "Admin SPA custom domain. Leave empty until the us-east-1 ACM cert is provisioned out-of-band; the module then attaches the alias on the next apply."
+  type        = string
+  default     = ""
+}
+
+variable "admin_acm_certificate_arn" {
+  description = "ARN of a us-east-1 ACM certificate covering `admin_custom_domain`. CloudFront requires `us-east-1` regardless of the application's primary region — that's a hard AWS constraint."
+  type        = string
+  default     = ""
+}
+
+module "admin_frontend" {
+  source = "../../modules/admin-frontend"
+
+  environment     = "prod"
+  admin_dist_path = abspath("${path.root}/../../../admin/dist")
+
+  custom_domain       = var.admin_custom_domain
+  acm_certificate_arn = var.admin_acm_certificate_arn
+
+  # Prod ships from edges closer to Ethiopia. PriceClass_200 adds
+  # the Cape Town + Mumbai edges that PriceClass_100 omits.
+  price_class = "PriceClass_200"
+}
+
+output "admin_frontend_url" {
+  description = "URL operators visit to use the admin dashboard. Switches between the CloudFront-assigned domain and the custom alias depending on whether the ACM cert is wired."
+  value       = module.admin_frontend.admin_url
+}
+
+output "admin_frontend_bucket" {
+  description = "Private S3 bucket name."
+  value       = module.admin_frontend.bucket_name
+}
+
+output "admin_frontend_distribution_id" {
+  description = "CloudFront distribution id — pass to `aws cloudfront create-invalidation` after a deploy."
+  value       = module.admin_frontend.cloudfront_distribution_id
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
 #   module "waf"            { source = "../../modules/waf"            ... }
 #   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }
