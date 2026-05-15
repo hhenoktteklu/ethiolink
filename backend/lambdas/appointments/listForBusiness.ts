@@ -26,6 +26,7 @@ import {
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
 import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
 import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
+import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import { loadConfig } from '../../shared/config/loadConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
@@ -34,6 +35,8 @@ import {
     AppointmentService,
 } from '../../shared/domains/appointments/appointmentService.js';
 import { toAppointmentView } from '../../shared/domains/appointments/appointmentView.js';
+import { PgNotificationLogRepository } from '../../shared/domains/notifications/notificationLogRepository.js';
+import { NotificationService } from '../../shared/domains/notifications/notificationService.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import { SlotService } from '../../shared/domains/availability/slotService.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
@@ -64,10 +67,17 @@ const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);
 const userService = new UserService(new PgUserRepository(pool));
+const notificationService = new NotificationService({
+    userRepository: new PgUserRepository(pool),
+    notificationLogRepository: new PgNotificationLogRepository(pool),
+    gateways: { MOCK: new MockNotificationGateway() },
+    logger: baseLogger,
+});
 const appointmentService = new AppointmentService({
     appointmentsRepo: new PgAppointmentsRepository(pool),
     businessRepo: new PgBusinessRepository(pool),
     serviceRepo: new PgServiceRepository(pool),
+    userRepo: new PgUserRepository(pool),
     slotService: new SlotService(
         new PgAvailabilityRepository(pool),
         new PgStaffRepository(pool),
@@ -81,6 +91,8 @@ const appointmentService = new AppointmentService({
     ),
     cashGateway: new CashGateway(),
     onlineGateway: new MockOnlineGateway(),
+    notificationService,
+    logger: baseLogger,
     options: {
         cancelCutoffMinutes: config.booking.cancelCutoffMinutes,
         timezone: config.booking.defaultTimezone,

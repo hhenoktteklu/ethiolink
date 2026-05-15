@@ -11,6 +11,21 @@
 //   * `appointmentStateMachine` — transition rules.
 //   * `PaymentGateway` (two instances, routed by `payment_method`) —
 //     `cashGateway` for CASH, `onlineGateway` for ONLINE_PENDING.
+//   * `NotificationService` — fan-out of booking lifecycle events
+//     to the recipient(s). Each successful mutation triggers ONE
+//     `dispatch` call against the appropriate template key (see
+//     `notifyBookingEvent`). Notifications are best-effort: any
+//     error inside the dispatch path is logged and swallowed at
+//     this layer so a failing notification cannot break a
+//     booking. The dispatcher itself already catches provider
+//     errors; the extra catch here is defense-in-depth against
+//     anything else (e.g. a stale DB session, a thrown
+//     `RepositoryError` on the log insert) and matches the
+//     PHASE_6_NOTIFICATIONS.md acceptance criterion: "A failing
+//     provider … does not break the booking flow." We notify on
+//     create / accept / reject / cancel / reschedule. Complete
+//     deliberately fires no notification in MVP — see the
+//     COMPLETE comment below.
 //
 // Method-by-method summary:
 //
@@ -51,7 +66,8 @@ import {
     OnlinePaymentsUnavailableError,
     PaymentGatewayError,
 } from '../../adapters/payments/PaymentGateway.js';
-import type { BusinessRepository } from '../businesses/businessRepository.js';
+import type { Logger } from '../../logging/logger.js';
+import type { Business, BusinessRepository } from '../businesses/businessRepository.js';
 import {
     SlotInvalidRangeError,
     SlotInvalidTimezoneError,
@@ -60,7 +76,13 @@ import {
     SlotServiceStaffMismatchError,
     SlotStaffNotFoundError,
 } from '../availability/slotService.js';
-import type { ServiceRepository } from '../services/serviceRepository.js';
+import type { NotificationService } from '../notifications/notificationService.js';
+import type {
+    BookingTemplateKey,
+    BookingTemplatePayload,
+} from '../notifications/templateRegistry.js';
+import type { Service, ServiceRepository } from '../services/serviceRepository.js';
+import type { UserRepository } from '../users/userRepository.js';
 
 import {
     type AppointmentActor,
@@ -223,10 +245,27 @@ export interface AppointmentServiceDependencies {
     readonly appointmentsRepo: AppointmentsRepository;
     readonly businessRepo: BusinessRepository;
     readonly serviceRepo: ServiceRepository;
-    readonly staffRepo: StaffRepository;
+    readonly userRepo: UserRepository;
     readonly slotService: SlotService;
     readonly cashGateway: PaymentGateway;
     readonly onlineGateway: PaymentGateway;
+    /**
+     * Notification dispatcher invoked after each successful
+     * lifecycle mutation (create / accept / reject / cancel /
+     * reschedule). Best-effort: errors from `dispatch` are
+     * logged + swallowed in `notifyBookingEvent`. Construct with
+     * a `MockNotificationGateway` for MVP — real providers plug
+     * in behind the same port.
+     */
+    readonly notificationService: NotificationService;
+    /**
+     * Structured logger used for the notification swallow path.
+     * Anything that escapes `NotificationService.dispatch` (which
+     * already catches provider failures) lands here as a warn so
+     * the admin can see a notification miss without the booking
+     * itself failing.
+     */
+    readonly logger: Logger;
     readonly options: AppointmentServiceOptions;
 }
 
@@ -362,19 +401,41 @@ export class AppointmentService {
             throw err;
         }
 
+        // (5) Notify the business owner that a customer just booked.
+        // Best-effort — see `notifyBookingEvent` for the swallow contract.
+        await this.notifyBusinessOwner(appointment, 'booking.requested.business');
+
         return Object.freeze<CreateAppointmentResult>({ appointment, payment });
     }
 
     // ----- Transitions ------------------------------------------------------
 
-    /** Business REQUESTED → ACCEPTED. */
+    /** Business REQUESTED → ACCEPTED. Notifies the customer. */
     async accept(id: string, caller: CallerContext): Promise<Appointment> {
-        return this.applyTransition(id, caller, 'BUSINESS', 'ACCEPT', null, null);
+        const appointment = await this.applyTransition(
+            id,
+            caller,
+            'BUSINESS',
+            'ACCEPT',
+            null,
+            null,
+        );
+        await this.notifyCustomer(appointment, 'booking.accepted.customer');
+        return appointment;
     }
 
-    /** Business REQUESTED → REJECTED. */
+    /** Business REQUESTED → REJECTED. Notifies the customer. */
     async reject(id: string, caller: CallerContext): Promise<Appointment> {
-        return this.applyTransition(id, caller, 'BUSINESS', 'REJECT', null, null);
+        const appointment = await this.applyTransition(
+            id,
+            caller,
+            'BUSINESS',
+            'REJECT',
+            null,
+            null,
+        );
+        await this.notifyCustomer(appointment, 'booking.rejected.customer');
+        return appointment;
     }
 
     /**
@@ -407,11 +468,30 @@ export class AppointmentService {
             fromStatus: appointment.status,
         });
 
-        return this.deps.appointmentsRepo.setStatus(id, {
+        const cancelled = await this.deps.appointmentsRepo.setStatus(id, {
             status: 'CANCELLED',
             cancelledBy: actor as CancelledBy,
             cancelReason: input.reason ?? null,
         });
+
+        // Notify the *other* side of the booking.
+        //   * CUSTOMER cancellation → tell the business owner.
+        //   * BUSINESS or ADMIN cancellation → tell the customer.
+        // ADMIN is treated like BUSINESS for the notification side
+        // because the customer is the affected party either way; the
+        // PHASE_6 rule "cancel by BUSINESS or ADMIN → cancelled.customer"
+        // makes the directionality explicit.
+        if (actor === 'CUSTOMER') {
+            await this.notifyBusinessOwner(cancelled, 'booking.cancelled.business', {
+                cancelReason: input.reason ?? null,
+            });
+        } else {
+            await this.notifyCustomer(cancelled, 'booking.cancelled.customer', {
+                cancelReason: input.reason ?? null,
+            });
+        }
+
+        return cancelled;
     }
 
     /**
@@ -475,20 +555,40 @@ export class AppointmentService {
             throw err;
         }
 
+        let finalRow = moved;
         if (moved.status === 'ACCEPTED') {
             // Reset business confirmation. The state machine has
             // already approved RESCHEDULE; this second write is the
             // status side of that transition.
-            return this.deps.appointmentsRepo.setStatus(id, {
+            finalRow = await this.deps.appointmentsRepo.setStatus(id, {
                 status: 'REQUESTED',
                 cancelledBy: null,
                 cancelReason: null,
             });
         }
-        return moved;
+
+        // Only CUSTOMER can reschedule in MVP — the state machine
+        // already enforced that above — so the recipient is always
+        // the business owner.
+        if (actor === 'CUSTOMER') {
+            await this.notifyBusinessOwner(
+                finalRow,
+                'booking.rescheduled.business',
+            );
+        }
+
+        return finalRow;
     }
 
-    /** Business ACCEPTED → COMPLETED. */
+    /**
+     * Business ACCEPTED → COMPLETED.
+     *
+     * No notification in MVP. The customer has already physically
+     * attended (that's the whole meaning of "completed"); telling
+     * them they were there isn't useful. The review-prompt notification
+     * lives on a separate scheduled trigger and is out of scope for
+     * Phase 6.
+     */
     async complete(id: string, caller: CallerContext): Promise<Appointment> {
         return this.applyTransition(id, caller, 'BUSINESS', 'COMPLETE', null, null);
     }
@@ -578,6 +678,156 @@ export class AppointmentService {
     private routePayment(method: PaymentMethod): PaymentGateway {
         return method === 'CASH' ? this.deps.cashGateway : this.deps.onlineGateway;
     }
+
+    // ----- Notification fan-out --------------------------------------------
+
+    /**
+     * Send a booking notification to the business owner attached
+     * to `appointment`. Resolves the business (for owner id + name)
+     * and the customer (for the display name shown in
+     * business-side templates), then hands off to
+     * `notifyBookingEvent` for the actual dispatch + swallow.
+     */
+    private async notifyBusinessOwner(
+        appointment: Appointment,
+        templateKey: BookingTemplateKey,
+        extras: NotifyExtras = {},
+    ): Promise<void> {
+        try {
+            const business = await this.deps.businessRepo.findById(
+                appointment.businessId,
+            );
+            if (!business) {
+                this.deps.logger.warn('Skipping business notification — business not found.', {
+                    appointmentId: appointment.id,
+                    businessId: appointment.businessId,
+                    templateKey,
+                });
+                return;
+            }
+            await this.notifyBookingEvent(
+                templateKey,
+                business.ownerUserId,
+                appointment,
+                /* needCustomerName */ true,
+                extras,
+                business,
+            );
+        } catch (err) {
+            this.swallowNotifyError(err, appointment.id, templateKey);
+        }
+    }
+
+    /**
+     * Send a booking notification to the customer attached to
+     * `appointment`. Resolves the business (for the display name
+     * shown in customer-side templates) and hands off.
+     */
+    private async notifyCustomer(
+        appointment: Appointment,
+        templateKey: BookingTemplateKey,
+        extras: NotifyExtras = {},
+    ): Promise<void> {
+        try {
+            await this.notifyBookingEvent(
+                templateKey,
+                appointment.customerId,
+                appointment,
+                /* needCustomerName */ false,
+                extras,
+                null,
+            );
+        } catch (err) {
+            this.swallowNotifyError(err, appointment.id, templateKey);
+        }
+    }
+
+    /**
+     * Shared body of the two fan-out helpers. Builds the
+     * `BookingTemplatePayload` from the appointment + the
+     * already-fetched (or to-be-fetched) business + service +
+     * customer-display-name and calls
+     * `notificationService.dispatch`.
+     *
+     * The dispatcher itself catches `NotificationGatewayError`
+     * subclasses; the outer try/catch in `notifyBusinessOwner` /
+     * `notifyCustomer` handles anything else (e.g. a thrown
+     * `RepositoryError` while inserting the QUEUED log row) so
+     * the booking flow is never blocked by a notification miss.
+     */
+    private async notifyBookingEvent(
+        templateKey: BookingTemplateKey,
+        recipientUserId: string,
+        appointment: Appointment,
+        needCustomerName: boolean,
+        extras: NotifyExtras,
+        preloadedBusiness: Business | null,
+    ): Promise<void> {
+        const businessP = preloadedBusiness
+            ? Promise.resolve(preloadedBusiness)
+            : this.deps.businessRepo.findById(appointment.businessId);
+        const serviceP = this.deps.serviceRepo.findById(appointment.serviceId);
+        const customerP = needCustomerName
+            ? this.deps.userRepo.findById(appointment.customerId)
+            : Promise.resolve(null);
+
+        const [business, service, customer] = await Promise.all([
+            businessP,
+            serviceP,
+            customerP,
+        ]);
+
+        if (!business || !service) {
+            this.deps.logger.warn('Skipping booking notification — missing business or service.', {
+                appointmentId: appointment.id,
+                templateKey,
+                businessMissing: !business,
+                serviceMissing: !service,
+            });
+            return;
+        }
+
+        const payload: BookingTemplatePayload = {
+            businessName: businessLabel(business),
+            serviceName: serviceLabel(service),
+            customerDisplayName: customer?.displayName ?? null,
+            startsAtUtc: appointment.startsAt.toISOString(),
+            cancelReason: extras.cancelReason ?? null,
+            rescheduleNotes: extras.rescheduleNotes ?? null,
+        };
+
+        await this.deps.notificationService.dispatch({
+            templateKey,
+            recipientUserId,
+            payload,
+            channel: 'MOCK',
+        });
+    }
+
+    private swallowNotifyError(
+        err: unknown,
+        appointmentId: string,
+        templateKey: BookingTemplateKey,
+    ): void {
+        this.deps.logger.warn('Booking notification dispatch failed (swallowed).', {
+            appointmentId,
+            templateKey,
+            error: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
+interface NotifyExtras {
+    readonly cancelReason?: string | null;
+    readonly rescheduleNotes?: string | null;
+}
+
+function businessLabel(business: Business): string {
+    return business.name ?? 'your business';
+}
+
+function serviceLabel(service: Service): string {
+    return service.name.en;
 }
 
 // ---------------------------------------------------------------------------

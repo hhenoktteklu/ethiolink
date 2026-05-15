@@ -27,6 +27,7 @@ import { describe, it } from 'node:test';
 
 import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
 import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
+import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import type {
     Appointment,
     AppointmentStatus,
@@ -44,11 +45,15 @@ import {
 } from '../../shared/domains/appointments/appointmentService.js';
 import type { Slot, SlotService } from '../../shared/domains/availability/slotService.js';
 import type { Business } from '../../shared/domains/businesses/businessRepository.js';
+import { NotificationService } from '../../shared/domains/notifications/notificationService.js';
 import type { Service } from '../../shared/domains/services/serviceRepository.js';
+import { createLogger } from '../../shared/logging/logger.js';
 
 import { InMemoryAppointmentsRepository } from '../_fakes/InMemoryAppointmentsRepository.js';
 import { InMemoryBusinessRepository } from '../_fakes/InMemoryBusinessRepository.js';
+import { InMemoryNotificationLogRepository } from '../_fakes/InMemoryNotificationLogRepository.js';
 import { InMemoryServiceRepository } from '../_fakes/InMemoryServiceRepository.js';
+import { InMemoryUserRepository } from '../_fakes/InMemoryUserRepository.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -164,6 +169,8 @@ interface Env {
     readonly apptRepo: InMemoryAppointmentsRepository;
     readonly businessRepo: InMemoryBusinessRepository;
     readonly serviceRepo: InMemoryServiceRepository;
+    readonly userRepo: InMemoryUserRepository;
+    readonly notificationLogRepo: InMemoryNotificationLogRepository;
 }
 
 interface EnvOptions {
@@ -175,21 +182,46 @@ function buildEnv(options: EnvOptions = {}): Env {
     const apptRepo = new InMemoryAppointmentsRepository();
     const businessRepo = new InMemoryBusinessRepository();
     const serviceRepo = new InMemoryServiceRepository();
+    const userRepo = new InMemoryUserRepository();
+    const notificationLogRepo = new InMemoryNotificationLogRepository();
 
     businessRepo.seed(makeBusiness());
     serviceRepo.seed(makeService());
+
+    // Seed the customer + owner so the notification dispatcher can
+    // resolve recipients. `upsertFromAuth` is the only public write
+    // path on the in-memory fake; we patch the id back on through a
+    // private cast so the seeded users match the constants the rest
+    // of the suite expects.
+    seedUser(userRepo, CUSTOMER_ID, 'CUSTOMER', 'Henok');
+    seedUser(userRepo, OWNER_ID, 'BUSINESS_OWNER', 'Owner');
 
     const slots = options.slots ?? [
         Object.freeze<Slot>({ startUtc: STARTS_AT_ISO, endUtc: ENDS_AT_ISO }),
     ];
 
+    const logger = createLogger({
+        level: 'error',
+        sink: { write: () => {} },
+    });
+
+    const notificationService = new NotificationService({
+        userRepository: userRepo,
+        notificationLogRepository: notificationLogRepo,
+        gateways: { MOCK: new MockNotificationGateway() },
+        logger,
+    });
+
     const service = new AppointmentService({
         appointmentsRepo: apptRepo,
         businessRepo,
         serviceRepo,
+        userRepo,
         slotService: makeSlotService(slots),
         cashGateway: new CashGateway(),
         onlineGateway: new MockOnlineGateway(),
+        notificationService,
+        logger,
         options: {
             cancelCutoffMinutes:
                 options.cancelCutoffMinutes ?? DEFAULT_CUTOFF_MINUTES,
@@ -197,7 +229,39 @@ function buildEnv(options: EnvOptions = {}): Env {
         },
     });
 
-    return { service, apptRepo, businessRepo, serviceRepo };
+    return { service, apptRepo, businessRepo, serviceRepo, userRepo, notificationLogRepo };
+}
+
+/**
+ * Seed a user with a known id. The in-memory `upsertFromAuth`
+ * assigns a fresh UUID; we overwrite via the internal Map so the
+ * appointment-service test can keep referencing the fixed
+ * CUSTOMER_ID / OWNER_ID constants.
+ */
+function seedUser(
+    userRepo: InMemoryUserRepository,
+    id: string,
+    role: 'CUSTOMER' | 'BUSINESS_OWNER' | 'ADMIN',
+    displayName: string,
+): void {
+    const internal = userRepo as unknown as {
+        rowsById: Map<string, unknown>;
+        rowsBySub: Map<string, unknown>;
+    };
+    const now = new Date();
+    const row = Object.freeze({
+        id,
+        cognitoSub: `sub-${id}`,
+        email: `${displayName.toLowerCase()}@example.com`,
+        phone: `+25191100${id.slice(-4)}`,
+        role,
+        status: 'ACTIVE' as const,
+        displayName,
+        createdAt: now,
+        updatedAt: now,
+    });
+    internal.rowsById.set(id, row);
+    internal.rowsBySub.set(`sub-${id}`, row);
 }
 
 // ---------------------------------------------------------------------------
@@ -492,5 +556,176 @@ describe('AppointmentService.reschedule', () => {
                 ),
             InvalidAppointmentTransitionError,
         );
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Booking lifecycle notifications
+// ---------------------------------------------------------------------------
+//
+// Focused coverage of the Phase 6 fan-out: each mutation should
+// leave exactly one `notification_logs` row, with the right
+// template key, recipient, and SENT status (the mock gateway
+// always succeeds). `complete` produces no notification — that's
+// asserted too.
+
+describe('AppointmentService — booking lifecycle notifications', () => {
+    it('create fires booking.requested.business to the business owner', async () => {
+        const env = buildEnv();
+        await env.service.create({
+            customerId: CUSTOMER_ID,
+            staffId: STAFF_ID,
+            serviceId: SERVICE_ID,
+            startsAtUtc: STARTS_AT_ISO,
+            paymentMethod: 'CASH',
+        });
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.requested.business');
+        assert.strictEqual(logs[0]!.recipientUserId, OWNER_ID);
+        assert.strictEqual(logs[0]!.status, 'SENT');
+        assert.strictEqual(logs[0]!.channel, 'MOCK');
+    });
+
+    it('accept fires booking.accepted.customer to the customer', async () => {
+        const env = buildEnv();
+        const seeded = makeAppointment();
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.accept(seeded.id, caller(OWNER_ID, 'BUSINESS_OWNER'));
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.accepted.customer');
+        assert.strictEqual(logs[0]!.recipientUserId, CUSTOMER_ID);
+        assert.strictEqual(logs[0]!.status, 'SENT');
+    });
+
+    it('reject fires booking.rejected.customer to the customer', async () => {
+        const env = buildEnv();
+        const seeded = makeAppointment();
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.reject(seeded.id, caller(OWNER_ID, 'BUSINESS_OWNER'));
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.rejected.customer');
+        assert.strictEqual(logs[0]!.recipientUserId, CUSTOMER_ID);
+    });
+
+    it('CUSTOMER cancel fires booking.cancelled.business to the business owner', async () => {
+        const env = buildEnv();
+        const seeded = makeAppointment();
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.cancel(
+            seeded.id,
+            caller(CUSTOMER_ID, 'CUSTOMER'),
+            { reason: 'Need to move to next week' },
+        );
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.cancelled.business');
+        assert.strictEqual(logs[0]!.recipientUserId, OWNER_ID);
+        assert.deepStrictEqual(
+            (logs[0]!.payload as { cancelReason: string | null }).cancelReason,
+            'Need to move to next week',
+        );
+    });
+
+    it('BUSINESS cancel fires booking.cancelled.customer to the customer', async () => {
+        const env = buildEnv();
+        const seeded = makeAppointment();
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.cancel(
+            seeded.id,
+            caller(OWNER_ID, 'BUSINESS_OWNER'),
+            { reason: 'Salon closed today' },
+        );
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.cancelled.customer');
+        assert.strictEqual(logs[0]!.recipientUserId, CUSTOMER_ID);
+    });
+
+    it('ADMIN cancel fires booking.cancelled.customer to the customer', async () => {
+        const env = buildEnv();
+        const seeded = makeAppointment();
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.cancel(
+            seeded.id,
+            caller(ADMIN_ID, 'ADMIN'),
+            { reason: 'Customer asked support to handle it' },
+        );
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.cancelled.customer');
+        assert.strictEqual(logs[0]!.recipientUserId, CUSTOMER_ID);
+    });
+
+    it('CUSTOMER reschedule fires booking.rescheduled.business to the business owner', async () => {
+        const env = buildEnv({
+            slots: [
+                Object.freeze<Slot>({ startUtc: STARTS_AT_ISO, endUtc: ENDS_AT_ISO }),
+                Object.freeze<Slot>({
+                    startUtc: '2026-05-15T07:00:00.000Z',
+                    endUtc: '2026-05-15T08:00:00.000Z',
+                }),
+            ],
+        });
+        const seeded = makeAppointment();
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.reschedule(
+            seeded.id,
+            caller(CUSTOMER_ID, 'CUSTOMER'),
+            { newStartsAtUtc: '2026-05-15T07:00:00.000Z' },
+        );
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.templateKey, 'booking.rescheduled.business');
+        assert.strictEqual(logs[0]!.recipientUserId, OWNER_ID);
+    });
+
+    it('complete does not fire any notification', async () => {
+        const env = buildEnv();
+        const seeded = makeAppointment({ status: 'ACCEPTED' });
+        env.apptRepo.seedAppointment(seeded);
+
+        await env.service.complete(seeded.id, caller(OWNER_ID, 'BUSINESS_OWNER'));
+
+        assert.strictEqual(env.notificationLogRepo.size(), 0);
+    });
+
+    it('swallows notification dispatch failures and does not break the booking', async () => {
+        // Use an env where the dispatcher's recipient lookup fails by
+        // wiping the seeded owner row. The customer create call must
+        // still succeed; the notification just doesn't land.
+        const env = buildEnv();
+        const internal = env.userRepo as unknown as {
+            rowsById: Map<string, unknown>;
+        };
+        internal.rowsById.delete(OWNER_ID);
+
+        const result = await env.service.create({
+            customerId: CUSTOMER_ID,
+            staffId: STAFF_ID,
+            serviceId: SERVICE_ID,
+            startsAtUtc: STARTS_AT_ISO,
+            paymentMethod: 'CASH',
+        });
+
+        assert.strictEqual(result.appointment.status, 'REQUESTED');
+        // No log row written — the dispatcher refuses to insert when
+        // the recipient doesn't resolve.
+        assert.strictEqual(env.notificationLogRepo.size(), 0);
     });
 });
