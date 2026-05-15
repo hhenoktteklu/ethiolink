@@ -207,6 +207,17 @@ CORS for the two media buckets is driven by the `admin_allowed_origins` and `mob
 
 `S3StorageGateway` (`backend/shared/adapters/storage/`) is the sole writer for both media buckets and picks the target by `IssueUploadUrlInput.isPublic`. Lambda env vars: `S3_BUCKET_MEDIA_PUBLIC` ← `media_public_bucket_name`, `S3_BUCKET_MEDIA_PRIVATE` ← `media_private_bucket_name`. A gateway-type VPC endpoint to S3 is intentionally not created in this module — it lands once the NAT egress cost on real traffic justifies the change.
 
+### EventBridge
+
+Provisioned by `infra/terraform/modules/eventbridge/`. One scheduled rule per environment driving the `scheduled-send-reminders` Lambda:
+
+- **Rule.** `aws_cloudwatch_event_rule` with `schedule_expression = "cron(0/15 * * * ? *)"` — every 15 minutes in UTC. The Lambda handler does its own `Africa/Addis_Ababa` timezone math for the reminder-window arithmetic (`[now + 23h45m, now + 24h00m)`), so the rule's UTC schedule is correct as-is.
+- **Target.** `aws_cloudwatch_event_target` pointing at the `scheduled-send-reminders` function ARN sourced from the Lambda module. No `input` / `input_transformer` — the handler's `ScheduledEvent` shape doesn't read the payload beyond `event.resources[0]` for logging.
+- **Permission.** `aws_lambda_permission` grants the `events.amazonaws.com` service principal `lambda:InvokeFunction` on the function, scoped to the rule's ARN as the `source_arn`. Without it the rule fires but the invocation 403s.
+- **Disable knob.** The module's `enabled` boolean (default `true`) flips the rule between `ENABLED` and `DISABLED` without removing the resource — useful for halting reminder dispatch in one environment while debugging.
+
+A CloudWatch alarm on the rule's `FailedInvocations` metric lands alongside the rest of the alarms in the `cloudwatch` module commit.
+
 ### CloudWatch
 
 - Log groups per Lambda, 30-day retention in dev, 90-day in prod.

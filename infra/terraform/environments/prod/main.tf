@@ -354,8 +354,32 @@ output "api_gateway_rest_api_id" {
   value       = module.api_gateway.rest_api_id
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — EventBridge
+#
+# Same 15-minute schedule as dev. Same `enabled = true` posture —
+# prod needs reminders firing from day one. The CloudWatch alarm
+# on this rule's `FailedInvocations` metric lands alongside the
+# `cloudwatch` module.
+# -----------------------------------------------------------------------------
+
+module "eventbridge" {
+  source = "../../modules/eventbridge"
+
+  environment = "prod"
+
+  scheduled_reminders_function_name = module.lambda.scheduled_reminders_function_name
+  scheduled_reminders_function_arn  = module.lambda.scheduled_reminders_function_arn
+
+  enabled = true
+}
+
+output "eventbridge_rule_arn" {
+  description = "ARN of the 15-minute scheduled-reminder rule."
+  value       = module.eventbridge.rule_arn
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
 #   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
 #   module "waf"            { source = "../../modules/waf"            ... }
 #   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }

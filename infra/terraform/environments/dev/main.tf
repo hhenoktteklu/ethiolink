@@ -329,8 +329,31 @@ output "api_gateway_rest_api_id" {
   value       = module.api_gateway.rest_api_id
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — EventBridge
+#
+# 15-minute scheduled rule firing the `scheduled-send-reminders`
+# Lambda. Enabled in dev so the reminder lifecycle can be smoke-
+# tested against the real DB once migrations land.
+# -----------------------------------------------------------------------------
+
+module "eventbridge" {
+  source = "../../modules/eventbridge"
+
+  environment = "dev"
+
+  scheduled_reminders_function_name = module.lambda.scheduled_reminders_function_name
+  scheduled_reminders_function_arn  = module.lambda.scheduled_reminders_function_arn
+
+  enabled = true
+}
+
+output "eventbridge_rule_arn" {
+  description = "ARN of the 15-minute scheduled-reminder rule. Consumed by the future CloudWatch alarms module."
+  value       = module.eventbridge.rule_arn
+}
+
 # Phase 7 will add:
-#   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
 #   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
 #   module "waf"            { source = "../../modules/waf"            ... }
 #   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }
