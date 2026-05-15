@@ -734,6 +734,106 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/appointments:
+    get:
+      tags: [auth]
+      operationId: listAppointmentsForBusiness
+      summary: List a business's incoming appointments.
+      description: |
+        Authenticated. Caller must own the business or be `ADMIN`. The
+        ownership check is enforced by `AppointmentService.listForBusiness`
+        and surfaces as 403 on failure.
+
+        Listing order: `starts_at DESC, id DESC`. No cursor pagination in
+        MVP — a single business's appointment count is small.
+      parameters:
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AppointmentStatus'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on `startsAt`.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound on `startsAt`.
+      responses:
+        '200':
+          description: The business's appointments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /appointments:
+    post:
+      tags: [auth]
+      operationId: createAppointment
+      summary: Book an appointment for the calling customer.
+      description: |
+        Authenticated. Requires the caller's role to be `CUSTOMER`. The
+        body specifies the staff member, the service, the desired
+        `startsAt` (ISO-8601), and the payment method. The service
+        validates that the requested instant is in the computed slot
+        list for that day and authorizes payment before INSERT.
+
+        Payment methods:
+          * `CASH` — settles in person; succeeds immediately.
+          * `ONLINE_PENDING` — returns 400 with `ONLINE_PAYMENTS_UNAVAILABLE`
+            in the response body in MVP. Real Telebirr / Chapa / CBE_BIRR
+            providers ship post-MVP behind the same gateway port.
+
+        Double-book races are caught by the migration-0009 exclusion
+        constraint and translated to 409 `SLOT_UNAVAILABLE`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAppointmentRequest'
+      responses:
+        '200':
+          description: The created appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -911,6 +1011,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /me/appointments:
+    get:
+      tags: [auth]
+      operationId: listMyAppointments
+      summary: List the caller's own appointments.
+      description: |
+        Authenticated. Returns appointments where the caller is the
+        customer. `BUSINESS_OWNER` and `ADMIN` callers see only their
+        own customer-side bookings (typically empty); the business-side
+        listing lives at `GET /v1/businesses/{businessId}/appointments`.
+
+        Listing order: `starts_at DESC, id DESC`. No cursor pagination
+        in MVP.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AppointmentStatus'
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on `startsAt`.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound on `startsAt`.
+      responses:
+        '200':
+          description: The caller's appointments.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentList'
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -1479,6 +1627,110 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Slot'
+    AppointmentStatus:
+      type: string
+      enum:
+        - REQUESTED
+        - ACCEPTED
+        - REJECTED
+        - CANCELLED
+        - COMPLETED
+        - NO_SHOW
+    PaymentMethod:
+      type: string
+      enum:
+        - CASH
+        - ONLINE_PENDING
+    CancelledBy:
+      type: [string, 'null']
+      enum:
+        - CUSTOMER
+        - BUSINESS
+        - ADMIN
+        - null
+    CreateAppointmentRequest:
+      type: object
+      required: [staffId, serviceId, startsAt, paymentMethod]
+      properties:
+        staffId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+          description: UTC ISO-8601 timestamp the customer wants to book.
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        notes:
+          type: [string, 'null']
+          maxLength: 2000
+    AppointmentView:
+      type: object
+      required:
+        - id
+        - customerId
+        - businessId
+        - serviceId
+        - staffId
+        - startsAt
+        - endsAt
+        - status
+        - paymentMethod
+        - priceEtb
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        businessId:
+          type: string
+          format: uuid
+        serviceId:
+          type: string
+          format: uuid
+        staffId:
+          type: string
+          format: uuid
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/AppointmentStatus'
+        paymentMethod:
+          $ref: '#/components/schemas/PaymentMethod'
+        priceEtb:
+          type: number
+          description: Price in ETB, snapshotted from `services.price_etb` at booking time.
+        notes:
+          type: [string, 'null']
+        cancelledBy:
+          $ref: '#/components/schemas/CancelledBy'
+        cancelReason:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AppointmentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppointmentView'
     MediaView:
       type: object
       required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]
