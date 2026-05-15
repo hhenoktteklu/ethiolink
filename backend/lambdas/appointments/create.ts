@@ -40,7 +40,7 @@ import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvi
 import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
 import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
 import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
 import {
@@ -87,7 +87,7 @@ import {
 // Cold-start init. Shared with `listMine` / `listForBusiness` only
 // through the service interface — each handler builds its own
 // instances (matches Phase 2 / 3 convention).
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);

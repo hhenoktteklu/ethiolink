@@ -10,7 +10,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import { BusinessService } from '../../shared/domains/businesses/businessService.js';
@@ -25,7 +25,7 @@ import { createLogger } from '../../shared/logging/logger.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const businessService = new BusinessService(new PgBusinessRepository(getPool(config)));
 

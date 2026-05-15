@@ -22,7 +22,7 @@ import {
     TokenInvalidError,
 } from '../../../shared/adapters/auth/AuthProvider.js';
 import { CognitoAuthProvider } from '../../../shared/adapters/auth/CognitoAuthProvider.js';
-import { loadConfig } from '../../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../../shared/db/pgClient.js';
 import { PgAdminActionRepository } from '../../../shared/domains/admin/adminActionRepository.js';
 import {
@@ -56,7 +56,7 @@ import { authorizeAdmin } from '../_authz.js';
 
 const NOTES_MAX = 2000;
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);

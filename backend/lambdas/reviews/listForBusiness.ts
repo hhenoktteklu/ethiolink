@@ -13,7 +13,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
 import { PgReviewRepository } from '../../shared/domains/reviews/reviewRepository.js';
@@ -29,7 +29,7 @@ import { createLogger } from '../../shared/logging/logger.js';
 
 const MAX_LIMIT = 100;
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const pool = getPool(config);
 const reviewService = new ReviewService(

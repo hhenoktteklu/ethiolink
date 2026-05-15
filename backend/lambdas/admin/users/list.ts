@@ -22,7 +22,7 @@ import {
     type UserRole,
 } from '../../../shared/adapters/auth/AuthProvider.js';
 import { CognitoAuthProvider } from '../../../shared/adapters/auth/CognitoAuthProvider.js';
-import { loadConfig } from '../../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../../shared/db/pgClient.js';
 import {
     PgUserRepository,
@@ -46,7 +46,7 @@ const MAX_LIMIT = 100;
 const USER_STATUSES: readonly UserStatus[] = ['ACTIVE', 'SUSPENDED', 'DELETED'];
 const USER_ROLES: readonly UserRole[] = ['CUSTOMER', 'BUSINESS_OWNER', 'ADMIN'];
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);

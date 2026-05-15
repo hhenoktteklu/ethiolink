@@ -6,7 +6,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import {
@@ -26,7 +26,7 @@ import { createLogger } from '../../shared/logging/logger.js';
 
 import { UUID_RE } from './_validators.js';
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const pool = getPool(config);
 const availabilityService = new AvailabilityService(

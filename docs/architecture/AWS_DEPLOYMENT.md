@@ -141,7 +141,16 @@ Provisioned by `infra/terraform/modules/lambda/`. Node.js 20 runtime. **One `aws
 | `BOOKING_*`                      | module input (defaults match `backend/.env.example`)     |
 | `DEFAULT_TIMEZONE`               | module input (default `Africa/Addis_Ababa`)              |
 
-**Password resolution.** `PG_PASSWORD` is **never** set as a Lambda environment variable — env vars are visible in plaintext in the AWS console and in the Terraform state file. Instead, every function receives `PG_SECRET_ARN = <master_secret_arn>` and the runtime resolves the secret at cold-start before `loadConfig` runs. The cold-start shim (`backend/shared/config/loadSecretsThenConfig.ts`) is a separate scheduled follow-up commit; until it lands, the Lambdas fail at startup because `loadConfig` requires `PG_PASSWORD` to be present. This is acceptable for the Lambda-deploy commit because no Lambda is reachable until API Gateway / EventBridge wire trigger sources. The shim commit is gated to land before the smoke-test commit.
+**Password resolution.** `PG_PASSWORD` is **never** set as a Lambda environment variable — env vars are visible in plaintext in the AWS console and in the Terraform state file. Instead, every function receives `PG_SECRET_ARN = <master_secret_arn>` and the runtime resolves the secret at cold-start before `loadConfig` runs. The shim is `backend/shared/config/loadSecretsThenConfig.ts`:
+
+  1. If `PG_SECRET_ARN` is absent (local dev), delegates directly to `loadConfig(env)` with no SDK import and no network call — preserves the docker-compose path byte-for-byte.
+  2. If present, looks up the cached value for that ARN at module scope (warm-invocation fast path).
+  3. On cache miss, calls `secretsResolver.resolve(arn)` — the default resolver lazy-imports `@aws-sdk/client-secrets-manager` and calls `GetSecretValueCommand`. Tests inject an in-memory resolver and a fresh cache to keep behavior deterministic.
+  4. Parses the JSON shape the Terraform RDS module writes (`{ username, password, engine, host, port, dbname, dbInstanceIdentifier }`). Malformed JSON, missing `password`, or missing `username` throws `SecretResolutionError`.
+  5. Builds a derived env where `PG_PASSWORD` always comes from the secret (explicit `PG_SECRET_ARN` is the operator's signal), and `PG_HOST` / `PG_PORT` / `PG_DATABASE` / `PG_USER` defer to the input env when present and fall back to the secret's values when not. This lets the Terraform Lambda env point `PG_HOST` at the RDS Proxy while the secret's `host` value (the direct DB endpoint) is only used by the migration runner.
+  6. Delegates to `loadConfig(derivedEnv)` and returns the frozen `AppConfig`.
+
+Every Lambda handler's cold-start init calls `await loadSecretsThenConfig()` at module top level (Node 20 ESM supports top-level `await`) instead of the previous synchronous `loadConfig()`. The 49 handlers were swapped mechanically in the same commit that introduced the shim.
 
 **IAM grouping.** One shared `ethiolink-${env}-lambda-exec` role for every function in the env. Carries the AWS-managed VPC access policy (logs + ENI), an inline policy that grants `secretsmanager:GetSecretValue` on the RDS master secret only, and `s3:GetObject` / `s3:PutObject` on both media buckets plus `s3:DeleteObject` on the private bucket. Per-domain or per-function role splitting is a follow-up commit paired with API Gateway (the first call site where the over-permissive role becomes observable).
 

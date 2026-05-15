@@ -16,7 +16,7 @@ import {
     TokenInvalidError,
 } from '../../shared/adapters/auth/AuthProvider.js';
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
 import { UserService } from '../../shared/domains/users/userService.js';
@@ -26,7 +26,7 @@ import { internalError, ok, unauthenticated } from '../../shared/http/responses.
 import { createLogger } from '../../shared/logging/logger.js';
 
 // Cold-start initialization. Lambdas reuse this across warm invocations.
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const userRepository = new PgUserRepository(getPool(config));

@@ -17,7 +17,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgCategoryRepository } from '../../shared/domains/categories/categoryRepository.js';
 import { CategoryService } from '../../shared/domains/categories/categoryService.js';
@@ -28,7 +28,7 @@ import { createLogger } from '../../shared/logging/logger.js';
 // Cold-start initialization. CategoryService is stateless beyond its
 // pool reference, so it is safe to construct once at module load and
 // reuse across warm invocations.
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const categoryService = new CategoryService(
     new PgCategoryRepository(getPool(config)),

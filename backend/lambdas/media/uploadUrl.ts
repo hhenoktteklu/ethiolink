@@ -34,7 +34,7 @@ import {
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
 import { S3StorageGateway } from '../../shared/adapters/storage/S3StorageGateway.js';
 import { StorageError } from '../../shared/adapters/storage/StorageGateway.js';
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import {
@@ -72,7 +72,7 @@ import {
 // Cold-start init. S3StorageGateway throws here if S3 buckets are
 // unset — these handlers cannot function without them, so failing
 // loudly at module load is the correct behaviour.
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);

@@ -40,7 +40,7 @@ import {
     TokenInvalidError,
 } from '../../shared/adapters/auth/AuthProvider.js';
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import {
@@ -75,7 +75,7 @@ import {
     parseWeekday,
 } from './_validators.js';
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);

@@ -22,7 +22,7 @@
 
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import {
@@ -40,7 +40,7 @@ import {
 import { createLogger } from '../../shared/logging/logger.js';
 
 // Cold-start init. Services are stateless beyond their pool reference.
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const pool = getPool(config);
 const businessService = new BusinessService(new PgBusinessRepository(pool));

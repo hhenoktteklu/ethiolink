@@ -56,7 +56,7 @@
 import type { ScheduledEvent } from 'aws-lambda';
 
 import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
-import { loadConfig } from '../../shared/config/loadConfig.js';
+import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import type {
     Appointment,
@@ -138,7 +138,7 @@ export interface ReminderBatchDeps {
 // Cold-start init
 // ---------------------------------------------------------------------------
 
-const config = loadConfig();
+const config = await loadSecretsThenConfig();
 const baseLogger = createLogger({ level: config.logLevel });
 const pool = getPool(config);
 const appointmentsRepo = new PgAppointmentsRepository(pool);
