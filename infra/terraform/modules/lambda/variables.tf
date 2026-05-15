@@ -229,6 +229,12 @@ variable "function_overrides" {
   default = {}
 }
 
+variable "function_env_overrides" {
+  description = "Per-function environment-variable overrides merged on top of the shared env block. Map keyed by the function's logical id; the inner map's keys override matching keys in the shared env, additional keys are appended. Currently used in prod to point `maintenance-db-migrate` at the direct RDS endpoint while every other function targets the proxy. Empty map = every function gets exactly the shared env."
+  type    = map(map(string))
+  default = {}
+}
+
 variable "tags" {
   description = "Additional tags applied to every resource created by this module."
   type        = map(string)

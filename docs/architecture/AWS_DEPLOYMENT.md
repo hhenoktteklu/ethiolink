@@ -166,6 +166,22 @@ Every Lambda handler's cold-start init calls `await loadSecretsThenConfig()` at 
 
 **Log groups.** One CloudWatch log group per function at `/aws/lambda/<function-name>` with environment-specific retention (30 days dev / 90 days prod). Explicit `aws_cloudwatch_log_group` resources rather than letting Lambda auto-create — auto-created groups default to "never expire", which is cost-hostile.
 
+**Migration runner.** A 50th function, `maintenance-db-migrate`, applies database migrations against RDS. It's NOT wired to API Gateway or EventBridge — operators invoke it manually after every `terraform apply` that ships a new migration:
+
+```bash
+aws lambda invoke \
+    --function-name "$(terraform output -raw lambda_db_migrate_function_name)" \
+    --cli-binary-format raw-in-base64-out \
+    /tmp/migrate-response.json
+cat /tmp/migrate-response.json
+```
+
+The handler returns `{ applied: string[], skipped: string[], failed: { filename, error }[], status: "success" | "partial_failure", target: string }`. The same `runMigrations` function backs the local `npm run db:migrate` CLI, so laptop + Lambda apply the exact same files in the exact same order — the `schema_migrations` ledger table dedupes re-invocations.
+
+**Migration runner — direct DB endpoint.** In prod the function's `PG_HOST` env is overridden to point at the direct RDS endpoint (`module.rds.db_endpoint`) instead of the proxy. RDS Proxy's prepared-statement caching interferes with DDL (CREATE TABLE / ALTER TABLE / CREATE INDEX) — a migration would apply against the proxy but partially-fail when the proxy's cached session state collides with the new schema. The direct endpoint bypasses the proxy entirely. The `function_env_overrides` map on the Lambda module is the seam that wires the override.
+
+**Packaging delta for the migration runner.** `backend/scripts/package.sh` copies `backend/db/` into `dist/db/` so the deployment zip contains `db/migrate.mjs` + `db/migrations/*.sql` alongside the compiled Lambda handlers. The Lambda's runner reads the SQL files at runtime from `/var/task/db/migrations/`.
+
 ### RDS
 
 Provisioned by `infra/terraform/modules/rds/`. One PostgreSQL 15 instance per environment, sitting on the VPC's private subnets with `sg-rds` attached (ingress on 5432 from `sg-lambda` only). Master credentials live in Secrets Manager under the stable name `ethiolink/${env}/rds/master` with the JSON shape `{ username, password, engine, host, port, dbname, dbInstanceIdentifier }` so the AWS-managed rotation Lambdas drop in without a value-shape change.

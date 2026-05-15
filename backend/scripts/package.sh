@@ -109,6 +109,19 @@ cp package.json package-lock.json "${DIST_DIR}/"
 rm -f "${DIST_DIR}/package.json" "${DIST_DIR}/package-lock.json"
 
 # -----------------------------------------------------------------------------
+# 3b. Copy db/ into dist/ for the migration Lambda.
+# -----------------------------------------------------------------------------
+#
+# The `maintenance-db-migrate` Lambda imports
+# `backend/db/migrate.mjs` (the same runner the local `npm run
+# db:migrate` CLI uses). tsc does not process `.mjs` files, so we
+# copy them in verbatim. The migration `.sql` files are read by
+# the runner at runtime; they also need to be in the bundle.
+
+echo "==> Copying db/ into dist/ for the migration Lambda"
+cp -r db "${DIST_DIR}/"
+
+# -----------------------------------------------------------------------------
 # 4. Zip dist/ in place.
 # -----------------------------------------------------------------------------
 

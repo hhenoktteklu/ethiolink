@@ -49,3 +49,13 @@ output "scheduled_reminders_function_name" {
   description = "Convenience output: name of the `scheduled-send-reminders` function. Useful for `aws lambda invoke --function-name <name>` smoke tests."
   value       = aws_lambda_function.function["scheduled-send-reminders"].function_name
 }
+
+output "db_migrate_function_arn" {
+  description = "Convenience output: the ARN of the `maintenance-db-migrate` function. Operators run `aws lambda invoke --function-name <name>` against this after every Terraform apply that ships a new migration."
+  value       = aws_lambda_function.function["maintenance-db-migrate"].arn
+}
+
+output "db_migrate_function_name" {
+  description = "Convenience output: name of the `maintenance-db-migrate` function (e.g. `ethiolink-dev-maintenance-db-migrate`)."
+  value       = aws_lambda_function.function["maintenance-db-migrate"].function_name
+}

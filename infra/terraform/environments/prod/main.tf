@@ -303,6 +303,25 @@ module "lambda" {
   log_retention_days = 90
   log_level          = "info"
   node_env           = "production"
+
+  # CRITICAL prod difference: the migration runner targets the
+  # direct RDS endpoint instead of the proxy. RDS Proxy's
+  # prepared-statement caching interferes with DDL (CREATE TABLE
+  # / ALTER TABLE / CREATE INDEX) — a migration would apply
+  # against the proxy but partially-fail when the proxy's cached
+  # session state collides with the new schema. The direct
+  # endpoint bypasses the proxy entirely; the runner takes ~10
+  # seconds for the 13 MVP migrations, well within Lambda budget.
+  function_env_overrides = {
+    "maintenance-db-migrate" = {
+      PG_HOST = module.rds.db_endpoint
+    }
+  }
+}
+
+output "lambda_db_migrate_function_name" {
+  description = "Name of the migration-runner Lambda. Operators invoke it via `aws lambda invoke --function-name <name> /tmp/response.json` after every apply that ships a new migration. In prod the function points at the direct RDS endpoint, bypassing the proxy."
+  value       = module.lambda.db_migrate_function_name
 }
 
 output "lambda_execution_role_arn" {

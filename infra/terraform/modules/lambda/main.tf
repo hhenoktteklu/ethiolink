@@ -277,6 +277,15 @@ locals {
       area    = "scheduled"
       handler = "lambdas/scheduled/sendReminders.handler"
     }
+
+    # ----- Maintenance -----------------------------------------------------
+    # Manually invoked via `aws lambda invoke` after every Terraform
+    # apply that ships a new migration. Not wired to API Gateway or
+    # EventBridge — operator-only.
+    "maintenance-db-migrate" = {
+      area    = "maintenance"
+      handler = "lambdas/maintenance/dbMigrate.handler"
+    }
   }
 
   # Shared env block — every function gets these. Per-function
@@ -460,7 +469,14 @@ resource "aws_lambda_function" "function" {
   }
 
   environment {
-    variables = local.shared_environment
+    # Shared env merged with any per-function override. The merge
+    # order makes the override value win on key collision — exactly
+    # what we want for the prod migration runner's `PG_HOST`
+    # rewrite (proxy → direct DB endpoint).
+    variables = merge(
+      local.shared_environment,
+      lookup(var.function_env_overrides, each.key, {}),
+    )
   }
 
   tags = merge(local.common_tags, {

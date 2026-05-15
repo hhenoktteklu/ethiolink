@@ -277,6 +277,22 @@ module "lambda" {
   log_retention_days = 30
   log_level          = "info"
   node_env           = "production"
+
+  # The migration runner targets the direct RDS endpoint. In dev
+  # this is the same value as `effective_endpoint` (no proxy), but
+  # we set it explicitly so the prod / dev wiring stays
+  # parallel and the next operator searching for "where does the
+  # migrator connect" finds the answer here, not in their head.
+  function_env_overrides = {
+    "maintenance-db-migrate" = {
+      PG_HOST = module.rds.db_endpoint
+    }
+  }
+}
+
+output "lambda_db_migrate_function_name" {
+  description = "Name of the migration-runner Lambda. Operators invoke it via `aws lambda invoke --function-name <name> /tmp/response.json` after every apply that ships a new migration."
+  value       = module.lambda.db_migrate_function_name
 }
 
 output "lambda_execution_role_arn" {
