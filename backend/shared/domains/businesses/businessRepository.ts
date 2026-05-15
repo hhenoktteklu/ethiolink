@@ -118,6 +118,11 @@ export interface BusinessRepository {
     insert(input: InsertBusinessInput): Promise<Business>;
     update(id: string, patch: UpdateBusinessFields): Promise<Business>;
     setStatus(id: string, status: BusinessStatus): Promise<Business>;
+    /**
+     * Dedicated mutation path for `featured_until`. Admin-only at the
+     * service layer. Pass `null` to clear the column (unfeature).
+     */
+    setFeaturedUntil(id: string, featuredUntil: Date | null): Promise<Business>;
     findById(id: string): Promise<Business | null>;
     findByOwnerUserId(ownerUserId: string): Promise<Business | null>;
     listPublic(
@@ -263,6 +268,23 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
             RETURNING ${BUSINESS_COLUMNS};
             `,
             [id, status],
+        );
+        if (!row) throw new RepositoryError(`Business ${id} not found.`);
+        return mapRow(row);
+    }
+
+    async setFeaturedUntil(
+        id: string,
+        featuredUntil: Date | null,
+    ): Promise<Business> {
+        const row = await this.oneOrNone<BusinessRow>(
+            `
+            UPDATE business_profiles
+               SET featured_until = $2
+             WHERE id = $1
+            RETURNING ${BUSINESS_COLUMNS};
+            `,
+            [id, featuredUntil],
         );
         if (!row) throw new RepositoryError(`Business ${id} not found.`);
         return mapRow(row);

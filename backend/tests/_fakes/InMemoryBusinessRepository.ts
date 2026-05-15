@@ -122,6 +122,23 @@ export class InMemoryBusinessRepository implements BusinessRepository {
         return next;
     }
 
+    async setFeaturedUntil(
+        id: string,
+        featuredUntil: Date | null,
+    ): Promise<Business> {
+        const existing = this.rowsById.get(id);
+        if (!existing) {
+            throw new RepositoryError(`Business ${id} not found.`);
+        }
+        const next = Object.freeze<Business>({
+            ...existing,
+            featuredUntil,
+            updatedAt: new Date(),
+        });
+        this.rowsById.set(id, next);
+        return next;
+    }
+
     async findById(id: string): Promise<Business | null> {
         return this.rowsById.get(id) ?? null;
     }
