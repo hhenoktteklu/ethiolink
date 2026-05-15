@@ -398,11 +398,18 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
-# Baseline inline policy — every role gets `secretsmanager:GetSecretValue`
-# on the RDS master secret. Without this the cold-start
-# `loadSecretsThenConfig` shim throws before any handler logic
-# runs, so EVERY domain needs it (including `maintenance`, which
-# is the migration runner).
+# Baseline inline policy — every role gets:
+#
+#   * `secretsmanager:GetSecretValue` on the RDS master secret —
+#     the cold-start `loadSecretsThenConfig` shim throws before
+#     any handler logic runs without it, so EVERY domain needs it
+#     (including `maintenance`, which is the migration runner).
+#
+#   * `xray:PutTraceSegments` + `xray:PutTelemetryRecords` —
+#     required by the AWS X-Ray daemon embedded in the Lambda
+#     runtime when `tracing_config.mode = "Active"` (set on every
+#     function below). Without these the daemon logs warnings on
+#     every invocation and traces are dropped.
 data "aws_iam_policy_document" "lambda_baseline" {
   statement {
     sid    = "ReadRdsMasterSecret"
@@ -414,6 +421,20 @@ data "aws_iam_policy_document" "lambda_baseline" {
     ]
 
     resources = [var.rds_master_secret_arn]
+  }
+
+  statement {
+    sid    = "XRayWrite"
+    effect = "Allow"
+
+    actions = [
+      "xray:PutTraceSegments",
+      "xray:PutTelemetryRecords",
+    ]
+
+    # X-Ray APIs require `*` resource — they don't support
+    # resource-level scoping. See the AWS X-Ray IAM reference.
+    resources = ["*"]
   }
 }
 
@@ -526,6 +547,18 @@ resource "aws_lambda_function" "function" {
   vpc_config {
     subnet_ids         = var.private_subnet_ids
     security_group_ids = [var.lambda_security_group_id]
+  }
+
+  # Phase 8: enable AWS X-Ray tracing on every function. Sets the
+  # `AWS_XRAY_DAEMON_ADDRESS` env var the runtime + the
+  # `shared/observability/tracing.ts` helper detect; the IAM
+  # baseline above grants the `xray:Put*` actions the daemon
+  # needs. Lambda-level traces (cold-start, duration, errors)
+  # light up immediately; SDK-call sub-segments require the
+  # `aws-xray-sdk-core` package + per-client wrapping, which
+  # lands in a follow-up commit.
+  tracing_config {
+    mode = "Active"
   }
 
   environment {

@@ -20,8 +20,8 @@ In scope:
   - Cognito password policy hardened; account lockout reviewed.
   - CSP and security headers on the admin SPA.
 - Observability gaps:
-  - Structured request logs with correlation ids.
-  - X-Ray tracing on every Lambda.
+  - Structured request logs with correlation ids. *(Phase 8 commit "observability tracing": `backend/shared/observability/correlationId.ts` ships the ALS scope + `getCurrentRequestContextRecord` adapter. Logger picks up the dynamic context via the new `contextProvider` hook on `LoggerOptions`. The mechanical per-handler refactor adopting `withRequestContext` is a small follow-up.)*
+  - X-Ray tracing on every Lambda. *(Phase 8 commit "observability tracing": Terraform Lambda module sets `tracing_config.mode = "Active"` on every function; baseline IAM policy adds `xray:PutTraceSegments` + `xray:PutTelemetryRecords`. Lambda-level traces light up immediately. SDK-call sub-segments via `aws-xray-sdk-core` + `captureAwsClient` are deferred to a follow-up.)*
   - Per-endpoint latency and error dashboards.
   - SLO definitions: 99.5% availability on booking creation, p95 < 800ms on browse.
 

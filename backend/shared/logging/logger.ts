@@ -37,6 +37,20 @@ interface LoggerOptions {
     readonly level: LogLevel;
     /** Bound context merged into every log line. */
     readonly context?: Record<string, unknown>;
+    /**
+     * Dynamic context resolved at emit time. The Phase 8
+     * observability shim wires
+     * `getCurrentRequestContextRecord` from
+     * `shared/observability/correlationId.ts` here so every log
+     * line auto-stamps `requestId` / `cognitoSub` / `route` /
+     * `method` / `handler` without the caller threading them
+     * through `child(...)`. Defaults to `undefined` — backward
+     * compatible.
+     *
+     * Merge order: dynamic context < bound context < per-call
+     * `meta`. Concrete log calls win.
+     */
+    readonly contextProvider?: () => Record<string, unknown>;
     /** Test seam: where to write output. Defaults to console. */
     readonly sink?: LogSink;
     /** Test seam: clock for the `timestamp` field. */
@@ -100,6 +114,7 @@ const CONSOLE_SINK: LogSink = {
 export function createLogger(options: LoggerOptions): Logger {
     const level = options.level;
     const context = options.context ?? {};
+    const contextProvider = options.contextProvider;
     const sink = options.sink ?? CONSOLE_SINK;
     const now = options.now ?? (() => new Date());
 
@@ -107,10 +122,16 @@ export function createLogger(options: LoggerOptions): Logger {
         if (LEVEL_ORDER[entryLevel] < LEVEL_ORDER[level]) {
             return;
         }
+        // Resolve the dynamic context (if any) at emit time so
+        // each log line picks up the *current* ALS scope — the
+        // logger instance is constructed at cold-start, but the
+        // request context changes per invocation.
+        const dynamicContext = contextProvider ? contextProvider() : {};
         const payload: Record<string, unknown> = {
             timestamp: now().toISOString(),
             level: entryLevel,
             message,
+            ...redact(dynamicContext),
             ...redact(context),
             ...(meta ? redact(meta) : {}),
         };
@@ -127,6 +148,7 @@ export function createLogger(options: LoggerOptions): Logger {
             createLogger({
                 level,
                 context: { ...context, ...childContext },
+                contextProvider,
                 sink,
                 now,
             }),

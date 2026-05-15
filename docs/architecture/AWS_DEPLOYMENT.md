@@ -166,6 +166,10 @@ Every Lambda handler's cold-start init calls `await loadSecretsThenConfig()` at 
 
 **Log groups.** One CloudWatch log group per function at `/aws/lambda/<function-name>` with environment-specific retention (30 days dev / 90 days prod). Explicit `aws_cloudwatch_log_group` resources rather than letting Lambda auto-create — auto-created groups default to "never expire", which is cost-hostile.
 
+**Tracing.** Every function has `tracing_config.mode = "Active"`, which switches on AWS X-Ray at the runtime layer (cold-start, init duration, function duration, billing-relevant metrics, downstream HTTP calls made via the embedded daemon). The baseline IAM policy on every per-domain role grants `xray:PutTraceSegments` + `xray:PutTelemetryRecords`. SDK-call sub-segments (each `s3:PutObject`, each `secretsmanager:GetSecretValue`) require the `aws-xray-sdk-core` package plus per-client wrapping; the application-side `backend/shared/observability/tracing.ts` exposes a `captureAwsClient(client)` hook that no-ops today but flips on once the SDK package lands in a follow-up commit.
+
+**Correlation IDs.** `backend/shared/observability/correlationId.ts` exports an `AsyncLocalStorage`-backed `withRequestContext(ctx, fn)` scope plus a `getCurrentRequestContext()` reader. Handlers wrap their entry body in the scope; deep call sites (the notification dispatcher, repository helpers) read the context without argument threading. The logger consumes the context via a new optional `contextProvider` hook on `LoggerOptions` — when wired, every log line auto-stamps `requestId` / `cognitoSub` / `route` / `method` / `handler`. The Phase 8 observability commit ships the helpers + the logger hook; the per-handler refactor that adopts the wrapper is a mechanical follow-up.
+
 **Migration runner.** A 50th function, `maintenance-db-migrate`, applies database migrations against RDS. It's NOT wired to API Gateway or EventBridge — operators invoke it manually after every `terraform apply` that ships a new migration:
 
 ```bash
