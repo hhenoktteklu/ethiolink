@@ -12,7 +12,7 @@ In scope:
 - Secret rotation: rotate RDS master password and any third-party API keys via Secrets Manager managed rotation. *(Phase 8 commit "enable RDS secret rotation": AWS-managed `SecretsManagerRDSPostgreSQLRotationSingleUser` Lambda deployed via SAR; `aws_secretsmanager_secret_rotation` schedules 30-day cadence; first rotation fires immediately after apply. Third-party API keys land alongside the real SMS/Telegram provider integration follow-ups.)*
 - RDS backup verification: monthly automated restore test to a scratch RDS instance, comparing schema and row counts. *(Phase 8 commit "DR runbook + backup verification": `.github/workflows/backup-verify.yml` runs monthly + on dispatch, default dry-run mode asserts snapshot freshness + descriptors. Full-restore mode is gated behind `workflow_dispatch.inputs.full_restore = true` and emits a "not implemented" notice until the Phase 8.5 follow-up ships the `restore-test` Terraform workspace.)*
 - DR runbook in `docs/operations/DR_RUNBOOK.md` covering RDS restore, Lambda redeploy, Cognito recreation guidance. *(Phase 8 commit "DR runbook + backup verification": full step-by-step playbook with per-step timing, 43-minute total wall-clock under the 60-minute SLO, fallback procedures for snapshot corruption / stuck restore / smoke-test failure, post-incident checklist.)*
-- Load testing: scripted scenarios for browse, book, accept, complete, with assertions on p95 latency.
+- Load testing: scripted scenarios for browse, book, accept, complete, with assertions on p95 latency. *(Phase 8 commit "k6 load tests": `infra/k6/browse.js` (100 RPS / 10 min / p95 < 800 ms), `infra/k6/book.js` (20 RPS / 9 min / p95 < 1500 ms / errors < 1 %), `infra/k6/full-lifecycle.js` (smoke flow). README documents install + env vars + thresholds + interpretation. Tuning commit follows once captured numbers exist.)*
 - Security review:
   - All endpoint authorization matrix reviewed against `API_SPEC.md`.
   - All Lambda IAM roles audited for least privilege. *(Phase 8 commit "split Lambda IAM roles by domain": shared role replaced by 11 per-domain roles; only the `media` role carries S3 statements. Per-handler narrowing on high-risk handlers remains a follow-up.)*
@@ -47,7 +47,7 @@ Out of scope:
 - [ ] Secret rotation enabled for RDS and third-party providers.
 - [ ] Backup restore test scripted and passing. *(Dry-run workflow shipped — `.github/workflows/backup-verify.yml`. Full-restore scratch-workspace remains Phase 8.5.)*
 - [ ] DR runbook validated by a tabletop exercise. *(Runbook shipped at `docs/operations/DR_RUNBOOK.md`; tabletop exercise is the operator-led validation step still to schedule.)*
-- [ ] Load test passes target p95 latency.
+- [ ] Load test passes target p95 latency. *(Scripts shipped at `infra/k6/`; running them against dev + capturing the numbers is the operator-led step still to schedule.)*
 - [ ] Security review checklist completed and signed off.
 - [ ] All Lambdas emit structured logs with correlation ids.
 - [ ] X-Ray enabled across all Lambdas.
