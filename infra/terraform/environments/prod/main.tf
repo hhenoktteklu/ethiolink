@@ -320,8 +320,41 @@ output "lambda_scheduled_reminders_function_name" {
   value       = module.lambda.scheduled_reminders_function_name
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — API Gateway
+#
+# REST API. Prod CORS allows the real admin SPA origin
+# (`https://admin.ethiolink.app`); custom-domain wiring
+# (`api.ethiolink.app`) lands in a follow-up commit alongside
+# the ACM cert + Route 53 record set.
+# -----------------------------------------------------------------------------
+
+module "api_gateway" {
+  source = "../../modules/api-gateway"
+
+  environment = "prod"
+  region      = var.region
+
+  cognito_user_pool_arn = module.cognito.user_pool_arn
+
+  lambda_function_arns        = module.lambda.function_arns
+  lambda_function_invoke_arns = module.lambda.function_invoke_arns
+  lambda_function_names       = module.lambda.function_names
+
+  cors_allowed_origins = ["https://admin.ethiolink.app"]
+}
+
+output "api_gateway_invoke_url" {
+  description = "Base URL — the admin SPA's `VITE_API_BASE_URL` and the mobile app's API base."
+  value       = module.api_gateway.invoke_url
+}
+
+output "api_gateway_rest_api_id" {
+  description = "REST API id."
+  value       = module.api_gateway.rest_api_id
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
 #   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
 #   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
 #   module "waf"            { source = "../../modules/waf"            ... }

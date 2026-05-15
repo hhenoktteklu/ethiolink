@@ -294,8 +294,42 @@ output "lambda_scheduled_reminders_function_name" {
   value       = module.lambda.scheduled_reminders_function_name
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — API Gateway
+#
+# REST API wiring every Lambda into an HTTP route. Dev uses the
+# default `*.execute-api` URL — custom-domain wiring lands in a
+# follow-up commit alongside the prod ACM cert work.
+# -----------------------------------------------------------------------------
+
+module "api_gateway" {
+  source = "../../modules/api-gateway"
+
+  environment = "dev"
+  region      = var.region
+
+  cognito_user_pool_arn = module.cognito.user_pool_arn
+
+  lambda_function_arns        = module.lambda.function_arns
+  lambda_function_invoke_arns = module.lambda.function_invoke_arns
+  lambda_function_names       = module.lambda.function_names
+
+  # Admin SPA's Vite dev origin. Add the CloudFront URL alongside
+  # the admin-frontend module commit.
+  cors_allowed_origins = ["http://localhost:5173"]
+}
+
+output "api_gateway_invoke_url" {
+  description = "Base URL the admin SPA + mobile app target. Bake into the Vite bundle as `VITE_API_BASE_URL`."
+  value       = module.api_gateway.invoke_url
+}
+
+output "api_gateway_rest_api_id" {
+  description = "REST API id — useful for `aws apigateway` CLI smoke tests."
+  value       = module.api_gateway.rest_api_id
+}
+
 # Phase 7 will add:
-#   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
 #   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
 #   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
 #   module "waf"            { source = "../../modules/waf"            ... }

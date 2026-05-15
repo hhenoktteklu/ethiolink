@@ -105,9 +105,19 @@ VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope
 
 ### API Gateway
 
-- One REST API per environment.
-- Cognito user-pool authorizer attached to all `/v1/*` routes except explicit public endpoints.
-- Custom domain via ACM cert in `eu-west-1` for prod; default `*.execute-api` URL in dev.
+Provisioned by `infra/terraform/modules/api-gateway/`. One REST API per environment (REST flavor, not HTTP API — picked for per-method Cognito user-pool authorizer support and OpenAPI parity). 48 HTTP routes — every Lambda handler under `backend/lambdas/` except `scheduled/sendReminders` (EventBridge-triggered).
+
+**Routes.** The full route table lives in `infra/terraform/modules/api-gateway/main.tf` `locals.routes` and is the authoritative source. 8 public routes (no authorizer) — every `GET` under `/v1/categories`, `/v1/businesses`, the per-business `services` / `staff` / `reviews` / `availability` / `slots` reads. The remaining 40 routes use the Cognito user-pool authorizer pointed at `module.cognito.user_pool_arn`. The authorizer reads from `method.request.header.Authorization` (`Bearer <id_token>`).
+
+**Path-variable naming.** API Gateway requires one variable name per segment position. The shared parent `/v1/businesses/{X}` uses `{businessId}` across both the single-entity reads (was `{id}` in the OpenAPI doc) and the nested `services` / `staff` / `appointments` / `reviews` sub-trees. Four handlers (`businesses/get`, `patch`, `submit`, `reviews/listForBusiness`) were normalized to read `event.pathParameters.businessId` to match. Inner segments use `{id}` (e.g. `/services/{id}`, `/staff/{id}`) or `{staffId}` for `/staff/{staffId}/availability` and `/staff/{staffId}/slots`, matching what the handler code already reads.
+
+**Integration.** Per route: `aws_api_gateway_method` (auth = `NONE` or `COGNITO_USER_POOLS`) + `aws_api_gateway_integration` (`type = "AWS_PROXY"`, `uri = module.lambda.function_invoke_arns[function]`) + `aws_lambda_permission` (source ARN scoped to the specific resource + method, not the API-wide `/*/*` wildcard).
+
+**CORS.** Every resource with at least one non-OPTIONS method also gets an `OPTIONS` mock integration returning the standard `Access-Control-Allow-*` headers + the configured origin set. `aws_api_gateway_gateway_response.default_4xx` / `default_5xx` add the same origin headers to error responses so the admin SPA sees the upstream error code rather than a CORS-mangled "fetch failed". Dev CORS allow-list: `http://localhost:5173`. Prod: `https://admin.ethiolink.app`.
+
+**Stage.** Stage name = environment name (`dev`, `prod`), so the invoke URL is `https://<api-id>.execute-api.<region>.amazonaws.com/<env>`. Each Terraform apply that changes the route map, path tree, authorizer, or CORS origin triggers a fresh deployment via a SHA-keyed `triggers` map.
+
+**Custom domain.** Deferred — dev uses the default `*.execute-api` URL today. The prod `api.ethiolink.app` mapping lands in a follow-up commit alongside the ACM cert + Route 53 record-set work.
 
 ### Lambda
 

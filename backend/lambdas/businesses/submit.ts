@@ -64,7 +64,7 @@ export const handler = async (
         handler: 'businesses.submit',
     });
 
-    const id = event.pathParameters?.id?.trim();
+    const id = event.pathParameters?.businessId?.trim();
     if (!id || !UUID_RE.test(id)) {
         return validationError('Business id must be a UUID.', { field: 'id' });
     }
