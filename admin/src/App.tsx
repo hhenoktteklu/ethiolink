@@ -19,6 +19,7 @@ import { AdminLayout } from './components/AdminLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { BusinessDetailPage } from './pages/BusinessDetailPage';
 import { BusinessesPage } from './pages/BusinessesPage';
+import { CategoriesPage } from './pages/CategoriesPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 
@@ -36,6 +37,7 @@ export function App() {
                 <Route path="/" element={<DashboardPage />} />
                 <Route path="/businesses" element={<BusinessesPage />} />
                 <Route path="/businesses/:id" element={<BusinessDetailPage />} />
+                <Route path="/categories" element={<CategoriesPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

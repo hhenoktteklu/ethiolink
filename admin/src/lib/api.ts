@@ -212,3 +212,93 @@ export function unfeatureBusiness(
         { featuredUntil: null, notes: notes ?? null },
     );
 }
+
+// ---------------------------------------------------------------------------
+// Admin categories
+// ---------------------------------------------------------------------------
+
+/**
+ * JSONB-localized text. MVP writes only `en`; `am` (Amharic) is
+ * reserved for a later content pass. Same shape as the backend
+ * `LocalizedText`.
+ */
+export interface LocalizedText {
+    readonly en: string;
+    readonly am?: string;
+}
+
+export interface AdminCategoryView {
+    readonly id: string;
+    readonly slug: string;
+    readonly name: LocalizedText;
+    readonly sortOrder: number;
+    readonly isActive: boolean;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+}
+
+export interface AdminCategoryListResponse {
+    readonly items: readonly AdminCategoryView[];
+}
+
+export function listAdminCategories(
+    params: { isActive?: boolean; limit?: number } = {},
+): Promise<AdminCategoryListResponse> {
+    const search = new URLSearchParams();
+    if (params.isActive !== undefined) {
+        search.set('isActive', params.isActive ? 'true' : 'false');
+    }
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<AdminCategoryListResponse>(
+        'GET',
+        `/v1/admin/categories${query ? `?${query}` : ''}`,
+    );
+}
+
+export interface CreateCategoryInput {
+    readonly slug: string;
+    readonly name: LocalizedText;
+    readonly sortOrder?: number;
+    readonly notes?: string | null;
+}
+
+export function createCategory(
+    input: CreateCategoryInput,
+): Promise<AdminCategoryView> {
+    return request<AdminCategoryView>('POST', '/v1/admin/categories', input);
+}
+
+export interface PatchCategoryInput {
+    readonly slug?: string;
+    readonly name?: LocalizedText;
+    readonly sortOrder?: number;
+    readonly notes?: string | null;
+}
+
+export function patchCategory(
+    id: string,
+    patch: PatchCategoryInput,
+): Promise<AdminCategoryView> {
+    return request<AdminCategoryView>(
+        'PATCH',
+        `/v1/admin/categories/${encodeURIComponent(id)}`,
+        patch,
+    );
+}
+
+/**
+ * Soft-delete (flips `is_active` to false). Already-inactive
+ * categories return 409 CONFLICT. The backend doesn't expose a
+ * reactivation path in MVP.
+ */
+export function deactivateCategory(
+    id: string,
+    notes?: string | null,
+): Promise<AdminCategoryView> {
+    return request<AdminCategoryView>(
+        'DELETE',
+        `/v1/admin/categories/${encodeURIComponent(id)}`,
+        { notes: notes ?? null },
+    );
+}
