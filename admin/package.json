@@ -2,12 +2,26 @@
   "name": "@ethiolink/admin",
   "version": "0.0.0",
   "private": true,
-  "description": "EthioLink admin dashboard (React + TypeScript). Initialized properly in Phase 5.",
+  "description": "EthioLink admin dashboard — React + TypeScript SPA. ADMIN-only.",
+  "type": "module",
   "scripts": {
-    "dev": "echo \"Initialized in Phase 5\" && exit 0",
-    "build": "echo \"Initialized in Phase 5\" && exit 0",
-    "preview": "echo \"Initialized in Phase 5\" && exit 0",
-    "lint": "echo \"Initialized in Phase 5\" && exit 0",
-    "test": "echo \"Initialized in Phase 5\" && exit 0"
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "lint": "echo \"Lint wired up in Phase 5+\" && exit 0",
+    "test": "echo \"Frontend tests wired up in a follow-up\" && exit 0"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.51.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
   }
 }
