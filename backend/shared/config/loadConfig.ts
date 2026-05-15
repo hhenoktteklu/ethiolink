@@ -74,6 +74,45 @@ export interface BookingConfig {
     readonly defaultTimezone: string;
 }
 
+/**
+ * Generic SMS provider configuration. Populated when every
+ * required env var is present (`SMS_PROVIDER_API_BASE_URL` +
+ * `SMS_PROVIDER_API_KEY` + `SMS_PROVIDER_SENDER_ID`); `null`
+ * when any one is absent. The dispatcher (future commit) checks
+ * the slot before constructing a `GenericSmsGateway` and falls
+ * back to `MockNotificationGateway` when it's null.
+ *
+ * Production credential resolution:
+ *   * `SMS_PROVIDER_API_KEY` may be supplied directly via the
+ *     Lambda env in dev / docker-compose.
+ *   * In production, `SMS_PROVIDER_API_KEY_SECRET_ARN` points at
+ *     a Secrets Manager secret holding the key. A future
+ *     `loadSecretsThenConfig` extension resolves the ARN and
+ *     writes the value into `SMS_PROVIDER_API_KEY` before
+ *     delegating to `loadConfig`. The extension is not in this
+ *     commit — `loadConfig` only reads the env var directly,
+ *     mirroring the `PG_PASSWORD` pattern.
+ *
+ * The `apiKeySecretArn` field is preserved here so operators can
+ * see at a glance whether a Lambda has the production secret
+ * wiring vs. the dev plain-env wiring. The future Secrets Manager
+ * resolution path uses the same field as its trigger.
+ */
+export interface SmsProviderConfig {
+    /** Provider base URL (e.g. `https://api.afromessage.com`). No trailing slash required. */
+    readonly apiBaseUrl: string;
+    /** Resolved API key. Comes from `SMS_PROVIDER_API_KEY` directly in dev; resolved from `SMS_PROVIDER_API_KEY_SECRET_ARN` via the future Secrets Manager seam in prod. */
+    readonly apiKey: string;
+    /** ARN of the Secrets Manager secret holding the API key, when set. Empty string in dev where the key comes from `SMS_PROVIDER_API_KEY` directly. */
+    readonly apiKeySecretArn: string;
+    /** Sender display name registered with the vendor (e.g. `EthioLink`). */
+    readonly senderId: string;
+    /** Provider identifier written to `notification_logs.provider`. Defaults to `'GENERIC_SMS'`. */
+    readonly providerName: string;
+    /** HTTP request timeout in milliseconds. Default 10000 (10 s). */
+    readonly timeoutMs: number;
+}
+
 export interface AppConfig {
     readonly nodeEnv: NodeEnv;
     readonly logLevel: LogLevel;
@@ -82,6 +121,8 @@ export interface AppConfig {
     readonly cognito: CognitoConfig;
     readonly s3: S3Config;
     readonly booking: BookingConfig;
+    /** SMS provider config when wired; `null` when the operator hasn't opted in. */
+    readonly smsProvider: SmsProviderConfig | null;
 }
 
 /** Raised when required config is missing. Carries the full list of names. */
@@ -193,6 +234,45 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
             defaultTimezone:
                 env.DEFAULT_TIMEZONE?.trim() || 'Africa/Addis_Ababa',
         }),
+        smsProvider: buildSmsProviderConfig(env),
+    });
+}
+
+/**
+ * Build the optional SMS provider config from env vars. Returns
+ * `null` when any one of the three required env vars is missing —
+ * the dispatcher checks the slot before constructing a real
+ * gateway and falls back to `MockNotificationGateway` otherwise.
+ *
+ * The Secrets Manager wiring (`SMS_PROVIDER_API_KEY_SECRET_ARN`)
+ * is recorded on the config object for visibility but its
+ * resolution lives in a future `loadSecretsThenConfig` extension —
+ * `loadConfig` only reads the (already-resolved or dev-plain)
+ * `SMS_PROVIDER_API_KEY` env var directly.
+ */
+function buildSmsProviderConfig(
+    env: NodeJS.ProcessEnv,
+): SmsProviderConfig | null {
+    const apiBaseUrl = env.SMS_PROVIDER_API_BASE_URL?.trim() ?? '';
+    const apiKey = env.SMS_PROVIDER_API_KEY?.trim() ?? '';
+    const senderId = env.SMS_PROVIDER_SENDER_ID?.trim() ?? '';
+
+    if (!apiBaseUrl || !apiKey || !senderId) {
+        return null;
+    }
+
+    return Object.freeze<SmsProviderConfig>({
+        apiBaseUrl,
+        apiKey,
+        apiKeySecretArn: env.SMS_PROVIDER_API_KEY_SECRET_ARN?.trim() ?? '',
+        senderId,
+        providerName:
+            env.SMS_PROVIDER_NAME?.trim() || 'GENERIC_SMS',
+        timeoutMs: parsePositiveInteger(
+            'SMS_PROVIDER_TIMEOUT_MS',
+            env.SMS_PROVIDER_TIMEOUT_MS,
+            10000,
+        ),
     });
 }
 

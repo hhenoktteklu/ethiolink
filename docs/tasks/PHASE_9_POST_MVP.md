@@ -2,6 +2,8 @@
 
 > Phase 8 closed the production-hardening track and left the platform code-complete for v1 (see [`PHASE_8_COMPLETION_SUMMARY.md`](./PHASE_8_COMPLETION_SUMMARY.md)). Phase 9 covers everything required to turn "MVP-ready backend + admin SPA" into "MVP that real customers use": real notification providers, the Flutter mobile app, customer-managed encryption, localization, and the first wave of marketplace growth features. The phase deliberately does not pretend to ship all of these — it scopes the work, picks a first implementation track, and leaves the others as recommended workstreams to schedule.
 
+> **In progress.** Track 1 (real SMS provider) — gateway skeleton, config types, and unit tests landed in commit "Phase 9: add SMS provider gateway". The gateway is dormant in production until the operator wires the dispatcher (a follow-up commit, not this one).
+
 ## Current MVP status
 
 The backend + admin + infrastructure surfaces are code-complete for v1:
@@ -137,13 +139,13 @@ The first track is sequenced; the rest are recommended workstreams to schedule a
 
 ### Track 1 — Real SMS provider (first recommended implementation)
 
-- [ ] Provider chosen and credentials in Secrets Manager (`ethiolink/${env}/sms-provider/api-key`).
-- [ ] `AfroMessageSmsGateway` implements `NotificationGateway` with happy-path + 4 failure-mode tests passing.
-- [ ] `dispatcherFactory.ts` selects the real gateway when `NOTIFICATIONS_PROVIDER=production`; mock retained as the dev default.
-- [ ] Lambda `notifications` IAM role grants `secretsmanager:GetSecretValue` scoped to the new secret ARN only.
-- [ ] `loadConfig.ts` + `loadSecretsThenConfig.ts` resolve `SMS_PROVIDER_*` env vars on cold start.
-- [ ] Operator runbook at `docs/operations/runbooks/sms-provider.md` covers rotation, dashboard, troubleshooting.
-- [ ] One end-to-end test SMS sent from dev to a real phone, recorded in `notification_logs` with `status=DELIVERED`.
+- [ ] Provider chosen and credentials in Secrets Manager (`ethiolink/${env}/sms-provider/api-key`). *(Pending operator decision. The gateway is provider-agnostic so this can be a single env-var change in the env stack once chosen.)*
+- [x] `GenericSmsGateway` implements `NotificationGateway` with happy-path + 4 failure-mode tests passing. *(Phase 9 commit "add SMS provider gateway". Provider-agnostic skeleton; subclassing for vendor-specific wire-shape quirks is the operator-side follow-up once a provider is chosen.)*
+- [ ] `dispatcherFactory.ts` selects the real gateway when `NOTIFICATIONS_PROVIDER=production`; mock retained as the dev default. *(Deliberately deferred to keep this commit dormant in production. The next code commit on this track flips the dispatcher.)*
+- [ ] Lambda `notifications` IAM role grants `secretsmanager:GetSecretValue` scoped to the new secret ARN only. *(Pairs with the dispatcher flip + the Secrets Manager wiring extension to `loadSecretsThenConfig`.)*
+- [x] `loadConfig.ts` resolves `SMS_PROVIDER_*` env vars on cold start. *(Phase 9 commit "add SMS provider gateway". `AppConfig.smsProvider` is `null` when env vars are unset; populated when `SMS_PROVIDER_API_BASE_URL` + `SMS_PROVIDER_API_KEY` + `SMS_PROVIDER_SENDER_ID` are all present. `loadSecretsThenConfig` Secrets Manager resolution of `SMS_PROVIDER_API_KEY_SECRET_ARN` is the next-commit follow-up.)*
+- [ ] Operator runbook at `docs/operations/runbooks/sms-provider.md` covers rotation, dashboard, troubleshooting. *(Lands alongside the dispatcher flip — the runbook is most useful when a real SMS is actually possible to dispatch.)*
+- [ ] One end-to-end test SMS sent from dev to a real phone, recorded in `notification_logs` with `status=DELIVERED`. *(Final acceptance gate for the track. Requires provider chosen + dispatcher flipped + IAM scope + runbook.)*
 
 ### Track 2 — Telegram bot
 
