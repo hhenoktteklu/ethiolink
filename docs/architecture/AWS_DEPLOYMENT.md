@@ -255,6 +255,28 @@ Provisioned by `infra/terraform/modules/eventbridge/`. One scheduled rule per en
 
 A CloudWatch alarm on the rule's `FailedInvocations` metric lands alongside the rest of the alarms in the `cloudwatch` module commit.
 
+### WAF
+
+Provisioned by `infra/terraform/modules/waf/`. One regional WAFv2 Web ACL per environment, associated with the API Gateway stage ARN.
+
+**Default action.** `allow {}` — anything not matched by the rules below passes through. The alternative (default-deny + explicit allow-list) is a Phase 8 hardening choice.
+
+**Managed rule groups** (`override_action { none {} }` on each — match decisions from the group itself are honored as-is rather than forced to `count`):
+
+| Group                                          | Purpose                                                             |
+| ---------------------------------------------- | ------------------------------------------------------------------- |
+| `AWSManagedRulesCommonRuleSet`                 | OWASP-style baseline (SQLi, XSS, path traversal, etc.).             |
+| `AWSManagedRulesKnownBadInputsRuleSet`         | Known exploit payloads (log4j signatures, common scanners).         |
+| `AWSManagedRulesAmazonIpReputationList`        | AWS-maintained IP reputation feed of known-bad sources.             |
+
+Each group has a module-level `enable_*` toggle (default `true`). If a managed rule false-positives a legitimate request mid-incident, the operator sets the corresponding flag to `false` and re-applies — the change is auditable in git rather than buried in a CloudWatch console toggle.
+
+**Rate-based rule.** Per source IP, blocks for 5 minutes once the IP exceeds `rate_limit_per_5min` requests (default 2000 — ~6.7 req/sec sustained per IP; generous for legitimate clients, restrictive for trivial scrapers). The block action returns 403 to the offending IP. Tune via the env-level `waf_rate_limit_per_5min` variable once the first load test surfaces real per-IP rates.
+
+**Observability.** Both the Web ACL and every rule have `cloudwatch_metrics_enabled = true` and `sampled_requests_enabled = true`. The `cloudwatch` module commit attaches alarms on `BlockedRequests` and per-rule-group block counts; `aws wafv2 get-sampled-requests` is the operator's mid-incident investigation surface.
+
+**Scope.** `REGIONAL` — API Gateway REST APIs are regional. A CloudFront-fronted ACL would need `CLOUDFRONT` scope and live in `us-east-1`; the admin SPA distribution doesn't get WAF in this commit (low traffic, operator-only audience). Adding it later is a separate Web ACL + association in a follow-up.
+
 ### CloudWatch
 
 - Log groups per Lambda, 30-day retention in dev, 90-day in prod.

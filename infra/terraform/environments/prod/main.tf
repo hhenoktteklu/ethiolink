@@ -431,6 +431,35 @@ output "admin_frontend_distribution_id" {
   value       = module.admin_frontend.cloudfront_distribution_id
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — WAF
+#
+# Regional WAFv2 Web ACL on the prod API Gateway stage. Same
+# managed rule groups as dev; rate-limit threshold is the same
+# 2000 req / 5 min / IP default but is variabled here so a real
+# load-test result can lift it without a module change.
+# -----------------------------------------------------------------------------
+
+variable "waf_rate_limit_per_5min" {
+  description = "Per-IP rate limit on the prod WAF Web ACL. Default 2000 req / 5 min — bump once the first load test surfaces real per-IP rates for the mobile + admin clients."
+  type        = number
+  default     = 2000
+}
+
+module "waf" {
+  source = "../../modules/waf"
+
+  environment = "prod"
+
+  api_gateway_stage_arn = "arn:aws:apigateway:${var.region}::/restapis/${module.api_gateway.rest_api_id}/stages/${module.api_gateway.stage_name}"
+
+  rate_limit_per_5min = var.waf_rate_limit_per_5min
+}
+
+output "waf_web_acl_arn" {
+  description = "WAFv2 Web ACL ARN."
+  value       = module.waf.web_acl_arn
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "waf"            { source = "../../modules/waf"            ... }
 #   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }

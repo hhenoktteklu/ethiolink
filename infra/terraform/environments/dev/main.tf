@@ -395,6 +395,33 @@ output "admin_frontend_distribution_id" {
   value       = module.admin_frontend.cloudfront_distribution_id
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — WAF
+#
+# Regional WAFv2 Web ACL on the API Gateway stage. Stage ARN is
+# computed inline from the API Gateway outputs — the API Gateway
+# module exposes `rest_api_id` + `stage_name`, which together
+# form the standard `arn:aws:apigateway:<region>::/restapis/.../stages/...`
+# shape that `aws_wafv2_web_acl_association.resource_arn` expects.
+# -----------------------------------------------------------------------------
+
+module "waf" {
+  source = "../../modules/waf"
+
+  environment = "dev"
+
+  api_gateway_stage_arn = "arn:aws:apigateway:${var.region}::/restapis/${module.api_gateway.rest_api_id}/stages/${module.api_gateway.stage_name}"
+
+  # 2000 req / 5 min / IP — the AWS-managed-rule defaults are
+  # plenty conservative for dev. Tune in prod once the first
+  # load test surfaces real per-IP rates.
+  rate_limit_per_5min = 2000
+}
+
+output "waf_web_acl_arn" {
+  description = "WAFv2 Web ACL ARN. The CloudWatch alarm module references this."
+  value       = module.waf.web_acl_arn
+}
+
 # Phase 7 will add:
-#   module "waf"            { source = "../../modules/waf"            ... }
 #   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }
