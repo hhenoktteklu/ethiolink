@@ -11,10 +11,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/config/app_config.dart';
 import 'package:ethiolink/core/config/app_config_scope.dart';
+import 'package:ethiolink/features/browse/business_detail_screen.dart';
 import 'package:ethiolink/features/browse/businesses_screen.dart';
+import 'package:ethiolink/features/browse/data/business_detail_repositories.dart';
 import 'package:ethiolink/features/browse/data/businesses_repository.dart';
+import 'package:ethiolink/features/browse/models/business_detail.dart';
 import 'package:ethiolink/features/browse/models/business_summary.dart';
 import 'package:ethiolink/features/browse/models/category.dart';
+import 'package:ethiolink/features/browse/models/review.dart';
+import 'package:ethiolink/features/browse/models/service.dart';
+import 'package:ethiolink/features/browse/models/staff.dart';
 
 const _testConfig = AppConfig(
   apiBaseUrl: 'https://example.test',
@@ -91,6 +97,7 @@ Future<void> _pump(
   WidgetTester tester, {
   required BusinessesRepository repo,
   Category category = _salonCategory,
+  BusinessDetailRepositories? detailRepos,
 }) async {
   await tester.pumpWidget(
     AppConfigScope(
@@ -99,10 +106,55 @@ Future<void> _pump(
         home: BusinessesScreen(
           category: category,
           repositoryOverride: repo,
+          detailRepositoriesOverride: detailRepos,
         ),
       ),
     ),
   );
+}
+
+// Minimal fakes for the row-tap navigation test. The destination
+// BusinessDetailScreen builds its own four fetches on mount; we
+// short-circuit each to return empty so the test stays fast.
+
+class _DetailRepo implements BusinessDetailRepository {
+  String? lastId;
+  @override
+  Future<BusinessDetail> getById(String id) async {
+    lastId = id;
+    return BusinessDetail(
+      id: id,
+      categoryId: 'cat',
+      name: 'Sunset Salon',
+      descriptionEn: null,
+      descriptionAm: null,
+      city: null,
+      addressLine: null,
+      latitude: null,
+      longitude: null,
+      phone: null,
+      telegramHandle: null,
+      whatsappPhone: null,
+      featuredUntil: null,
+      ratingAvg: 0,
+      ratingCount: 0,
+    );
+  }
+}
+
+class _ServicesRepo implements ServicesRepository {
+  @override
+  Future<List<Service>> listForBusiness(String id) async => const <Service>[];
+}
+
+class _StaffRepo implements StaffRepository {
+  @override
+  Future<List<Staff>> listForBusiness(String id) async => const <Staff>[];
+}
+
+class _ReviewsRepo implements ReviewsRepository {
+  @override
+  Future<List<Review>> listForBusiness(String id) async => const <Review>[];
 }
 
 void main() {
@@ -171,6 +223,31 @@ void main() {
     expect(find.text("Can't reach the server"), findsOneWidget);
     expect(find.text('Try again'), findsOneWidget);
     expect(find.textContaining('boom'), findsOneWidget);
+  });
+
+  testWidgets('tapping a business row navigates to BusinessDetailScreen',
+      (tester) async {
+    final repo = FakeBusinessesRepository()
+      ..enqueueValue(BusinessListPage(
+        items: [_biz('Sunset Salon')],
+        nextCursor: null,
+      ));
+    final detailRepo = _DetailRepo();
+    final detailRepos = BusinessDetailRepositories(
+      detail: detailRepo,
+      services: _ServicesRepo(),
+      staff: _StaffRepo(),
+      reviews: _ReviewsRepo(),
+    );
+
+    await _pump(tester, repo: repo, detailRepos: detailRepos);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Sunset Salon'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BusinessDetailScreen), findsOneWidget);
+    expect(detailRepo.lastId, 'id-Sunset Salon');
   });
 
   testWidgets('Load more appends a second page', (tester) async {

@@ -25,6 +25,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
+import 'business_detail_screen.dart';
+import 'data/business_detail_repositories.dart';
 import 'data/businesses_repository.dart';
 import 'models/business_summary.dart';
 import 'models/category.dart';
@@ -33,6 +35,7 @@ class BusinessesScreen extends StatefulWidget {
   const BusinessesScreen({
     required this.category,
     this.repositoryOverride,
+    this.detailRepositoriesOverride,
     super.key,
   });
 
@@ -44,6 +47,11 @@ class BusinessesScreen extends StatefulWidget {
   /// Test seam. Production constructs an `HttpBusinessesRepository`
   /// over the `AppConfigScope`-injected `AppConfig`.
   final BusinessesRepository? repositoryOverride;
+
+  /// Forwarded to `BusinessDetailScreen` when the user taps a
+  /// row. Tests use this to short-circuit the four detail-side
+  /// fetches; production leaves it null.
+  final BusinessDetailRepositories? detailRepositoriesOverride;
 
   @override
   State<BusinessesScreen> createState() => _BusinessesScreenState();
@@ -153,6 +161,7 @@ class _BusinessesScreenState extends State<BusinessesScreen> {
               onLoadMore: _fetchNextPage,
               pageError: _items.isNotEmpty ? _error : null,
               onRetryNext: _fetchNextPage,
+              detailRepositoriesOverride: widget.detailRepositoriesOverride,
             );
           },
         ),
@@ -278,6 +287,7 @@ class _ResultsList extends StatelessWidget {
     required this.onLoadMore,
     required this.pageError,
     required this.onRetryNext,
+    required this.detailRepositoriesOverride,
   });
 
   final List<BusinessSummary> items;
@@ -292,6 +302,8 @@ class _ResultsList extends StatelessWidget {
   final Object? pageError;
   final VoidCallback onRetryNext;
 
+  final BusinessDetailRepositories? detailRepositoriesOverride;
+
   @override
   Widget build(BuildContext context) {
     return ListView.separated(
@@ -301,7 +313,10 @@ class _ResultsList extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 0),
       itemBuilder: (context, i) {
         if (i < items.length) {
-          return _BusinessListItem(business: items[i]);
+          return _BusinessListItem(
+            business: items[i],
+            detailRepositoriesOverride: detailRepositoriesOverride,
+          );
         }
         return _ListFooter(
           nextCursor: nextCursor,
@@ -316,9 +331,13 @@ class _ResultsList extends StatelessWidget {
 }
 
 class _BusinessListItem extends StatelessWidget {
-  const _BusinessListItem({required this.business});
+  const _BusinessListItem({
+    required this.business,
+    required this.detailRepositoriesOverride,
+  });
 
   final BusinessSummary business;
+  final BusinessDetailRepositories? detailRepositoriesOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -370,12 +389,13 @@ class _BusinessListItem extends StatelessWidget {
         ],
       ),
       onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${name} — detail screen lands in the next mobile commit.',
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BusinessDetailScreen(
+              businessId: business.id,
+              initialName: business.name,
+              repositoriesOverride: detailRepositoriesOverride,
             ),
-            duration: const Duration(seconds: 2),
           ),
         );
       },
