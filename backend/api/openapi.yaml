@@ -834,6 +834,215 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /appointments/{id}/accept:
+    post:
+      tags: [auth]
+      operationId: acceptAppointment
+      summary: Business accepts a REQUESTED appointment.
+      description: |
+        Authenticated. Caller must own the business associated with the
+        appointment, or be `ADMIN`. Refuses any fromStatus other than
+        REQUESTED with 409 CONFLICT.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The updated appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /appointments/{id}/reject:
+    post:
+      tags: [auth]
+      operationId: rejectAppointment
+      summary: Business rejects a REQUESTED appointment.
+      description: |
+        Authenticated. Caller must own the business associated with the
+        appointment, or be `ADMIN`. Body accepts an optional `reason`;
+        the reason is logged but NOT persisted in MVP — the schema has
+        no `reject_reason` column. A future migration adds the column
+        and the service grows a parameter.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RejectAppointmentRequest'
+      responses:
+        '200':
+          description: The updated appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /appointments/{id}/cancel:
+    post:
+      tags: [auth]
+      operationId: cancelAppointment
+      summary: Cancel an appointment.
+      description: |
+        Authenticated. The actor is derived from the caller:
+          * `ADMIN` role → admin cancel (bypasses cutoff).
+          * caller is the customer → customer cancel (cutoff applies).
+          * caller owns the business → business cancel (bypasses cutoff).
+          * otherwise → 403.
+
+        The cancellation cutoff is `BOOKING_CANCEL_CUTOFF_MINUTES`
+        (default 240). Customer attempts inside the cutoff return 409
+        CONFLICT.
+
+        Body accepts an optional `reason`; the reason is persisted to
+        `appointments.cancel_reason`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelAppointmentRequest'
+      responses:
+        '200':
+          description: The updated appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /appointments/{id}/reschedule:
+    post:
+      tags: [auth]
+      operationId: rescheduleAppointment
+      summary: Customer reschedules an appointment.
+      description: |
+        Authenticated. The state machine permits only `CUSTOMER` for
+        RESCHEDULE — `BUSINESS_OWNER` and `ADMIN` attempts surface as
+        409 CONFLICT.
+
+        The new slot is re-validated against `SlotService.computeSlots`,
+        so an unavailable target returns 409 `SLOT_UNAVAILABLE`. If
+        the move succeeds and the row was `ACCEPTED`, the service
+        resets the status to REQUESTED so the business must re-accept.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RescheduleAppointmentRequest'
+      responses:
+        '200':
+          description: The updated appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /appointments/{id}/complete:
+    post:
+      tags: [auth]
+      operationId: completeAppointment
+      summary: Business marks an ACCEPTED appointment as COMPLETED.
+      description: |
+        Authenticated. Caller must own the business associated with the
+        appointment, or be `ADMIN`. Only valid from ACCEPTED; refuses
+        any other fromStatus with 409 CONFLICT.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The updated appointment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -1731,6 +1940,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AppointmentView'
+    RejectAppointmentRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+          description: |
+            Optional human-readable reason. Logged in MVP; NOT
+            persisted because the schema has no `reject_reason` column.
+    CancelAppointmentRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 1000
+          description: Optional human-readable reason. Persisted to `appointments.cancel_reason`.
+    RescheduleAppointmentRequest:
+      type: object
+      required: [startsAt]
+      properties:
+        startsAt:
+          type: string
+          format: date-time
+          description: New UTC ISO-8601 start timestamp.
     MediaView:
       type: object
       required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]
