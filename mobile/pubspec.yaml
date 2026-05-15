@@ -41,6 +41,13 @@ dependencies:
   flutter_appauth: ^7.0.0
   flutter_secure_storage: ^9.2.2
 
+  # Phase 9 — HTTP client. Dio's interceptor model fits the
+  # auth-token-attachment pattern cleanly; the alternative
+  # `package:http` would require a manual wrapper around every
+  # call site. We swap to the OpenAPI-generated `dart-dio` client
+  # in a future commit; the pubspec dependency is the same.
+  dio: ^5.4.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

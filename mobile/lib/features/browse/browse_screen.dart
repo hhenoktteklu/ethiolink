@@ -1,25 +1,47 @@
-// EthioLink Mobile — placeholder browse / home screen.
+// EthioLink Mobile — browse / home screen.
 //
-// Phase 9 Track 3 scaffold. Lands after a successful (fake)
-// sign-in. The real screen will query `GET /v1/categories` +
-// `GET /v1/businesses` and render the marketplace grid; the
-// placeholder shows the four MVP categories as static cards so
-// the navigation loop ("login → browse → ...") works end-to-end.
+// Phase 9 mobile commit "add mobile categories fetch". Replaces
+// the scaffold's 4 static category cards with a real
+// `GET /v1/categories` fetch via `CategoriesRepository`.
 //
-// The bottom navigation bar wires to the placeholder bookings +
-// profile screens so the operator can walk every scaffold screen
-// without modifying code.
+// State machine:
+//
+//   * `_Loading`  — initial state. CircularProgressIndicator
+//                   centred on the tab.
+//   * `_Success`  — `List<Category>` is non-empty. Renders the
+//                   responsive grid of category cards.
+//   * `_Empty`    — `List<Category>` is empty (the API returned
+//                   `{items: []}`). Renders an empty-state with
+//                   the cause + retry button. Categories should
+//                   never legitimately be empty in MVP — the
+//                   seed migration inserts the four MVP entries
+//                   — so this state is effectively the
+//                   "operator forgot to run db:seed" indicator.
+//   * `_Error`    — `CategoriesLoadFailure` thrown. Renders a
+//                   clear error with a retry button + the
+//                   underlying message.
+//
+// The widget pulls a `CategoriesRepository` via constructor
+// override (tests) or constructs an `HttpCategoriesRepository`
+// over the `AppConfigScope`-injected `AppConfig` (production).
+// The `authServiceOverride` plumbing from the scaffold is
+// preserved unchanged for the sign-out flow.
 
 import 'package:flutter/material.dart';
 
+import '../../core/api/api_client.dart';
 import '../../core/auth/auth_service.dart';
+import '../../core/config/app_config_scope.dart';
 import '../bookings/bookings_screen.dart';
 import '../profile/profile_screen.dart';
+import 'data/categories_repository.dart';
+import 'models/category.dart';
 
 class BrowseScreen extends StatefulWidget {
   const BrowseScreen({
     required this.session,
     this.authServiceOverride,
+    this.categoriesRepositoryOverride,
     super.key,
   });
 
@@ -30,6 +52,11 @@ class BrowseScreen extends StatefulWidget {
   /// surrounding `LoginScreen`.
   final AuthService? authServiceOverride;
 
+  /// Test-injected repository. Production leaves this `null` and
+  /// the State constructs `HttpCategoriesRepository` from
+  /// `AppConfigScope`.
+  final CategoriesRepository? categoriesRepositoryOverride;
+
   @override
   State<BrowseScreen> createState() => _BrowseScreenState();
 }
@@ -37,19 +64,31 @@ class BrowseScreen extends StatefulWidget {
 class _BrowseScreenState extends State<BrowseScreen> {
   int _selectedIndex = 0;
 
-  late final List<Widget> _tabs = <Widget>[
-    _BrowseTab(session: widget.session),
-    BookingsScreen(session: widget.session),
-    ProfileScreen(
-      session: widget.session,
-      authServiceOverride: widget.authServiceOverride,
-    ),
-  ];
+  CategoriesRepository? _repo;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_repo != null) return;
+    _repo = widget.categoriesRepositoryOverride ??
+        HttpCategoriesRepository(
+          ApiClient(config: AppConfigScope.of(context)),
+        );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final tabs = <Widget>[
+      _BrowseTab(session: widget.session, repository: _repo!),
+      BookingsScreen(session: widget.session),
+      ProfileScreen(
+        session: widget.session,
+        authServiceOverride: widget.authServiceOverride,
+      ),
+    ];
+
     return Scaffold(
-      body: _tabs[_selectedIndex],
+      body: tabs[_selectedIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (i) => setState(() => _selectedIndex = i),
@@ -75,69 +114,225 @@ class _BrowseScreenState extends State<BrowseScreen> {
   }
 }
 
-class _BrowseTab extends StatelessWidget {
-  const _BrowseTab({required this.session});
+class _BrowseTab extends StatefulWidget {
+  const _BrowseTab({required this.session, required this.repository});
 
   final AuthSession session;
+  final CategoriesRepository repository;
 
-  static const _placeholderCategories = <_CategoryCard>[
-    _CategoryCard(icon: Icons.content_cut, label: 'Salons'),
-    _CategoryCard(icon: Icons.cut, label: 'Barbers'),
-    _CategoryCard(icon: Icons.spa, label: 'Spas'),
-    _CategoryCard(icon: Icons.brush, label: 'Beauty Pros'),
-  ];
+  @override
+  State<_BrowseTab> createState() => _BrowseTabState();
+}
+
+class _BrowseTabState extends State<_BrowseTab> {
+  Future<List<Category>>? _future;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  void _refresh() {
+    setState(() {
+      _future = widget.repository.list();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: [
-        SliverAppBar(
-          title: const Text('Discover'),
-          floating: true,
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          sliver: SliverToBoxAdapter(
-            child: Text(
-              'Welcome back, ${session.email}.',
-              style: Theme.of(context).textTheme.bodyMedium,
+    return RefreshIndicator(
+      onRefresh: () async {
+        _refresh();
+        await _future;
+      },
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          const SliverAppBar(
+            title: Text('Discover'),
+            floating: true,
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: Text(
+                'Welcome back, ${widget.session.email}.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
             ),
           ),
-        ),
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-          sliver: SliverGrid(
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.2,
-            ),
-            delegate: SliverChildBuilderDelegate(
-              (context, i) => _placeholderCategories[i],
-              childCount: _placeholderCategories.length,
-            ),
-          ),
-        ),
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 8, 16, 24),
-            child: Text(
-              'Marketplace listings load here once the API client lands.',
-              textAlign: TextAlign.center,
+          SliverToBoxAdapter(
+            child: FutureBuilder<List<Category>>(
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const _LoadingState();
+                }
+                if (snapshot.hasError) {
+                  return _ErrorState(
+                    error: snapshot.error!,
+                    onRetry: _refresh,
+                  );
+                }
+                final data = snapshot.data ?? <Category>[];
+                if (data.isEmpty) {
+                  return _EmptyState(onRetry: _refresh);
+                }
+                return _CategoryGrid(categories: data);
+              },
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 48),
+      child: Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
+      child: Column(
+        children: [
+          Icon(Icons.inbox_outlined, size: 56, color: colors.onSurfaceVariant),
+          const SizedBox(height: 12),
+          Text(
+            'No categories yet.',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'The marketplace catalog is still being prepared. '
+            'Pull down to refresh.',
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final isNetwork = error is CategoriesLoadFailure &&
+        (error as CategoriesLoadFailure).isNetworkError;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 32),
+      child: Column(
+        children: [
+          Icon(
+            isNetwork ? Icons.wifi_off : Icons.error_outline,
+            size: 56,
+            color: colors.error,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            isNetwork
+                ? "Can't reach the server"
+                : 'Something went wrong',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            error.toString(),
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Try again'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryGrid extends StatelessWidget {
+  const _CategoryGrid({required this.categories});
+
+  final List<Category> categories;
+
+  // Slug → icon mapping for the placeholder UI. New seeded
+  // categories without a slug entry fall back to a generic icon.
+  // The design pass replaces this with vendor-supplied imagery.
+  static const _iconBySlug = <String, IconData>{
+    'salon': Icons.content_cut,
+    'barber': Icons.cut,
+    'spa': Icons.spa,
+    'beauty-professional': Icons.brush,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.2,
         ),
-      ],
+        itemCount: categories.length,
+        itemBuilder: (context, i) {
+          final c = categories[i];
+          return _CategoryCard(
+            category: c,
+            icon: _iconBySlug[c.slug] ?? Icons.local_offer_outlined,
+          );
+        },
+      ),
     );
   }
 }
 
 class _CategoryCard extends StatelessWidget {
-  const _CategoryCard({required this.icon, required this.label});
+  const _CategoryCard({required this.category, required this.icon});
 
+  final Category category;
   final IconData icon;
-  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +345,10 @@ class _CategoryCard extends StatelessWidget {
         onTap: () {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('$label — placeholder. Wire the real fetch next.'),
+              content: Text(
+                '${category.nameEn} — listing screen lands in '
+                'the next mobile commit.',
+              ),
               duration: const Duration(seconds: 2),
             ),
           );
@@ -163,8 +361,9 @@ class _CategoryCard extends StatelessWidget {
               Icon(icon, size: 36, color: colors.primary),
               const SizedBox(height: 8),
               Text(
-                label,
+                category.nameEn,
                 style: Theme.of(context).textTheme.titleMedium,
+                textAlign: TextAlign.center,
               ),
             ],
           ),

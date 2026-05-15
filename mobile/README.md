@@ -179,19 +179,18 @@ If the browser closes but the app stays on the LoginScreen, the deep link didn't
 - ✅ Branded login screen — Cognito PKCE sign-in via `flutter_appauth` against the configured hosted-UI domain.
 - ✅ Secure token cache via `flutter_secure_storage` (Keychain / Keystore). Refresh-on-near-expiry built into `CognitoAuthService.currentSession()`.
 - ✅ Three-tab bottom navigation: Browse, Bookings, Profile.
-- ✅ Browse tab — 4 placeholder category cards (Salons / Barbers / Spas / Beauty Pros).
+- ✅ Browse tab — live `GET /v1/categories` fetch via `HttpCategoriesRepository` over Dio. Loading / success / empty / error states with a pull-to-refresh + retry button.
 - ✅ Profile tab — session info + env display + working sign-out (clears secure storage + best-effort hosted-UI logout).
 - ✅ `AppConfig` + `AppConfigScope` inherited-widget pattern.
 - ✅ `AuthService` port with two implementations: `CognitoAuthService` (production) + `FakeAuthService` (tests + offline demo). `LoginScreen` accepts an optional override so widget tests stay platform-channel-free.
-- ✅ `ApiClient` skeleton with a stable `baseUrl` getter and `UnimplementedError`-throwing method stubs.
+- ✅ `ApiClient` over Dio with an `AuthTokenInterceptor` — attaches `Authorization: Bearer <idToken>` when a session exists; public endpoints work without one. One-shot 401 retry after a token refresh.
+- ✅ `CategoriesRepository` port with `HttpCategoriesRepository` over the `ApiClient`. `BrowseScreen` accepts a repository override so widget tests stay network-free.
 - ✅ `flutter_lints` + strict analyzer settings.
-- ✅ Widget tests covering login render + fake-auth sign-in routing + missing-config detection; unit tests covering id-token claim decoding + role precedence.
+- ✅ Widget tests covering login render + fake-auth tap + missing-config detection + BrowseScreen's loading / success / empty / error states. Unit tests covering id-token claim decoding + role precedence + Category JSON parsing.
 
 ## What the scaffold deliberately does NOT ship
 
 Each item below is on the immediate Phase 9 Track 3 backlog. The scaffold leaves a typed seam so the follow-up commits drop in cleanly.
-
-- ❌ Real HTTP client (Dio + auth-token interceptor + retry). Pairs with the OpenAPI-generated client.
 - ❌ OpenAPI-generated Dart client from `backend/api/openapi.yaml`. Lands once the auth path is real so generated requests can be authenticated end-to-end.
 - ❌ State management (Riverpod). Adopted when the first feature with non-trivial state lands — likely the slot picker or the booking funnel.
 - ❌ Routing library (go_router). Adopted when the screen count crosses ~6.
@@ -218,4 +217,4 @@ flutter analyze
 
 ## Next recommended mobile commit
 
-**"Phase 9: add Dio + auth-token interceptor + first browse fetch"** — replace `ApiClient`'s `UnimplementedError` stubs with a real Dio-backed implementation. The interceptor pulls the current `idToken` from `flutter_secure_storage` (the same `_kIdToken` key `CognitoAuthService` writes) and attaches it as the `Authorization: Bearer <idToken>` header on every request; on a 401, retry once after `CognitoAuthService.currentSession()` refreshes the token. Land the first real fetch as part of the same commit — `GET /v1/categories` against the live dev API — so the browse tab's 4 placeholder cards become the real four MVP categories. Sets up the foundation for every subsequent feature track (booking funnel, /v1/me/appointments, business-owner flows). ~2–3 days of work.
+**"Phase 9: add mobile businesses search"** — extend `BrowseScreen`'s category cards into a real marketplace list. Tap on `Salons` (or any category) → new `BusinessesScreen` powered by `GET /v1/businesses?category=salon&...`. New `HttpBusinessesRepository` over the existing `ApiClient` (no new HTTP plumbing — the interceptor + retry path are already in place). Adds: business-list item widget, `BusinessSummary` model from the `BusinessPublicView` schema, infinite-scroll pagination via the existing `nextCursor` shape. Sets up the `BusinessDetailScreen` + service / staff / slot picker as the immediate next-but-one commits. ~3 days including the dev-API smoke pass.

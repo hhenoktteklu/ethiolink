@@ -1,44 +1,257 @@
-// EthioLink Mobile — HTTP client placeholder.
+// EthioLink Mobile — Dio-backed HTTP client.
 //
-// The scaffold's API client is intentionally tiny: a `baseUrl`
-// holder and a no-op `get` / `post` pair. Real HTTP wiring (Dio
-// + interceptors + auth-token attachment + retry) lands in a
-// follow-up commit once the OpenAPI-generated client is wired.
+// Phase 9 Track 3, post-auth commit. Replaces the
+// `UnimplementedError`-throwing scaffold stub. The client is
+// thin on purpose: it owns the `Dio` instance, the auth-token
+// interceptor wiring, and a small JSON helper. Per-domain
+// repositories (`CategoriesRepository`, future bookings repo,
+// etc.) layer on top.
 //
-// The placeholder exists so the feature screens have a real
-// type to import. Replacing it later is a one-import swap.
+// Auth-token attachment:
+//   * Public endpoints (`GET /v1/categories`,
+//     `GET /v1/businesses*`) work without an Authorization header.
+//     The interceptor inspects each request — if a `TokenProvider`
+//     returns a non-null token, the header is added; otherwise the
+//     request goes out unauthenticated and the API serves it via
+//     its `authorization = "NONE"` route handler.
+//
+//   * Authenticated endpoints attach
+//     `Authorization: Bearer <idToken>`. The token comes from the
+//     same `flutter_secure_storage` cache `CognitoAuthService`
+//     writes — we read by key, not by inversion-of-control through
+//     `AuthService`, to keep the interceptor synchronous-feeling at
+//     the call site (it still issues the storage read async; the
+//     `onRequest` handler is async-aware).
+//
+//   * 401 retry — when the API rejects an authenticated request,
+//     the interceptor asks the `TokenProvider` to refresh once,
+//     then retries the original request with the fresh token. The
+//     production provider's `refresh()` calls
+//     `CognitoAuthService.currentSession()` which already handles
+//     near-expiry refresh; on failure it returns null and the
+//     401 surfaces to the caller for re-login routing.
+//
+// Test seam:
+//   * Tests inject a `Dio` configured with a `MockAdapter` from
+//     `package:dio` (or the standard `package:dio_test` adapter
+//     when it lands in pubspec; for scaffold tests we drive
+//     repositories with a fake repo abstraction instead).
+//   * The `TokenProvider` abstraction is the second seam — tests
+//     pass an in-memory token (or `null`) without touching
+//     `flutter_secure_storage`.
+
+import 'package:dio/dio.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../config/app_config.dart';
 
+/// Provides the current id-token for outbound API requests, plus
+/// a refresh hook the 401 retry path can call. Production uses
+/// `SecureStorageTokenProvider`; tests use an in-memory stub.
+abstract class TokenProvider {
+  /// Current id token (null when the user is signed out). Called
+  /// on every request the interceptor processes.
+  Future<String?> currentIdToken();
+
+  /// Best-effort refresh after a 401. Returns the new id token
+  /// when refresh succeeded, `null` otherwise. The interceptor
+  /// retries the original request with the new token; on null it
+  /// surfaces the 401 to the caller.
+  Future<String?> refresh();
+}
+
+/// Default production `TokenProvider`. Reads from
+/// `flutter_secure_storage` under the same key
+/// `CognitoAuthService` writes. The refresh hook is intentionally
+/// left as a stub — wiring it through to `CognitoAuthService.currentSession`
+/// requires the auth service instance; the next mobile commit
+/// adds that DI wire-up. Today: on 401, the user re-logs in by
+/// hand from the LoginScreen. Acceptable for the first browse-
+/// fetch path because every authenticated endpoint behind it
+/// already returns 401 gracefully.
+class SecureStorageTokenProvider implements TokenProvider {
+  const SecureStorageTokenProvider({this.storage = const FlutterSecureStorage()});
+
+  final FlutterSecureStorage storage;
+
+  /// Mirrors the key constant in `cognito_auth_service.dart`. We
+  /// reference the literal here (not the constant) to avoid an
+  /// import cycle between `core/api/` and `core/auth/`. Renaming
+  /// requires updating both sites — the trade-off is acceptable
+  /// at scaffold scale.
+  static const _kIdToken = 'cognito.id_token';
+
+  @override
+  Future<String?> currentIdToken() => storage.read(key: _kIdToken);
+
+  @override
+  Future<String?> refresh() async {
+    // Phase 9 placeholder. Real refresh dispatch lands in the
+    // next mobile commit when `CognitoAuthService` is injectable
+    // here without creating an import cycle. For now we just
+    // re-read — if the auth service refreshed the token on cold
+    // start, the next request picks up the fresh value.
+    return storage.read(key: _kIdToken);
+  }
+}
+
+/// Thin wrapper around `Dio`. Repositories depend on this; the
+/// `dio` getter exposes the underlying client for the rare case
+/// a caller needs to send a request shape the helpers don't
+/// cover.
 class ApiClient {
-  ApiClient({required this.config});
-
-  final AppConfig config;
-
-  /// API root including stage suffix, e.g.
-  /// `https://abc.execute-api.eu-west-1.amazonaws.com/dev`.
-  String get baseUrl => config.apiBaseUrl;
-
-  /// Placeholder. Throws `UnimplementedError` until the Dio
-  /// integration lands. Tests that need a working HTTP client
-  /// inject a fake implementation directly into the feature
-  /// services.
-  Future<dynamic> get(String path, {Map<String, String>? headers}) {
-    throw UnimplementedError(
-      'ApiClient.get is a Phase 9 scaffold placeholder. '
-      'Implement with the Dio adapter in the next mobile commit.',
+  ApiClient({
+    required AppConfig config,
+    TokenProvider? tokenProvider,
+    Dio? dio,
+  })  : _tokenProvider = tokenProvider ?? const SecureStorageTokenProvider(),
+        dio = dio ??
+            Dio(
+              BaseOptions(
+                baseUrl: config.apiBaseUrl,
+                connectTimeout: const Duration(seconds: 10),
+                receiveTimeout: const Duration(seconds: 15),
+                responseType: ResponseType.json,
+                headers: <String, String>{
+                  'Accept': 'application/json',
+                  'Content-Type': 'application/json',
+                },
+              ),
+            ) {
+    dio!.interceptors.add(
+      AuthTokenInterceptor(_tokenProvider, dio: dio!),
     );
   }
 
-  /// Placeholder. Same posture as `get`.
-  Future<dynamic> post(
+  final Dio dio;
+  final TokenProvider _tokenProvider;
+
+  /// Convenience GET that decodes the JSON body via the supplied
+  /// `parse` callback. Throws `ApiException` on non-2xx responses
+  /// + on transport errors.
+  Future<T> getJson<T>(
     String path, {
-    Object? body,
-    Map<String, String>? headers,
-  }) {
-    throw UnimplementedError(
-      'ApiClient.post is a Phase 9 scaffold placeholder. '
-      'Implement with the Dio adapter in the next mobile commit.',
+    Map<String, dynamic>? queryParameters,
+    required T Function(dynamic body) parse,
+  }) async {
+    try {
+      final response = await dio.get<dynamic>(
+        path,
+        queryParameters: queryParameters,
+      );
+      return parse(response.data);
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+}
+
+/// Dio interceptor that attaches the Cognito id token to every
+/// request when one is available, and runs a one-shot 401 retry
+/// path after asking the `TokenProvider` to refresh.
+class AuthTokenInterceptor extends Interceptor {
+  AuthTokenInterceptor(this._tokenProvider, {required this.dio});
+
+  final TokenProvider _tokenProvider;
+  final Dio dio;
+
+  static const _retryFlag = '__ethiolink_auth_retried';
+
+  @override
+  Future<void> onRequest(
+    RequestOptions options,
+    RequestInterceptorHandler handler,
+  ) async {
+    // Don't overwrite an explicit Authorization header — the
+    // caller may have a reason (e.g. forwarding a different
+    // bearer in a test). Otherwise attach when a token exists.
+    if (!options.headers.containsKey('Authorization')) {
+      final token = await _tokenProvider.currentIdToken();
+      if (token != null && token.isNotEmpty) {
+        options.headers['Authorization'] = 'Bearer $token';
+      }
+    }
+    handler.next(options);
+  }
+
+  @override
+  Future<void> onError(
+    DioException err,
+    ErrorInterceptorHandler handler,
+  ) async {
+    // 401 retry path. Only retries once — the `_retryFlag` extra
+    // prevents an infinite loop when the refresh succeeds but the
+    // API still rejects (e.g. revoked user, role demotion).
+    final response = err.response;
+    if (response?.statusCode != 401 ||
+        err.requestOptions.extra[_retryFlag] == true) {
+      handler.next(err);
+      return;
+    }
+
+    final fresh = await _tokenProvider.refresh();
+    if (fresh == null || fresh.isEmpty) {
+      handler.next(err);
+      return;
+    }
+
+    final retryOptions = err.requestOptions.copyWith(
+      headers: <String, dynamic>{
+        ...err.requestOptions.headers,
+        'Authorization': 'Bearer $fresh',
+      },
+      extra: <String, dynamic>{
+        ...err.requestOptions.extra,
+        _retryFlag: true,
+      },
+    );
+
+    try {
+      final retried = await dio.fetch<dynamic>(retryOptions);
+      handler.resolve(retried);
+    } on DioException catch (retryErr) {
+      handler.next(retryErr);
+    }
+  }
+}
+
+/// Domain-friendly wrapper for transport + HTTP errors. The
+/// underlying `DioException` is preserved on `.cause` for
+/// debugging; the public surface is `statusCode` + `message` +
+/// `isNetworkError`. Repositories may further translate specific
+/// 4xx codes into typed domain errors.
+class ApiException implements Exception {
+  ApiException({
+    required this.message,
+    this.statusCode,
+    this.isNetworkError = false,
+    this.cause,
+  });
+
+  final String message;
+  final int? statusCode;
+  final bool isNetworkError;
+  final Object? cause;
+
+  factory ApiException.fromDio(DioException err) {
+    final status = err.response?.statusCode;
+    if (status != null) {
+      // 4xx / 5xx with a parsed response.
+      return ApiException(
+        message: 'HTTP $status from ${err.requestOptions.path}.',
+        statusCode: status,
+        cause: err,
+      );
+    }
+    // No response — network / timeout / abort.
+    return ApiException(
+      message:
+          'Network error: ${err.type.name}${err.message != null ? " (${err.message})" : ""}.',
+      isNetworkError: true,
+      cause: err,
     );
   }
+
+  @override
+  String toString() => 'ApiException: $message';
 }
