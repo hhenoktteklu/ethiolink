@@ -93,15 +93,24 @@ export interface LoadSecretsThenConfigOptions {
     /**
      * How to fetch the secret. Defaults to the lazy-imported AWS
      * SDK resolver. Tests inject a fake to avoid the network call.
+     * Used for BOTH the RDS master secret AND the SMS provider
+     * API key secret — same interface, separate caches.
      */
     readonly secretsResolver?: SecretsResolver;
 
     /**
-     * Cache of resolved secrets keyed by ARN. Defaults to the
-     * module-scope cache so warm Lambda invocations reuse the
-     * value. Tests pass a fresh `Map` to isolate state.
+     * Cache of resolved RDS master secrets keyed by ARN. Defaults
+     * to the module-scope cache so warm Lambda invocations reuse
+     * the value. Tests pass a fresh `Map` to isolate state.
      */
     readonly cache?: Map<string, ResolvedRdsSecret>;
+
+    /**
+     * Cache of resolved SMS API keys keyed by secret ARN. Defaults
+     * to the module-scope cache. Tests pass a fresh `Map` to
+     * isolate state from the RDS cache.
+     */
+    readonly smsApiKeyCache?: Map<string, string>;
 }
 
 /**
@@ -130,6 +139,14 @@ export class SecretResolutionError extends Error {
  */
 const defaultCache = new Map<string, ResolvedRdsSecret>();
 
+/**
+ * Separate cache for resolved SMS API keys. Keyed by secret ARN
+ * and holds the resolved key string verbatim. Lives at module
+ * scope so warm Lambda invocations skip the network call after a
+ * cold-start resolution.
+ */
+const defaultSmsApiKeyCache = new Map<string, string>();
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -150,59 +167,77 @@ export async function loadSecretsThenConfig(
     options: LoadSecretsThenConfigOptions = {},
 ): Promise<AppConfig> {
     const env = options.env ?? process.env;
-    const secretArn = env.PG_SECRET_ARN?.trim();
+    const resolver = options.secretsResolver ?? defaultSecretsManagerResolver();
+    const rdsCache = options.cache ?? defaultCache;
+    const smsCache = options.smsApiKeyCache ?? defaultSmsApiKeyCache;
 
-    // No secret to resolve — preserve local-dev / docker-compose
-    // behavior. `PG_PASSWORD` is already in the env from
-    // `backend/.env`.
-    if (!secretArn) {
-        return loadConfig(env);
+    // Start with the input env. Both resolution paths below may
+    // layer values onto this map; `loadConfig` consumes the
+    // result.
+    let derived: NodeJS.ProcessEnv = env;
+
+    // ---- RDS master secret -----------------------------------------------
+    const rdsSecretArn = env.PG_SECRET_ARN?.trim();
+    if (rdsSecretArn) {
+        let resolved = rdsCache.get(rdsSecretArn);
+        if (!resolved) {
+            const raw = await resolver.resolve(rdsSecretArn);
+            resolved = parseSecret(raw);
+            rdsCache.set(rdsSecretArn, resolved);
+        }
+
+        // `PG_PASSWORD` ALWAYS comes from the secret (explicit
+        // `PG_SECRET_ARN` is the operator's signal). The remaining
+        // DB-side keys defer to the input env so the Terraform
+        // Lambda env can point `PG_HOST` at the RDS Proxy while
+        // the secret's `host` points at the direct DB endpoint.
+        derived = { ...derived, PG_PASSWORD: resolved.password };
+        if (!isPresent(env.PG_HOST) && resolved.host) {
+            derived.PG_HOST = resolved.host;
+        }
+        if (!isPresent(env.PG_PORT) && resolved.port !== undefined) {
+            derived.PG_PORT = String(resolved.port);
+        }
+        if (!isPresent(env.PG_DATABASE) && resolved.dbname) {
+            derived.PG_DATABASE = resolved.dbname;
+        }
+        if (!isPresent(env.PG_USER) && resolved.username) {
+            derived.PG_USER = resolved.username;
+        }
     }
 
-    const cache = options.cache ?? defaultCache;
-    let resolved = cache.get(secretArn);
-
-    if (!resolved) {
-        const resolver = options.secretsResolver ?? defaultSecretsManagerResolver();
-        const raw = await resolver.resolve(secretArn);
-        resolved = parseSecret(raw);
-        cache.set(secretArn, resolved);
-    }
-
-    // Build the derived env. `PG_PASSWORD` always comes from the
-    // secret (explicit `PG_SECRET_ARN` is the operator's signal
-    // that they want the secret-resolved value, even if a stale
-    // `PG_PASSWORD` is also present). The remaining DB-side keys
-    // defer to the input env so the Terraform Lambda env can
-    // point `PG_HOST` at the RDS Proxy while the secret's `host`
-    // points at the direct DB endpoint.
-    const derived: NodeJS.ProcessEnv = {
-        ...env,
-        PG_PASSWORD: resolved.password,
-    };
-
-    if (!isPresent(env.PG_HOST) && resolved.host) {
-        derived.PG_HOST = resolved.host;
-    }
-    if (!isPresent(env.PG_PORT) && resolved.port !== undefined) {
-        derived.PG_PORT = String(resolved.port);
-    }
-    if (!isPresent(env.PG_DATABASE) && resolved.dbname) {
-        derived.PG_DATABASE = resolved.dbname;
-    }
-    if (!isPresent(env.PG_USER) && resolved.username) {
-        derived.PG_USER = resolved.username;
+    // ---- SMS provider API key secret -------------------------------------
+    //
+    // Mirrors the RDS pattern. Resolution is triggered by
+    // `SMS_PROVIDER_API_KEY_SECRET_ARN` being set AND
+    // `SMS_PROVIDER_API_KEY` NOT already being in the env. The
+    // explicit env-var-wins behavior is the local-dev / test
+    // escape hatch: if a dev sets `SMS_PROVIDER_API_KEY` directly
+    // they get that value, no network call. In production the
+    // env stack never sets the plain key — only the ARN — so the
+    // resolver always runs on cold start.
+    const smsSecretArn = env.SMS_PROVIDER_API_KEY_SECRET_ARN?.trim();
+    if (smsSecretArn && !isPresent(env.SMS_PROVIDER_API_KEY)) {
+        let key = smsCache.get(smsSecretArn);
+        if (!key) {
+            const raw = await resolver.resolve(smsSecretArn);
+            key = parseSmsApiKey(raw);
+            smsCache.set(smsSecretArn, key);
+        }
+        derived = { ...derived, SMS_PROVIDER_API_KEY: key };
     }
 
     return loadConfig(derived);
 }
 
 /**
- * Clear the module-scope cache. Used by tests; production code
- * has no reason to clear cache mid-lifetime.
+ * Clear the module-scope caches. Used by tests; production code
+ * has no reason to clear cache mid-lifetime. Clears both the RDS
+ * master cache and the SMS API key cache.
  */
 export function clearSecretsCache(): void {
     defaultCache.clear();
+    defaultSmsApiKeyCache.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -284,6 +319,71 @@ function parseSecret(raw: string): ResolvedRdsSecret {
         dbInstanceIdentifier:
             typeof obj.dbInstanceIdentifier === 'string' ? obj.dbInstanceIdentifier : undefined,
     });
+}
+
+/**
+ * Parse the SMS API key secret payload. Accepts two shapes so
+ * the operator can pick whichever is simpler for the chosen
+ * vendor:
+ *
+ *   * Plain string — the SecretString IS the key. Used when the
+ *     vendor's onboarding emits a flat token (most Ethiopian SMS
+ *     REST providers).
+ *
+ *   * JSON `{ "apiKey": "..." }` — used when the operator wants
+ *     the secret to carry extra fields (e.g. `senderId`, expiry
+ *     metadata) without breaking this resolver. Only `apiKey` is
+ *     consumed today; other fields are ignored.
+ *
+ * Anything else (empty string, JSON without `apiKey`, malformed
+ * JSON-looking blob) throws `SecretResolutionError` so a
+ * misconfigured secret fails the cold start loudly rather than
+ * silently shipping with an empty key.
+ */
+function parseSmsApiKey(raw: string): string {
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+        throw new SecretResolutionError(
+            'SMS provider API key secret is empty. Set the secret to either ' +
+                'the plain API key string or a JSON object with an `apiKey` field.',
+        );
+    }
+
+    // JSON shape detection — if it starts with `{` we expect an
+    // object with an `apiKey` field. Otherwise treat as a plain
+    // string. This is intentionally lenient: a vendor key that
+    // happens to look like JSON without braces (rare) is still
+    // treated as plain.
+    if (trimmed.startsWith('{')) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch (err) {
+            throw new SecretResolutionError(
+                `SMS provider API key secret looks like JSON but failed to parse: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            );
+        }
+        if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            Array.isArray(parsed)
+        ) {
+            throw new SecretResolutionError(
+                'SMS provider API key secret JSON must be a non-array object.',
+            );
+        }
+        const obj = parsed as Record<string, unknown>;
+        if (typeof obj.apiKey !== 'string' || obj.apiKey === '') {
+            throw new SecretResolutionError(
+                'SMS provider API key secret JSON is missing the `apiKey` string field.',
+            );
+        }
+        return obj.apiKey;
+    }
+
+    return trimmed;
 }
 
 function isPresent(value: string | undefined): boolean {

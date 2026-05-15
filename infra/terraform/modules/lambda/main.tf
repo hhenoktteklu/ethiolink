@@ -309,6 +309,11 @@ locals {
     S3_UPLOAD_URL_EXPIRES_SECONDS  = "900"
     S3_READ_URL_EXPIRES_SECONDS    = "3600"
     NOTIFICATIONS_PROVIDER         = var.notifications_provider
+    SMS_PROVIDER_API_BASE_URL      = var.sms_provider_api_base_url
+    SMS_PROVIDER_SENDER_ID         = var.sms_provider_sender_id
+    SMS_PROVIDER_API_KEY_SECRET_ARN = var.sms_provider_api_key_secret_arn
+    SMS_PROVIDER_NAME              = var.sms_provider_name
+    SMS_PROVIDER_TIMEOUT_MS        = tostring(var.sms_provider_timeout_ms)
     PAYMENTS_PROVIDER_CASH         = var.payments_provider_cash
     PAYMENTS_PROVIDER_ONLINE       = var.payments_provider_online
     BOOKING_CANCEL_CUTOFF_MINUTES  = tostring(var.booking_cancel_cutoff_minutes)
@@ -497,6 +502,53 @@ resource "aws_iam_role_policy" "lambda_media_s3" {
   name   = "${local.base_name}-lambda-media-s3"
   role   = aws_iam_role.lambda_exec["media"].id
   policy = data.aws_iam_policy_document.lambda_media_s3.json
+}
+
+# -----------------------------------------------------------------------------
+# Phase 9 — SMS provider secret read.
+#
+# Attached ONLY to the `appointments` + `scheduled` roles — those
+# two domains are the entire surface of notification dispatch
+# (every booking-lifecycle handler + the reminder Lambda). Other
+# domains (auth, businesses, admin, etc.) never construct an SMS
+# gateway, so they don't need this permission.
+#
+# The policy is gated on `var.sms_provider_api_key_secret_arn`
+# being non-empty so the dev / prod env stacks that haven't wired
+# SMS get no extra IAM surface. When the operator wires the
+# secret, this policy attaches automatically on next apply.
+# -----------------------------------------------------------------------------
+
+locals {
+  sms_provider_secret_consumer_areas = (
+    var.sms_provider_api_key_secret_arn != ""
+    ? toset(["appointments", "scheduled"])
+    : toset([])
+  )
+}
+
+data "aws_iam_policy_document" "lambda_sms_provider_secret" {
+  count = var.sms_provider_api_key_secret_arn != "" ? 1 : 0
+
+  statement {
+    sid    = "ReadSmsProviderApiKey"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+
+    resources = [var.sms_provider_api_key_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_sms_provider_secret" {
+  for_each = local.sms_provider_secret_consumer_areas
+
+  name   = "${local.base_name}-lambda-sms-provider-secret-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_sms_provider_secret[0].json
 }
 
 # -----------------------------------------------------------------------------

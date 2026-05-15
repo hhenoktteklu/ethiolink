@@ -23,6 +23,50 @@ import {
     type SecretsResolver,
 } from '../../shared/config/loadSecretsThenConfig.js';
 
+// SMS provider env shape used by the Phase 9 tests below. Note:
+// `SMS_PROVIDER_API_KEY` is intentionally absent so the secret
+// resolution path runs; SMS_PROVIDER_API_BASE_URL + SENDER_ID are
+// present so `config.smsProvider` builds non-null.
+const SMS_ARN =
+    'arn:aws:secretsmanager:eu-west-1:123:secret:ethiolink/dev/sms-provider/api-key';
+
+const ENV_WITH_SMS_SECRET: NodeJS.ProcessEnv = Object.freeze({
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'info',
+    APP_REGION: 'eu-west-1',
+    PG_HOST: 'localhost',
+    PG_DATABASE: 'ethiolink',
+    PG_USER: 'ethiolink',
+    PG_PASSWORD: 'local-pw',
+    COGNITO_USER_POOL_ID: 'pool',
+    COGNITO_APP_CLIENT_ID_MOBILE: 'mob',
+    COGNITO_APP_CLIENT_ID_ADMIN: 'adm',
+    COGNITO_REGION: 'eu-west-1',
+    SMS_PROVIDER_API_BASE_URL: 'https://sms.example.com',
+    SMS_PROVIDER_SENDER_ID: 'EthioLink',
+    SMS_PROVIDER_API_KEY_SECRET_ARN: SMS_ARN,
+});
+
+/**
+ * Per-ARN scriptable resolver. The base `FakeResolver` returns
+ * one value for any ARN; this one looks up by ARN so the same
+ * test can resolve both an RDS and an SMS secret without
+ * cross-pollination.
+ */
+class MultiResolver implements SecretsResolver {
+    public readonly calls: string[] = [];
+    constructor(private readonly map: Record<string, string | Error>) {}
+    async resolve(arn: string): Promise<string> {
+        this.calls.push(arn);
+        const v = this.map[arn];
+        if (v === undefined) {
+            throw new Error(`MultiResolver: no scripted response for ${arn}`);
+        }
+        if (v instanceof Error) throw v;
+        return v;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
@@ -307,5 +351,187 @@ describe('loadSecretsThenConfig — surface', () => {
         const err = new SecretResolutionError('boom');
         assert.strictEqual(err.name, 'SecretResolutionError');
         assert.ok(err instanceof Error);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 9 — SMS provider API key resolution
+// ---------------------------------------------------------------------------
+
+describe('loadSecretsThenConfig — SMS plain-string secret', () => {
+    it('writes the secret value into SMS_PROVIDER_API_KEY and builds smsProvider', async () => {
+        const resolver = new MultiResolver({
+            [SMS_ARN]: 'plain-sms-key-abc',
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: { ...ENV_WITH_SMS_SECRET },
+            secretsResolver: resolver,
+            cache: new Map<string, ResolvedRdsSecret>(),
+            smsApiKeyCache: new Map<string, string>(),
+        });
+
+        assert.ok(config.smsProvider, 'expected smsProvider to be populated');
+        assert.strictEqual(config.smsProvider!.apiKey, 'plain-sms-key-abc');
+        assert.strictEqual(
+            config.smsProvider!.apiBaseUrl,
+            'https://sms.example.com',
+        );
+        assert.strictEqual(config.smsProvider!.senderId, 'EthioLink');
+        assert.strictEqual(config.smsProvider!.apiKeySecretArn, SMS_ARN);
+        assert.strictEqual(resolver.calls.length, 1);
+        assert.strictEqual(resolver.calls[0], SMS_ARN);
+    });
+});
+
+describe('loadSecretsThenConfig — SMS JSON-wrapped secret', () => {
+    it('parses { "apiKey": "..." } from the SecretString', async () => {
+        const resolver = new MultiResolver({
+            [SMS_ARN]: JSON.stringify({ apiKey: 'json-wrapped-key' }),
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: { ...ENV_WITH_SMS_SECRET },
+            secretsResolver: resolver,
+            cache: new Map<string, ResolvedRdsSecret>(),
+            smsApiKeyCache: new Map<string, string>(),
+        });
+
+        assert.ok(config.smsProvider);
+        assert.strictEqual(config.smsProvider!.apiKey, 'json-wrapped-key');
+    });
+});
+
+describe('loadSecretsThenConfig — SMS explicit env wins over secret', () => {
+    it('does not call the resolver when SMS_PROVIDER_API_KEY is already set', async () => {
+        const resolver = new MultiResolver({
+            [SMS_ARN]: 'never-resolved',
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: {
+                ...ENV_WITH_SMS_SECRET,
+                SMS_PROVIDER_API_KEY: 'env-overrides-secret',
+            },
+            secretsResolver: resolver,
+            cache: new Map<string, ResolvedRdsSecret>(),
+            smsApiKeyCache: new Map<string, string>(),
+        });
+
+        assert.ok(config.smsProvider);
+        assert.strictEqual(
+            config.smsProvider!.apiKey,
+            'env-overrides-secret',
+        );
+        assert.strictEqual(
+            resolver.calls.length,
+            0,
+            'resolver must not be called when env value is present',
+        );
+    });
+});
+
+describe('loadSecretsThenConfig — SMS cache', () => {
+    it('reuses the cached SMS API key across calls', async () => {
+        const resolver = new MultiResolver({
+            [SMS_ARN]: 'cached-key',
+        });
+        const smsCache = new Map<string, string>();
+
+        await loadSecretsThenConfig({
+            env: { ...ENV_WITH_SMS_SECRET },
+            secretsResolver: resolver,
+            cache: new Map<string, ResolvedRdsSecret>(),
+            smsApiKeyCache: smsCache,
+        });
+        await loadSecretsThenConfig({
+            env: { ...ENV_WITH_SMS_SECRET },
+            secretsResolver: resolver,
+            cache: new Map<string, ResolvedRdsSecret>(),
+            smsApiKeyCache: smsCache,
+        });
+
+        assert.strictEqual(resolver.calls.length, 1, 'second call must use cache');
+        assert.strictEqual(smsCache.size, 1);
+        assert.strictEqual(smsCache.get(SMS_ARN), 'cached-key');
+    });
+});
+
+describe('loadSecretsThenConfig — SMS malformed secret', () => {
+    it('throws SecretResolutionError on empty SecretString', async () => {
+        const resolver = new MultiResolver({ [SMS_ARN]: '   ' });
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: { ...ENV_WITH_SMS_SECRET },
+                    secretsResolver: resolver,
+                    cache: new Map<string, ResolvedRdsSecret>(),
+                    smsApiKeyCache: new Map<string, string>(),
+                }),
+            (err: unknown) =>
+                err instanceof SecretResolutionError &&
+                /empty/i.test(err.message),
+        );
+    });
+
+    it('throws when JSON shape is missing apiKey', async () => {
+        const resolver = new MultiResolver({
+            [SMS_ARN]: JSON.stringify({ notTheRightField: 'x' }),
+        });
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: { ...ENV_WITH_SMS_SECRET },
+                    secretsResolver: resolver,
+                    cache: new Map<string, ResolvedRdsSecret>(),
+                    smsApiKeyCache: new Map<string, string>(),
+                }),
+            (err: unknown) =>
+                err instanceof SecretResolutionError &&
+                /apiKey/.test(err.message),
+        );
+    });
+
+    it('throws on malformed JSON that looks like an object', async () => {
+        const resolver = new MultiResolver({
+            [SMS_ARN]: '{ "apiKey": "broken',
+        });
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: { ...ENV_WITH_SMS_SECRET },
+                    secretsResolver: resolver,
+                    cache: new Map<string, ResolvedRdsSecret>(),
+                    smsApiKeyCache: new Map<string, string>(),
+                }),
+            (err: unknown) => err instanceof SecretResolutionError,
+        );
+    });
+});
+
+describe('loadSecretsThenConfig — both RDS and SMS resolution together', () => {
+    it('resolves both secrets via the same resolver in one call', async () => {
+        const rdsArn = ENV_WITH_SECRET_ARN.PG_SECRET_ARN!;
+        const resolver = new MultiResolver({
+            [rdsArn]: VALID_SECRET_JSON,
+            [SMS_ARN]: 'combined-test-key',
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: {
+                ...ENV_WITH_SECRET_ARN,
+                SMS_PROVIDER_API_BASE_URL: 'https://sms.example.com',
+                SMS_PROVIDER_SENDER_ID: 'EthioLink',
+                SMS_PROVIDER_API_KEY_SECRET_ARN: SMS_ARN,
+            },
+            secretsResolver: resolver,
+            cache: new Map<string, ResolvedRdsSecret>(),
+            smsApiKeyCache: new Map<string, string>(),
+        });
+
+        assert.strictEqual(config.pg.password, 'secret-pw-from-aws');
+        assert.ok(config.smsProvider);
+        assert.strictEqual(config.smsProvider!.apiKey, 'combined-test-key');
+        assert.deepStrictEqual([...resolver.calls].sort(), [rdsArn, SMS_ARN].sort());
     });
 });

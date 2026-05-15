@@ -39,7 +39,6 @@ import {
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
 import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
 import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
-import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
@@ -54,8 +53,7 @@ import {
     SlotStaffNotFoundError,
 } from '../../shared/domains/appointments/appointmentService.js';
 import { toAppointmentView } from '../../shared/domains/appointments/appointmentView.js';
-import { PgNotificationLogRepository } from '../../shared/domains/notifications/notificationLogRepository.js';
-import { NotificationService } from '../../shared/domains/notifications/notificationService.js';
+import { createNotificationService } from '../../shared/domains/notifications/notificationServiceFactory.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import { SlotService } from '../../shared/domains/availability/slotService.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
@@ -92,10 +90,9 @@ const baseLogger = createLogger({ level: config.logLevel });
 const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);
 const userService = new UserService(new PgUserRepository(pool));
-const notificationService = new NotificationService({
-    userRepository: new PgUserRepository(pool),
-    notificationLogRepository: new PgNotificationLogRepository(pool),
-    gateways: { MOCK: new MockNotificationGateway() },
+const notificationService = createNotificationService({
+    pool,
+    config,
     logger: baseLogger,
 });
 const appointmentService = new AppointmentService({

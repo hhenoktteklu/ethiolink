@@ -55,7 +55,6 @@
 
 import type { ScheduledEvent } from 'aws-lambda';
 
-import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import type {
@@ -67,7 +66,8 @@ import type { BusinessRepository } from '../../shared/domains/businesses/busines
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import type { NotificationLogRepository } from '../../shared/domains/notifications/notificationLogRepository.js';
 import { PgNotificationLogRepository } from '../../shared/domains/notifications/notificationLogRepository.js';
-import { NotificationService } from '../../shared/domains/notifications/notificationService.js';
+import type { NotificationService } from '../../shared/domains/notifications/notificationService.js';
+import { createNotificationService } from '../../shared/domains/notifications/notificationServiceFactory.js';
 import type { BookingTemplateKey } from '../../shared/domains/notifications/templateRegistry.js';
 import type { ServiceRepository } from '../../shared/domains/services/serviceRepository.js';
 import { PgServiceRepository } from '../../shared/domains/services/serviceRepository.js';
@@ -146,10 +146,9 @@ const businessRepo = new PgBusinessRepository(pool);
 const serviceRepo = new PgServiceRepository(pool);
 const userRepo = new PgUserRepository(pool);
 const notificationLogRepo = new PgNotificationLogRepository(pool);
-const notificationService = new NotificationService({
-    userRepository: userRepo,
-    notificationLogRepository: notificationLogRepo,
-    gateways: { MOCK: new MockNotificationGateway() },
+const notificationService = createNotificationService({
+    pool,
+    config,
     logger: baseLogger,
 });
 

@@ -162,9 +162,70 @@ variable "log_retention_days" {
 # -----------------------------------------------------------------------------
 
 variable "notifications_provider" {
-  description = "Notification provider routing key. `mock` until real SMS / Telegram providers ship; the dispatcher reads this to pick the channel-to-gateway map at cold-start."
+  description = "Notification provider routing key. `mock` keeps `MockNotificationGateway` as the only wired gateway. `sms` (or `production`) opts in to `GenericSmsGateway` for the `SMS` channel when `sms_provider_api_base_url` etc. are also set. The factory in `notificationServiceFactory.ts` evaluates this at cold-start."
   type        = string
   default     = "mock"
+
+  validation {
+    condition     = contains(["mock", "sms", "production"], var.notifications_provider)
+    error_message = "notifications_provider must be one of: mock, sms, production."
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Phase 9 — SMS provider config.
+#
+# All four variables default to empty so the existing dev / prod
+# env stacks remain valid without any change. Operators wire a
+# real provider by setting all of:
+#
+#   * `sms_provider_api_base_url`        — vendor REST endpoint
+#                                          (e.g. https://api.afromessage.com)
+#   * `sms_provider_sender_id`           — sender display name
+#                                          registered with the
+#                                          vendor (e.g. "EthioLink")
+#   * `sms_provider_api_key_secret_arn`  — Secrets Manager ARN
+#                                          holding the API key.
+#                                          `loadSecretsThenConfig`
+#                                          resolves this into
+#                                          `SMS_PROVIDER_API_KEY`
+#                                          at cold start.
+#   * `notifications_provider = "sms"`   — provider flag.
+#
+# When ANY of the three vendor vars is empty, `loadConfig` builds
+# `config.smsProvider = null` and the factory keeps the SMS channel
+# unmapped — `MockNotificationGateway` continues to handle every
+# dispatch. This makes the SMS rollout strictly opt-in.
+# -----------------------------------------------------------------------------
+
+variable "sms_provider_api_base_url" {
+  description = "SMS vendor REST base URL (e.g. `https://api.afromessage.com`). Empty when SMS is not wired."
+  type        = string
+  default     = ""
+}
+
+variable "sms_provider_sender_id" {
+  description = "Sender display name registered with the SMS vendor. Empty when SMS is not wired."
+  type        = string
+  default     = ""
+}
+
+variable "sms_provider_api_key_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the SMS provider API key. SecretString must be either the plain API key OR a JSON object with an `apiKey` field. Empty when SMS is not wired. When set, only the `appointments` and `scheduled` Lambda IAM roles get `secretsmanager:GetSecretValue` scoped to this ARN — other domains continue to lack the permission."
+  type        = string
+  default     = ""
+}
+
+variable "sms_provider_name" {
+  description = "Provider identifier written to `notification_logs.provider`. Free-form; defaults to `GENERIC_SMS`. Operators can set this to the chosen vendor name (e.g. `AFRO_MESSAGE`) for clearer log inspection."
+  type        = string
+  default     = ""
+}
+
+variable "sms_provider_timeout_ms" {
+  description = "HTTP request timeout for the SMS provider, in milliseconds. Default 10000 (10s)."
+  type        = number
+  default     = 10000
 }
 
 variable "payments_provider_cash" {

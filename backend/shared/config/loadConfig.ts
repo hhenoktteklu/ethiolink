@@ -17,6 +17,29 @@
 export type NodeEnv = 'development' | 'test' | 'production';
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
+/**
+ * Resolved value of `NOTIFICATIONS_PROVIDER`. Controls which
+ * notification gateway the factory wires alongside the always-on
+ * `MockNotificationGateway`:
+ *
+ *   * `'mock'`        — default. Only `MockNotificationGateway` is
+ *                       wired. Real providers stay dormant even
+ *                       when their config is present.
+ *   * `'sms'`         — when `config.smsProvider` is non-null, the
+ *                       `GenericSmsGateway` is wired under the
+ *                       `SMS` channel. Other channels still fall
+ *                       through to mock.
+ *   * `'production'`  — same effect as `'sms'` for now; reserved
+ *                       so a future Telegram / email provider can
+ *                       layer on without re-naming this enum.
+ *
+ * Unknown values throw `InvalidConfigError` at config-load time
+ * (same posture as `NODE_ENV` / `LOG_LEVEL`) — a typo in the env
+ * stack fails the cold start loudly rather than silently routing
+ * SMS traffic through the mock.
+ */
+export type NotificationsProvider = 'mock' | 'sms' | 'production';
+
 export interface PgConfig {
     readonly host: string;
     readonly port: number;
@@ -123,6 +146,14 @@ export interface AppConfig {
     readonly booking: BookingConfig;
     /** SMS provider config when wired; `null` when the operator hasn't opted in. */
     readonly smsProvider: SmsProviderConfig | null;
+    /**
+     * Provider-selector flag. The notification-service factory
+     * reads this alongside `smsProvider` to decide whether to wire
+     * `GenericSmsGateway` for the `SMS` channel. `'mock'` is the
+     * safe default and keeps the gateway dormant even when SMS
+     * config is present.
+     */
+    readonly notificationsProvider: NotificationsProvider;
 }
 
 /** Raised when required config is missing. Carries the full list of names. */
@@ -163,6 +194,11 @@ const REQUIRED_VARS = [
 
 const VALID_NODE_ENVS: readonly NodeEnv[] = ['development', 'test', 'production'];
 const VALID_LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
+const VALID_NOTIFICATIONS_PROVIDERS: readonly NotificationsProvider[] = [
+    'mock',
+    'sms',
+    'production',
+];
 
 /**
  * Read and validate configuration from the given env-like map.
@@ -235,6 +271,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
                 env.DEFAULT_TIMEZONE?.trim() || 'Africa/Addis_Ababa',
         }),
         smsProvider: buildSmsProviderConfig(env),
+        notificationsProvider: parseEnum<NotificationsProvider>(
+            'NOTIFICATIONS_PROVIDER',
+            env.NOTIFICATIONS_PROVIDER,
+            VALID_NOTIFICATIONS_PROVIDERS,
+            'mock',
+        ),
     });
 }
 
