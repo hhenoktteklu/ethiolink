@@ -137,3 +137,78 @@ export function listAdminBusinesses(
         `/v1/admin/businesses${query ? `?${query}` : ''}`,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Admin write actions
+// ---------------------------------------------------------------------------
+//
+// All four endpoints accept an optional `notes` body that the
+// backend stores on the matching `admin_actions` row. Each returns
+// the updated `BusinessOwnerView`. Failed writes throw `ApiError`.
+
+export function approveBusiness(
+    id: string,
+    notes?: string | null,
+): Promise<BusinessOwnerView> {
+    return request<BusinessOwnerView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(id)}/approve`,
+        { notes: notes ?? null },
+    );
+}
+
+export function rejectBusiness(
+    id: string,
+    notes?: string | null,
+): Promise<BusinessOwnerView> {
+    return request<BusinessOwnerView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(id)}/reject`,
+        { notes: notes ?? null },
+    );
+}
+
+export function suspendBusiness(
+    id: string,
+    notes?: string | null,
+): Promise<BusinessOwnerView> {
+    return request<BusinessOwnerView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(id)}/suspend`,
+        { notes: notes ?? null },
+    );
+}
+
+/**
+ * Feature a business until the given `featuredUntil` instant. The
+ * backend emits a `FEATURE_BUSINESS` audit row. Only valid for
+ * APPROVED businesses; any other status returns 409 CONFLICT.
+ */
+export function featureBusiness(
+    id: string,
+    featuredUntil: Date,
+    notes?: string | null,
+): Promise<BusinessOwnerView> {
+    return request<BusinessOwnerView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(id)}/feature`,
+        { featuredUntil: featuredUntil.toISOString(), notes: notes ?? null },
+    );
+}
+
+/**
+ * Clear `featured_until`. The backend emits a distinct
+ * `UNFEATURE_BUSINESS` audit row (separate from `FEATURE_BUSINESS`)
+ * so the audit history distinguishes the two intents. Only valid
+ * for APPROVED businesses.
+ */
+export function unfeatureBusiness(
+    id: string,
+    notes?: string | null,
+): Promise<BusinessOwnerView> {
+    return request<BusinessOwnerView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(id)}/feature`,
+        { featuredUntil: null, notes: notes ?? null },
+    );
+}

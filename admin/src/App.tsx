@@ -17,6 +17,8 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { AdminLayout } from './components/AdminLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { BusinessDetailPage } from './pages/BusinessDetailPage';
+import { BusinessesPage } from './pages/BusinessesPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 
@@ -32,6 +34,8 @@ export function App() {
                 }
             >
                 <Route path="/" element={<DashboardPage />} />
+                <Route path="/businesses" element={<BusinessesPage />} />
+                <Route path="/businesses/:id" element={<BusinessDetailPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
