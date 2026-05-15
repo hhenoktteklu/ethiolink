@@ -64,6 +64,7 @@ Out of scope:
 ### Phase 5 unit-test coverage landed so far
 
 - `adminBusinessService.test.ts` — happy paths for approve / reject / suspend (APPROVED + PENDING_REVIEW) / setFeaturedUntil (feature + unfeature), each verifying both the mutation and the audit-row contents (adminUserId / action / targetType / targetId / notes). Authorization matrix over CUSTOMER + BUSINESS_OWNER callers for every method. Not-found (`AdminBusinessNotFoundError`). Invalid-transition matrix (approve / reject / suspend / feature / unfeature from every wrong fromStatus). Audit-row invariant: exactly one row per successful action, zero rows when validation fails before any mutation. Uses `InMemoryBusinessRepository` (already widened with `setFeaturedUntil`) + new `InMemoryAdminActionRepository` (append-only, with `size` / `all` / `rowsForTarget` / `rowsByAdmin` test helpers).
+- `adminUserService.test.ts` — happy paths for suspendUser (ACTIVE → SUSPENDED) and restoreUser (SUSPENDED → ACTIVE), each with `notes` set + null, audit-row contents asserted in full. DELETED is terminal — both methods refuse with `AdminUserInvalidTransitionError` carrying the right `fromStatus` and `attemptedAction`. Authorization matrix over CUSTOMER + BUSINESS_OWNER callers (the mutation is verified to not happen). Missing user → `AdminUserNotFoundError`. Same audit invariant — one row per success (with per-admin attribution across a two-action sequence), zero rows on failure. Reuses `InMemoryUserRepository` unchanged (users seeded via `upsertFromAuth` + optional `setStatus`).
 
 ## Rollback notes
 
