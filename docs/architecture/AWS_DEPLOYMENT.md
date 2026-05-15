@@ -111,10 +111,41 @@ VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope
 
 ### Lambda
 
-- Node.js 20.x runtime.
-- One Lambda per domain area (auth, businesses, services, staff, availability, appointments, reviews, media, admin, notifications).
-- All Lambdas attach to the VPC and `sg-lambda` security group to reach RDS.
-- Environment variables provided from Terraform; secrets from AWS Secrets Manager.
+Provisioned by `infra/terraform/modules/lambda/`. Node.js 20 runtime. **One `aws_lambda_function` per handler** under `backend/lambdas/` — 49 functions total at the end of Phase 6, all named `ethiolink-${env}-<area>-<file>` (e.g. `ethiolink-dev-appointments-create`, `ethiolink-prod-admin-notifications-list`).
+
+**Packaging.** Every function references the same `backend/dist/lambda.zip` artifact produced by `backend/scripts/package.sh`. The script compiles TypeScript to `backend/dist/`, prunes the compiled test tree, installs production-only `node_modules` inside `dist/`, and zips the result. Each `aws_lambda_function` selects its entry by a different `handler` value (`lambdas/<area>/<file>.handler`). The one-zip-many-handlers pattern is the deliberate MVP simplification — splitting into per-handler bundles is a documented follow-up gated on cold-start budget violations.
+
+**VPC config.** Every function attaches to the VPC's private subnets with `sg-lambda` as its security group. RDS connectivity routes through `sg-rds`'s ingress rule (from `sg-lambda`); in prod the proxy SG sits between them. AWS-managed `AWSLambdaVPCAccessExecutionRole` covers the ENI lifecycle + CloudWatch logs permissions.
+
+**Environment variables.** Assembled from upstream module outputs + `backend/.env.example` defaults:
+
+| Env var                          | Source                                                  |
+| -------------------------------- | ------------------------------------------------------- |
+| `NODE_ENV`, `LOG_LEVEL`          | module input (defaults `production` / `info`)            |
+| `APP_REGION`, `COGNITO_REGION`   | `var.region`                                            |
+| `PG_HOST`                        | `module.rds.effective_endpoint` (proxy in prod, direct in dev) |
+| `PG_PORT`                        | `module.rds.db_port`                                    |
+| `PG_DATABASE`, `PG_USER`         | module input                                            |
+| `PG_SSL`                         | hardcoded `"true"`                                      |
+| `PG_SECRET_ARN`                  | `module.rds.master_secret_arn` (see *Password resolution* below) |
+| `COGNITO_USER_POOL_ID`           | `module.cognito.user_pool_id`                            |
+| `COGNITO_APP_CLIENT_ID_MOBILE`   | `module.cognito.mobile_app_client_id`                    |
+| `COGNITO_APP_CLIENT_ID_ADMIN`    | `module.cognito.admin_app_client_id`                     |
+| `S3_BUCKET_MEDIA_PUBLIC`         | `module.s3.media_public_bucket_name`                     |
+| `S3_BUCKET_MEDIA_PRIVATE`        | `module.s3.media_private_bucket_name`                    |
+| `S3_UPLOAD_URL_EXPIRES_SECONDS`  | hardcoded `900`                                          |
+| `S3_READ_URL_EXPIRES_SECONDS`    | hardcoded `3600`                                         |
+| `NOTIFICATIONS_PROVIDER`         | module input (default `mock`)                            |
+| `PAYMENTS_PROVIDER_CASH`         | module input (default `cash`)                            |
+| `PAYMENTS_PROVIDER_ONLINE`       | module input (default `mock`)                            |
+| `BOOKING_*`                      | module input (defaults match `backend/.env.example`)     |
+| `DEFAULT_TIMEZONE`               | module input (default `Africa/Addis_Ababa`)              |
+
+**Password resolution.** `PG_PASSWORD` is **never** set as a Lambda environment variable — env vars are visible in plaintext in the AWS console and in the Terraform state file. Instead, every function receives `PG_SECRET_ARN = <master_secret_arn>` and the runtime resolves the secret at cold-start before `loadConfig` runs. The cold-start shim (`backend/shared/config/loadSecretsThenConfig.ts`) is a separate scheduled follow-up commit; until it lands, the Lambdas fail at startup because `loadConfig` requires `PG_PASSWORD` to be present. This is acceptable for the Lambda-deploy commit because no Lambda is reachable until API Gateway / EventBridge wire trigger sources. The shim commit is gated to land before the smoke-test commit.
+
+**IAM grouping.** One shared `ethiolink-${env}-lambda-exec` role for every function in the env. Carries the AWS-managed VPC access policy (logs + ENI), an inline policy that grants `secretsmanager:GetSecretValue` on the RDS master secret only, and `s3:GetObject` / `s3:PutObject` on both media buckets plus `s3:DeleteObject` on the private bucket. Per-domain or per-function role splitting is a follow-up commit paired with API Gateway (the first call site where the over-permissive role becomes observable).
+
+**Log groups.** One CloudWatch log group per function at `/aws/lambda/<function-name>` with environment-specific retention (30 days dev / 90 days prod). Explicit `aws_cloudwatch_log_group` resources rather than letting Lambda auto-create — auto-created groups default to "never expire", which is cost-hostile.
 
 ### RDS
 

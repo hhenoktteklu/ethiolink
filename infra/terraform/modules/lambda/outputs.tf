@@ -1,0 +1,51 @@
+# EthioLink — Lambda module outputs.
+#
+# Consumed by:
+#   * `api-gateway` module — needs `function_arns` to wire each
+#     route's `aws_apigatewayv2_integration` (or REST equivalent).
+#     The `function_invoke_arns` are the values API Gateway
+#     actually invokes; ARNs are for IAM scoping.
+#   * `eventbridge` module — the `scheduled-send-reminders` ARN
+#     is the target of the 15-minute cron rule.
+#   * Manual operator surfaces — `aws lambda invoke` for smoke
+#     tests against a specific function.
+
+output "execution_role_arn" {
+  description = "ARN of the shared Lambda execution role. Useful for downstream modules that want to grant additional permissions (e.g. CloudWatch metric publishing) by attaching their own policy."
+  value       = aws_iam_role.lambda_exec.arn
+}
+
+output "execution_role_name" {
+  description = "Name of the shared Lambda execution role."
+  value       = aws_iam_role.lambda_exec.name
+}
+
+output "function_names" {
+  description = "Map of logical id → function name (e.g. `auth-sync` → `ethiolink-dev-auth-sync`). Use this for any future `aws lambda invoke` script or for CloudWatch dashboard widgets."
+  value       = { for k, fn in aws_lambda_function.function : k => fn.function_name }
+}
+
+output "function_arns" {
+  description = "Map of logical id → function ARN. The API Gateway module looks each route's handler up here when wiring integrations."
+  value       = { for k, fn in aws_lambda_function.function : k => fn.arn }
+}
+
+output "function_invoke_arns" {
+  description = "Map of logical id → invoke ARN. This is the ARN that API Gateway integrations + EventBridge targets actually invoke; distinct from `function_arns` (which is the regular ARN used in IAM policies)."
+  value       = { for k, fn in aws_lambda_function.function : k => fn.invoke_arn }
+}
+
+output "log_group_names" {
+  description = "Map of logical id → CloudWatch log group name. The cloudwatch module reads this to attach metric filters / dashboards per function."
+  value       = { for k, lg in aws_cloudwatch_log_group.function : k => lg.name }
+}
+
+output "scheduled_reminders_function_arn" {
+  description = "Convenience output: the ARN of the `scheduled-send-reminders` function. The EventBridge module's target attribute consumes this directly."
+  value       = aws_lambda_function.function["scheduled-send-reminders"].arn
+}
+
+output "scheduled_reminders_function_name" {
+  description = "Convenience output: name of the `scheduled-send-reminders` function. Useful for `aws lambda invoke --function-name <name>` smoke tests."
+  value       = aws_lambda_function.function["scheduled-send-reminders"].function_name
+}

@@ -221,8 +221,80 @@ output "rds_master_secret_arn" {
   value       = module.rds.master_secret_arn
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — Lambda
+#
+# Every EthioLink handler ships as a Lambda function from the
+# shared `backend/dist/lambda.zip` artifact produced by
+# `backend/scripts/package.sh`. Operators must run the script
+# before `terraform apply` — the Terraform plan refuses to proceed
+# when the zip is missing.
+#
+# Dev uses the direct RDS endpoint (no proxy), 30-day log
+# retention, and the module-default memory / timeout for every
+# function.
+# -----------------------------------------------------------------------------
+
+module "lambda" {
+  source = "../../modules/lambda"
+
+  environment = "dev"
+  region      = var.region
+
+  package_zip_path = abspath("${path.root}/../../../backend/dist/lambda.zip")
+
+  # VPC config — every Lambda attaches to the private subnets.
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  lambda_security_group_id = module.vpc.lambda_security_group_id
+
+  # RDS env wiring.
+  pg_host               = module.rds.effective_endpoint
+  pg_port               = module.rds.db_port
+  pg_database           = module.rds.db_name
+  pg_user               = "ethiolink"
+  rds_master_secret_arn = module.rds.master_secret_arn
+
+  # Cognito env wiring.
+  cognito_user_pool_id         = module.cognito.user_pool_id
+  cognito_app_client_id_mobile = module.cognito.mobile_app_client_id
+  cognito_app_client_id_admin  = module.cognito.admin_app_client_id
+
+  # S3 env wiring.
+  media_public_bucket      = module.s3.media_public_bucket_name
+  media_private_bucket     = module.s3.media_private_bucket_name
+  media_public_bucket_arn  = module.s3.media_public_bucket_arn
+  media_private_bucket_arn = module.s3.media_private_bucket_arn
+
+  # Application-policy defaults — match `backend/.env.example`.
+  notifications_provider        = "mock"
+  payments_provider_cash        = "cash"
+  payments_provider_online      = "mock"
+  booking_cancel_cutoff_minutes = 240
+  booking_slot_step_minutes     = 15
+  booking_buffer_minutes        = 5
+  default_timezone              = "Africa/Addis_Ababa"
+
+  log_retention_days = 30
+  log_level          = "info"
+  node_env           = "production"
+}
+
+output "lambda_execution_role_arn" {
+  description = "Shared Lambda execution role ARN."
+  value       = module.lambda.execution_role_arn
+}
+
+output "lambda_function_names" {
+  description = "Map of logical id → function name. Useful for `aws lambda invoke` smoke tests."
+  value       = module.lambda.function_names
+}
+
+output "lambda_scheduled_reminders_function_name" {
+  description = "Convenience output: the `scheduled-send-reminders` function name. The EventBridge module wires this as its rule target."
+  value       = module.lambda.scheduled_reminders_function_name
+}
+
 # Phase 7 will add:
-#   module "lambda"         { source = "../../modules/lambda"         ... }
 #   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
 #   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
 #   module "admin_frontend" { source = "../../modules/admin-frontend" ... }

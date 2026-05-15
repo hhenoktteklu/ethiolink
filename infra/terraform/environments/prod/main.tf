@@ -256,8 +256,71 @@ output "rds_proxy_endpoint" {
   value       = module.rds.proxy_endpoint
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — Lambda
+#
+# Same shape as dev with three differences: prod points
+# `PG_HOST` at the RDS Proxy endpoint (`effective_endpoint` is
+# the proxy when `enable_rds_proxy = true`); log retention is
+# 90 days; and the function memory / timeout will get per-function
+# overrides once the first load test surfaces real numbers.
+# -----------------------------------------------------------------------------
+
+module "lambda" {
+  source = "../../modules/lambda"
+
+  environment = "prod"
+  region      = var.region
+
+  package_zip_path = abspath("${path.root}/../../../backend/dist/lambda.zip")
+
+  private_subnet_ids       = module.vpc.private_subnet_ids
+  lambda_security_group_id = module.vpc.lambda_security_group_id
+
+  pg_host               = module.rds.effective_endpoint
+  pg_port               = module.rds.db_port
+  pg_database           = module.rds.db_name
+  pg_user               = "ethiolink"
+  rds_master_secret_arn = module.rds.master_secret_arn
+
+  cognito_user_pool_id         = module.cognito.user_pool_id
+  cognito_app_client_id_mobile = module.cognito.mobile_app_client_id
+  cognito_app_client_id_admin  = module.cognito.admin_app_client_id
+
+  media_public_bucket      = module.s3.media_public_bucket_name
+  media_private_bucket     = module.s3.media_private_bucket_name
+  media_public_bucket_arn  = module.s3.media_public_bucket_arn
+  media_private_bucket_arn = module.s3.media_private_bucket_arn
+
+  notifications_provider        = "mock"
+  payments_provider_cash        = "cash"
+  payments_provider_online      = "mock"
+  booking_cancel_cutoff_minutes = 240
+  booking_slot_step_minutes     = 15
+  booking_buffer_minutes        = 5
+  default_timezone              = "Africa/Addis_Ababa"
+
+  log_retention_days = 90
+  log_level          = "info"
+  node_env           = "production"
+}
+
+output "lambda_execution_role_arn" {
+  description = "Shared Lambda execution role ARN."
+  value       = module.lambda.execution_role_arn
+}
+
+output "lambda_function_names" {
+  description = "Map of logical id → function name."
+  value       = module.lambda.function_names
+}
+
+output "lambda_scheduled_reminders_function_name" {
+  description = "Name of the `scheduled-send-reminders` function. Wired into the EventBridge rule once that module lands."
+  value       = module.lambda.scheduled_reminders_function_name
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "lambda"         { source = "../../modules/lambda"         ... }
 #   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
 #   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
 #   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
