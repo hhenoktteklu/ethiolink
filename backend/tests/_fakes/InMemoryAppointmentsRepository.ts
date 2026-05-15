@@ -33,6 +33,7 @@ import { randomUUID } from 'node:crypto';
 
 import { RepositoryError } from '../../shared/repositories/baseRepository.js';
 import type {
+    AdminAppointmentFilters,
     Appointment,
     AppointmentConflict,
     AppointmentsRepository,
@@ -239,6 +240,35 @@ export class InMemoryAppointmentsRepository implements AppointmentsRepository {
         });
         this.rows[idx] = next;
         return next;
+    }
+
+    async listAll(
+        filters: AdminAppointmentFilters,
+        limit: number,
+    ): Promise<readonly Appointment[]> {
+        const fromTs = filters.fromUtc?.getTime();
+        const toTs = filters.toUtc?.getTime();
+        return this.rows
+            .filter((r) => r.deletedAt === null)
+            .filter((r) => filters.status === undefined || r.status === filters.status)
+            .filter(
+                (r) =>
+                    filters.businessId === undefined ||
+                    r.businessId === filters.businessId,
+            )
+            .filter(
+                (r) =>
+                    filters.customerId === undefined ||
+                    r.customerId === filters.customerId,
+            )
+            .filter((r) => fromTs === undefined || r.startsAt.getTime() >= fromTs)
+            .filter((r) => toTs === undefined || r.startsAt.getTime() < toTs)
+            .sort(
+                (a, b) =>
+                    b.startsAt.getTime() - a.startsAt.getTime() ||
+                    (a.id < b.id ? 1 : -1),
+            )
+            .slice(0, limit);
     }
 
     // ----- Internals --------------------------------------------------------

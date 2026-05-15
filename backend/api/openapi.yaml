@@ -1732,6 +1732,80 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /admin/appointments:
+    get:
+      tags: [admin]
+      operationId: adminListAppointments
+      summary: Cross-business appointment listing.
+      description: |
+        Authenticated, ADMIN-only. Read-only view across every
+        appointment in the system. Filters: `status`, `businessId`,
+        `customerId`, `from` (inclusive lower bound on `startsAt`),
+        `to` (exclusive upper bound on `startsAt`). All optional.
+        Soft-deleted appointments are excluded.
+
+        Sort: `starts_at DESC, id DESC`. No cursor pagination in
+        MVP — `limit` caps at 100, default 50.
+
+        Returns standard `AppointmentView` items so admin clients
+        can reuse any rendering already wired for the per-customer
+        and per-business listings.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/AppointmentStatus'
+        - name: businessId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: customerId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Inclusive lower bound on `startsAt`.
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          description: Exclusive upper bound on `startsAt`.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Admin appointments listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppointmentList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /me/business:
     get:
       tags: [auth]

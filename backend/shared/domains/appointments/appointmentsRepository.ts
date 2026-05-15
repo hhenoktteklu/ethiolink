@@ -161,9 +161,25 @@ export interface RescheduleAppointmentInput {
     readonly endsAt: Date;
 }
 
-/** Filters accepted by listing methods. */
+/** Filters accepted by `listForCustomer` / `listForBusiness`. */
 export interface ListAppointmentsFilters {
     readonly status?: AppointmentStatus;
+    /** Inclusive lower bound on `starts_at`. */
+    readonly fromUtc?: Date;
+    /** Exclusive upper bound on `starts_at`. */
+    readonly toUtc?: Date;
+}
+
+/**
+ * Filters accepted by the admin-only `listAll`. Cross-business — adds
+ * `businessId` and `customerId` to the standard filter set so the
+ * admin dashboard can drill into a single business's queue or a
+ * single customer's history without standing up dedicated endpoints.
+ */
+export interface AdminAppointmentFilters {
+    readonly status?: AppointmentStatus;
+    readonly businessId?: string;
+    readonly customerId?: string;
     /** Inclusive lower bound on `starts_at`. */
     readonly fromUtc?: Date;
     /** Exclusive upper bound on `starts_at`. */
@@ -190,6 +206,17 @@ export interface AppointmentsRepository extends AppointmentConflictsRepository {
         id: string,
         input: RescheduleAppointmentInput,
     ): Promise<Appointment>;
+    /**
+     * Admin-only cross-business listing. Filters by any of `status`,
+     * `businessId`, `customerId`, `fromUtc`, `toUtc`; all optional.
+     * Soft-deleted rows are excluded. Sort matches the existing
+     * single-tenant listings: `starts_at DESC, id DESC`. `limit` is
+     * clamped at the call site.
+     */
+    listAll(
+        filters: AdminAppointmentFilters,
+        limit: number,
+    ): Promise<readonly Appointment[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -391,6 +418,35 @@ export class PgAppointmentsRepository
         );
         if (!row) throw new RepositoryError(`Appointment ${id} not found.`);
         return mapRow(row);
+    }
+
+    async listAll(
+        filters: AdminAppointmentFilters,
+        limit: number,
+    ): Promise<readonly Appointment[]> {
+        const rows = await this.many<AppointmentRow>(
+            `
+            SELECT ${APPOINTMENT_COLUMNS}
+              FROM appointments
+             WHERE deleted_at IS NULL
+               AND ($1::text        IS NULL OR status      = $1)
+               AND ($2::uuid        IS NULL OR business_id = $2)
+               AND ($3::uuid        IS NULL OR customer_id = $3)
+               AND ($4::timestamptz IS NULL OR starts_at  >= $4)
+               AND ($5::timestamptz IS NULL OR starts_at  <  $5)
+             ORDER BY starts_at DESC, id DESC
+             LIMIT $6;
+            `,
+            [
+                filters.status ?? null,
+                filters.businessId ?? null,
+                filters.customerId ?? null,
+                filters.fromUtc ?? null,
+                filters.toUtc ?? null,
+                limit,
+            ],
+        );
+        return rows.map(mapRow);
     }
 
     private async listBy(
