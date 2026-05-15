@@ -1,15 +1,16 @@
-// EthioLink — public JSON shape for a category.
+// EthioLink — JSON shapes for a category.
 //
-// Returned by `GET /v1/categories` and embedded in business profile
-// responses (Phase 2 listing + detail endpoints). The localized `name`
-// is kept as a structured object on the wire — clients pick the active
-// locale without an additional round-trip and without server-side
-// language negotiation.
+// Two projections of the same domain object:
+//   * `CategoryView` — public-facing. Returned by `GET /v1/categories`
+//     and embedded in business profile responses. The public listing
+//     already filters to active rows only, so `isActive` is omitted.
+//   * `AdminCategoryView` — admin-facing. Extends `CategoryView` with
+//     `isActive` so the dashboard can render the active / deactivated
+//     buckets.
 //
-// What's omitted from the public view:
-//   * `isActive` — the public listing already filters to active rows
-//     only, so surfacing this would be redundant noise. Admin endpoints
-//     in Phase 5 will use a separate view that includes it.
+// The localized `name` is kept as a structured object on the wire —
+// clients pick the active locale without an additional round-trip
+// and without server-side language negotiation.
 
 import type { Category, LocalizedText } from './categoryRepository.js';
 
@@ -30,5 +31,20 @@ export function toCategoryView(category: Category): CategoryView {
         sortOrder: category.sortOrder,
         createdAt: category.createdAt.toISOString(),
         updatedAt: category.updatedAt.toISOString(),
+    });
+}
+
+/**
+ * Admin projection. Adds `isActive` so the dashboard can colour-code
+ * deactivated rows; everything else mirrors `CategoryView`.
+ */
+export interface AdminCategoryView extends CategoryView {
+    readonly isActive: boolean;
+}
+
+export function toAdminCategoryView(category: Category): AdminCategoryView {
+    return Object.freeze<AdminCategoryView>({
+        ...toCategoryView(category),
+        isActive: category.isActive,
     });
 }

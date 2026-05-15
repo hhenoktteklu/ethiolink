@@ -14,6 +14,7 @@ import { randomUUID } from 'node:crypto';
 
 import { RepositoryError } from '../../shared/repositories/baseRepository.js';
 import type {
+    AdminCategoryFilters,
     Category,
     CategoryRepository,
     InsertCategoryInput,
@@ -134,6 +135,16 @@ export class InMemoryCategoryRepository implements CategoryRepository {
         });
         this.rowsById.set(id, next);
         return next;
+    }
+
+    async listForAdmin(
+        filters: AdminCategoryFilters,
+        limit: number,
+    ): Promise<readonly Category[]> {
+        return Array.from(this.rowsById.values())
+            .filter((c) => filters.isActive === undefined || c.isActive === filters.isActive)
+            .sort(compareCategories)
+            .slice(0, limit);
     }
 }
 

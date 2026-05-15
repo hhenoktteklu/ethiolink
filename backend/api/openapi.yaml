@@ -1571,6 +1571,167 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /admin/categories:
+    get:
+      tags: [admin]
+      operationId: adminListCategories
+      summary: List categories (active + deactivated).
+      description: |
+        Authenticated, ADMIN-only. Returns `AdminCategoryView` rows
+        (extends `CategoryView` with `isActive` so the dashboard can
+        render deactivated entries). Sort order matches the public
+        canonical listing: `sort_order ASC, name->>'en' ASC`.
+
+        No cursor pagination — `limit` caps at 100, default 100. The
+        MVP marketplace has four categories; the cap is generous.
+      parameters:
+        - name: isActive
+          in: query
+          required: false
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Admin categories listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [admin]
+      operationId: adminCreateCategory
+      summary: Create a marketplace category.
+      description: |
+        Authenticated, ADMIN-only. Slug must be unique across all
+        categories (active or deactivated). Records one
+        `CREATE_CATEGORY` row in `admin_actions`. Returns the created
+        row with `isActive: true`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateCategoryRequest'
+      responses:
+        '200':
+          description: The created category.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/categories/{id}:
+    patch:
+      tags: [admin]
+      operationId: adminPatchCategory
+      summary: Update a category.
+      description: |
+        Authenticated, ADMIN-only. All body fields optional; a `{}`
+        body is a valid no-op patch that still records an
+        `UPDATE_CATEGORY` audit row. `isActive` is NOT patched here
+        — use `DELETE /v1/admin/categories/{id}` to deactivate.
+        Slug changes are uniqueness-checked.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminPatchCategoryRequest'
+      responses:
+        '200':
+          description: The updated category.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+    delete:
+      tags: [admin]
+      operationId: adminDeactivateCategory
+      summary: Deactivate (soft-delete) a category.
+      description: |
+        Authenticated, ADMIN-only. **Soft-delete** — flips `is_active`
+        to `false`. The row is preserved so `business_profiles` rows
+        referencing this category via FK remain valid. Already-
+        inactive categories return 409 CONFLICT. Records one
+        `DEACTIVATE_CATEGORY` row in `admin_actions`. Optional
+        `{ notes }` body is persisted to the audit row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesRequest'
+      responses:
+        '200':
+          description: The deactivated category.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminCategoryView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /me/business:
     get:
       tags: [auth]
@@ -1792,6 +1953,66 @@ components:
         updatedAt:
           type: string
           format: date-time
+    AdminCategoryView:
+      allOf:
+        - $ref: '#/components/schemas/CategoryView'
+        - type: object
+          description: |
+            Admin projection. Extends `CategoryView` with `isActive`
+            so the dashboard can render deactivated entries
+            distinctly from active ones.
+          required: [isActive]
+          properties:
+            isActive:
+              type: boolean
+    AdminCategoryList:
+      type: object
+      description: |
+        Admin listing of categories. No cursor pagination in MVP —
+        `limit` caps the row count at the call site.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminCategoryView'
+    AdminCreateCategoryRequest:
+      type: object
+      required: [slug, name]
+      properties:
+        slug:
+          type: string
+          description: Stable machine-friendly key. Trimmed; max 64 chars.
+          maxLength: 64
+        name:
+          $ref: '#/components/schemas/LocalizedText'
+        sortOrder:
+          type: integer
+          minimum: 0
+          description: Optional. Defaults to `0`.
+        notes:
+          type: [string, 'null']
+          maxLength: 2000
+          description: Optional. Persisted to the `admin_actions` audit row.
+    AdminPatchCategoryRequest:
+      type: object
+      description: |
+        Patch shape — every field optional. A `{}` body is a valid
+        no-op patch that still records an `UPDATE_CATEGORY` audit
+        row (admin intent). `isActive` is NOT in this shape — use
+        `DELETE /v1/admin/categories/{id}` to deactivate.
+      properties:
+        slug:
+          type: string
+          maxLength: 64
+        name:
+          $ref: '#/components/schemas/LocalizedText'
+        sortOrder:
+          type: integer
+          minimum: 0
+        notes:
+          type: [string, 'null']
+          maxLength: 2000
     CategoryList:
       type: object
       required: [items, nextCursor]

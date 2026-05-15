@@ -67,6 +67,16 @@ export interface UpdateCategoryFields {
     readonly sortOrder?: number;
 }
 
+/**
+ * Filters accepted by `listForAdmin`. `isActive` is the only filter
+ * in MVP — admin dashboards surface "all", "active only", or
+ * "deactivated" buckets. No cursor pagination; categories are a
+ * small fixed set bounded by the `limit` parameter.
+ */
+export interface AdminCategoryFilters {
+    readonly isActive?: boolean;
+}
+
 export interface CategoryRepository {
     listActive(): Promise<readonly Category[]>;
     listAll(): Promise<readonly Category[]>;
@@ -75,6 +85,15 @@ export interface CategoryRepository {
     insert(input: InsertCategoryInput): Promise<Category>;
     update(id: string, patch: UpdateCategoryFields): Promise<Category>;
     setIsActive(id: string, isActive: boolean): Promise<Category>;
+    /**
+     * Admin listing. Optional `isActive` filter; sort matches the
+     * public canonical order (`sort_order ASC, name->>'en' ASC`) so
+     * the admin sees rows in the same arrangement customers would.
+     */
+    listForAdmin(
+        filters: AdminCategoryFilters,
+        limit: number,
+    ): Promise<readonly Category[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +226,23 @@ export class PgCategoryRepository extends BaseRepository implements CategoryRepo
         );
         if (!row) throw new RepositoryError(`Category ${id} not found.`);
         return mapRow(row);
+    }
+
+    async listForAdmin(
+        filters: AdminCategoryFilters,
+        limit: number,
+    ): Promise<readonly Category[]> {
+        const rows = await this.many<CategoryRow>(
+            `
+            SELECT ${CATEGORY_COLUMNS}
+              FROM business_categories
+             WHERE ($1::bool IS NULL OR is_active = $1)
+             ${ORDER_BY}
+             LIMIT $2;
+            `,
+            [filters.isActive ?? null, limit],
+        );
+        return rows.map(mapRow);
     }
 }
 
