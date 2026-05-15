@@ -30,6 +30,11 @@ const PATCH_KEYS: ReadonlyArray<keyof UpdateServiceFields> = [
 export class InMemoryServiceRepository implements ServiceRepository {
     private readonly rowsById = new Map<string, Service>();
 
+    /** Test seed: bypass `insert` to fix the id / timestamps / isActive. */
+    seed(service: Service): void {
+        this.rowsById.set(service.id, Object.freeze({ ...service }));
+    }
+
     size(): number {
         return this.rowsById.size;
     }

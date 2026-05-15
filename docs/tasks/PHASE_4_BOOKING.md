@@ -58,10 +58,16 @@ Out of scope:
 
 ## Test plan
 
-- Unit: state machine transitions matrix.
-- Unit: slot-conflict detection helpers.
-- Concurrency: spawn two parallel `POST /v1/appointments` requests targeting the same slot in a dev test script; assert exactly one wins.
-- Integration: full flow — create draft business → seed approved row → add service/staff/availability → book → accept → complete → review → confirm `rating_avg` updates.
+- Unit: state machine transitions matrix.<!-- Done — `backend/tests/appointments/appointmentStateMachine.test.ts` (matrix walk + terminal sealing + integrity invariants). -->
+- Unit: slot-conflict detection helpers.<!-- Covered by `backend/tests/availability/slotComputer.test.ts` (Phase 3) and `backend/tests/appointments/appointmentService.test.ts` (23P01 mapping via `InMemoryAppointmentsRepository.failNextInsertWithExclusion`). -->
+- Concurrency: spawn two parallel `POST /v1/appointments` requests targeting the same slot in a dev test script; assert exactly one wins.<!-- Outstanding — `terraform apply` gate. Unit-level proxy: `AppointmentService.create` translates SQLSTATE 23P01 to `AppointmentSlotUnavailableError` (`appointmentService.test.ts`). -->
+- Integration: full flow — create draft business → seed approved row → add service/staff/availability → book → accept → complete → review → confirm `rating_avg` updates.<!-- Outstanding — `terraform apply` gate. -->
+
+### Phase 4 unit-test coverage landed so far
+
+- `appointmentStateMachine.test.ts` — every matrix row, terminal sealing, disallowed sample, integrity invariants.
+- `paymentGateways.test.ts` — `CashGateway` SUCCEEDED contract + idempotency-key ignored; `MockOnlineGateway` throws `OnlinePaymentsUnavailableError` with code `ONLINE_PAYMENTS_UNAVAILABLE`.
+- `appointmentService.test.ts` — cash create flow, online → typed error / no row, slot misalignment, 23P01 race-loss, accept / reject / complete state transitions, cancel cutoff (customer-before / customer-after / admin-override), reschedule resets ACCEPTED → REQUESTED, invalid transitions, non-owner rejection. Uses widened `InMemoryAppointmentsRepository` (full repo surface + `failNextInsertWithExclusion` knob) and a stubbed `SlotService`.
 
 ## Rollback notes
 
