@@ -69,9 +69,27 @@ After step 4 succeeds, every subsequent Terraform action on dev or prod runs fro
 
 ### Networking
 
-- One VPC per environment with public + private subnets across two AZs.
-- NAT Gateway in each environment (single AZ in dev, two AZs in prod).
-- Security groups: `sg-rds`, `sg-lambda`, `sg-bastion` (prod only).
+Provisioned by `infra/terraform/modules/vpc/`. One VPC per environment with the topology below.
+
+| Property              | Dev                                  | Prod                                  |
+| --------------------- | ------------------------------------ | ------------------------------------- |
+| VPC CIDR              | `10.0.0.0/16`                        | `10.1.0.0/16`                         |
+| Availability zones    | 2 (first 2 from `aws_availability_zones`) | 2                                |
+| Public subnets        | 2 × `/24` at `cidrsubnet(...,8,0..1)` | 2 × `/24` at `cidrsubnet(...,8,0..1)` |
+| Private subnets       | 2 × `/24` at `cidrsubnet(...,8,10..11)` | 2 × `/24` at `cidrsubnet(...,8,10..11)` |
+| Internet Gateway      | 1                                    | 1                                     |
+| NAT Gateways          | 1 (single-AZ — accepts dev outages)  | 2 (one per AZ — survives single-AZ NAT outage) |
+| Bastion SG            | not created                          | created (no associated instance until on-call need) |
+
+CIDR carve-out leaves a 10-slot gap between public and private indexes so future tiers (dedicated DB subnet group at indexes 20+, ElastiCache at 30+, etc.) can land without renumbering the existing subnets.
+
+Security groups:
+
+- **`sg-lambda`** — egress allow-all, no ingress. Every EthioLink Lambda attaches to this SG; Lambdas don't accept inbound TCP (API Gateway and EventBridge invoke via the AWS plane, not VPC networking).
+- **`sg-rds`** — ingress on TCP 5432 from `sg-lambda` (cross-SG reference, no hardcoded CIDR). When the bastion SG is present, an additional ingress rule from the bastion SG is added on the same port. No public exposure.
+- **`sg-bastion`** *(prod only)* — ingress on TCP 22 from operator-supplied CIDRs (`bastion_allowed_cidrs`, empty by default — the operator adds their IP via an out-of-band rule when access is actually needed). Egress allow-all. The SG exists ahead of any actual bastion EC2 instance so launching one is a non-Terraform-blocking step.
+
+VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope for the MVP VPC module — they land in follow-up commits once a real workload measures NAT egress cost.
 
 ### Cognito
 

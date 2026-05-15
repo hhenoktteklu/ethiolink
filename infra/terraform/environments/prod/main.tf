@@ -92,8 +92,64 @@ output "cognito_hosted_ui_domain" {
   value       = module.cognito.hosted_ui_domain
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — VPC
+#
+# Two-AZ topology with one NAT Gateway per AZ. Single-AZ NAT loss
+# would otherwise strand Lambdas in the surviving AZ without egress
+# — paired NATs are the prod posture per `AWS_DEPLOYMENT.md`.
+# The bastion SG is created (no instance) so a real on-call need
+# can land an EC2 bastion with no Terraform churn.
+# -----------------------------------------------------------------------------
+
+module "vpc" {
+  source = "../../modules/vpc"
+
+  environment = "prod"
+
+  vpc_cidr          = "10.1.0.0/16"
+  az_count          = 2
+  nat_gateway_count = 2
+
+  enable_bastion_sg = true
+  # `bastion_allowed_cidrs` left empty by default — the operator
+  # adds their own IP via an out-of-band SG ingress rule when
+  # bastion access is actually needed, rather than hardcoding an
+  # office IP into Terraform.
+  bastion_allowed_cidrs = []
+}
+
+output "vpc_id" {
+  description = "Prod VPC id."
+  value       = module.vpc.vpc_id
+}
+
+output "vpc_private_subnet_ids" {
+  description = "Private subnet ids. Lambdas + RDS live here."
+  value       = module.vpc.private_subnet_ids
+}
+
+output "vpc_public_subnet_ids" {
+  description = "Public subnet ids. NAT gateways + (future) bastion live here."
+  value       = module.vpc.public_subnet_ids
+}
+
+output "vpc_lambda_security_group_id" {
+  description = "Security group every EthioLink Lambda attaches to."
+  value       = module.vpc.lambda_security_group_id
+}
+
+output "vpc_rds_security_group_id" {
+  description = "Security group the RDS instance attaches to. Ingress from Lambda SG (and the bastion SG)."
+  value       = module.vpc.rds_security_group_id
+}
+
+output "vpc_bastion_security_group_id" {
+  description = "Security group the operator bastion attaches to."
+  value       = module.vpc.bastion_security_group_id
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "vpc"            { source = "../../modules/vpc"            ... }
 #   module "s3"             { source = "../../modules/s3"             ... }
 #   module "rds"            { source = "../../modules/rds"            ... }  # + RDS Proxy in prod
 #   module "lambda"         { source = "../../modules/lambda"         ... }

@@ -83,9 +83,59 @@ output "cognito_hosted_ui_domain" {
   value       = module.cognito.hosted_ui_domain
 }
 
-# Phase 2/7 will add:
-#   module "s3"          { source = "../../modules/s3"          ... }
-#   module "rds"         { source = "../../modules/rds"         ... }
-#   module "api_gateway" { source = "../../modules/api-gateway" ... }
-#   module "lambda"      { source = "../../modules/lambda"      ... }
-#   module "cloudwatch"  { source = "../../modules/cloudwatch"  ... }
+# -----------------------------------------------------------------------------
+# Phase 7 — VPC
+#
+# Two-AZ topology with a single shared NAT Gateway. Dev tolerates a
+# single-AZ NAT outage (it's dev — outages are dev-only). Prod
+# spreads NAT across both AZs in `environments/prod/main.tf`.
+# Subnet CIDRs are deterministic carve-outs of the /16; see the
+# module header for the layout.
+# -----------------------------------------------------------------------------
+
+module "vpc" {
+  source = "../../modules/vpc"
+
+  environment = "dev"
+
+  vpc_cidr          = "10.0.0.0/16"
+  az_count          = 2
+  nat_gateway_count = 1
+
+  enable_bastion_sg = false
+}
+
+output "vpc_id" {
+  description = "Dev VPC id. Consumed by every other Phase 7 module."
+  value       = module.vpc.vpc_id
+}
+
+output "vpc_private_subnet_ids" {
+  description = "Private subnet ids. Lambdas + RDS live here."
+  value       = module.vpc.private_subnet_ids
+}
+
+output "vpc_public_subnet_ids" {
+  description = "Public subnet ids. NAT gateways + (future) bastion live here."
+  value       = module.vpc.public_subnet_ids
+}
+
+output "vpc_lambda_security_group_id" {
+  description = "Security group every EthioLink Lambda should attach to."
+  value       = module.vpc.lambda_security_group_id
+}
+
+output "vpc_rds_security_group_id" {
+  description = "Security group the RDS instance attaches to. Ingress allowed only from the Lambda SG."
+  value       = module.vpc.rds_security_group_id
+}
+
+# Phase 7 will add:
+#   module "s3"             { source = "../../modules/s3"             ... }
+#   module "rds"            { source = "../../modules/rds"            ... }
+#   module "lambda"         { source = "../../modules/lambda"         ... }
+#   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
+#   module "eventbridge"    { source = "../../modules/eventbridge"    ... }
+#   module "admin_frontend" { source = "../../modules/admin-frontend" ... }
+#   module "waf"            { source = "../../modules/waf"            ... }
+#   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }
