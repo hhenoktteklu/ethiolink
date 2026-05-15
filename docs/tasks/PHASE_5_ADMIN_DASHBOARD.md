@@ -57,9 +57,13 @@ Out of scope:
 
 ## Test plan
 
-- Backend unit: admin services (approve, reject, suspend) state-transition rules.
+- Backend unit: admin services (approve, reject, suspend) state-transition rules.<!-- `adminBusinessService.test.ts` shipped: happy paths for approve / reject / suspend (APPROVED + PENDING_REVIEW) / setFeaturedUntil (feature + unfeature); non-ADMIN refused (`AdminForbiddenError`); missing business (`AdminBusinessNotFoundError`); invalid-transition matrix; audit-row contract — exactly one row per success with the right `adminUserId`/`action`/`targetType`/`targetId`/`notes`, zero rows on failure. `adminUserService` + `adminCategoryService` test files are the next test commits. -->
 - Frontend unit: route guards, API client error handling.
 - Manual: log in as ADMIN, approve a pending business, see it appear on the public listing endpoint.
+
+### Phase 5 unit-test coverage landed so far
+
+- `adminBusinessService.test.ts` — happy paths for approve / reject / suspend (APPROVED + PENDING_REVIEW) / setFeaturedUntil (feature + unfeature), each verifying both the mutation and the audit-row contents (adminUserId / action / targetType / targetId / notes). Authorization matrix over CUSTOMER + BUSINESS_OWNER callers for every method. Not-found (`AdminBusinessNotFoundError`). Invalid-transition matrix (approve / reject / suspend / feature / unfeature from every wrong fromStatus). Audit-row invariant: exactly one row per successful action, zero rows when validation fails before any mutation. Uses `InMemoryBusinessRepository` (already widened with `setFeaturedUntil`) + new `InMemoryAdminActionRepository` (append-only, with `size` / `all` / `rowsForTarget` / `rowsByAdmin` test helpers).
 
 ## Rollback notes
 
