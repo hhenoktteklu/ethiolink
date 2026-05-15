@@ -23,6 +23,7 @@ import type {
     UpsertUserFromAuthInput,
     User,
     UserRepository,
+    UserStatus,
 } from '../../shared/domains/users/userRepository.js';
 
 export class InMemoryUserRepository implements UserRepository {
@@ -85,6 +86,21 @@ export class InMemoryUserRepository implements UserRepository {
         const updated = Object.freeze<User>({
             ...existing,
             displayName: patch.displayName,
+            updatedAt: new Date(),
+        });
+        this.rowsById.set(updated.id, updated);
+        this.rowsBySub.set(updated.cognitoSub, updated);
+        return updated;
+    }
+
+    async setStatus(id: string, status: UserStatus): Promise<User> {
+        const existing = this.rowsById.get(id);
+        if (!existing) {
+            throw new RepositoryError(`User ${id} not found.`);
+        }
+        const updated = Object.freeze<User>({
+            ...existing,
+            status,
             updatedAt: new Date(),
         });
         this.rowsById.set(updated.id, updated);

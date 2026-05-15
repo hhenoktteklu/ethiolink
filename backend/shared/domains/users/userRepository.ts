@@ -60,6 +60,15 @@ export interface UserRepository {
     findById(id: string): Promise<User | null>;
     findByCognitoSub(cognitoSub: string): Promise<User | null>;
     update(id: string, patch: UpdateUserFields): Promise<User>;
+    /**
+     * Dedicated mutation path for `status`. Admin-only at the service
+     * layer — only `AdminUserService.suspendUser` / `.restoreUser`
+     * should call this in MVP. Mirrors the design comment at the top
+     * of this file: "admin actions (suspend/restore) are the only
+     * legitimate status mutators". Throws `RepositoryError` if the
+     * id is missing.
+     */
+    setStatus(id: string, status: UserStatus): Promise<User>;
 }
 
 // ---------------------------------------------------------------------------
@@ -133,6 +142,22 @@ export class PgUserRepository extends BaseRepository implements UserRepository {
             RETURNING ${USER_COLUMNS};
             `,
             [id, patch.displayName],
+        );
+        if (!row) {
+            throw new RepositoryError(`User ${id} not found.`);
+        }
+        return mapRow(row);
+    }
+
+    async setStatus(id: string, status: UserStatus): Promise<User> {
+        const row = await this.oneOrNone<UserRow>(
+            `
+            UPDATE users
+               SET status = $2
+             WHERE id = $1
+            RETURNING ${USER_COLUMNS};
+            `,
+            [id, status],
         );
         if (!row) {
             throw new RepositoryError(`User ${id} not found.`);
