@@ -20,15 +20,15 @@ backend/
   tests/      unit + integration tests
 ```
 
-## Current state (Phase 5 — backend)
+## Current state (Phase 6 — backend)
 
 The following are wired up:
 
-- `npm run db:migrate` — applies migrations 0001–0012 via `db/migrate.mjs`. Migrations 0009–0011 (appointments, reviews, payment_intents) and 0012 (admin_actions) are authored and applied against local docker-compose Postgres. The same migrations against an AWS-hosted dev RDS instance are gated on Phase 7 (the dev Terraform stack currently provisions only Cognito).
+- `npm run db:migrate` — applies migrations 0001–0013 via `db/migrate.mjs`. Migrations 0009–0011 (appointments, reviews, payment_intents), 0012 (admin_actions), and 0013 (notification_logs) are authored and applied against local docker-compose Postgres. The same migrations against an AWS-hosted dev RDS instance are gated on Phase 7 (the dev Terraform stack currently provisions only Cognito).
 - `npm run db:seed` — applies seeds (currently the four MVP categories) via `db/seed.mjs`.
-- `npm test` — Node test runner via `tsx`. Suite covers Phase 1 (`UserService` + `loadConfig`), Phase 2 (`BusinessService` / `MediaService` / `CategoryService`), Phase 3 (`services`, `staff`, `availabilityService`, `slotComputer`, `slotService`), Phase 4 (`appointmentStateMachine`, `appointmentService`, `paymentGateways`, `reviewService`), and Phase 5 backend (`adminBusinessService`, `adminUserService`, `adminCategoryService`). All use in-memory fakes — no Postgres required.
+- `npm test` — Node test runner via `tsx`. Suite covers Phase 1 (`UserService` + `loadConfig`), Phase 2 (`BusinessService` / `MediaService` / `CategoryService`), Phase 3 (`services`, `staff`, `availabilityService`, `slotComputer`, `slotService`), Phase 4 (`appointmentStateMachine`, `appointmentService`, `paymentGateways`, `reviewService`), Phase 5 backend (`adminBusinessService`, `adminUserService`, `adminCategoryService`), and Phase 6 (`notificationGateways`, `templateRegistry`, `notificationService`, `sendReminders`, plus a lifecycle-notification describe block on `appointmentService`). All use in-memory fakes — no Postgres required.
 
-The React admin app under `admin/` is still pending — Phase 5's last deliverable. Every admin endpoint listed below works against the backend; the dashboard UI lands in a follow-up.
+The React admin app under `admin/` is fully wired through Phase 6 — every admin endpoint listed below has a corresponding page, including the new `/notifications` troubleshooting surface.
 
 `npm run build` and `npm run lint` are still Phase 0 placeholders.
 
@@ -83,8 +83,17 @@ The React admin app under `admin/` is still pending — Phase 5's last deliverab
 | PATCH  | `/v1/admin/categories/{id}`                                          | yes | `ADMIN`-only. Patch a category + `UPDATE_CATEGORY` audit row. No-op empty patch still records intent. |
 | DELETE | `/v1/admin/categories/{id}`                                          | yes | `ADMIN`-only. **Soft-delete** — flips `is_active` to `false` + `DEACTIVATE_CATEGORY` audit row. Already-inactive → 409. |
 | GET    | `/v1/admin/appointments`                                             | yes | `ADMIN`-only cross-business listing. Filters: `status`, `businessId`, `customerId`, `from`, `to`, `limit`. Read-only; no audit row. |
+| GET    | `/v1/admin/notifications`                                            | yes | `ADMIN`-only cross-channel listing of `notification_logs`. Filters: `status`, `channel`, `recipientUserId`, `from`, `to`, `limit` (1..100, default 100). Read-only; no audit row. |
 
 See `api/openapi.yaml` for the full contract.
+
+### Notification dispatch prerequisites
+
+Phase 6 introduces a `NotificationService` dispatcher (`backend/shared/domains/notifications/notificationService.ts`) composed by every appointment-mutation Lambda. Each successful create / accept / reject / cancel / reschedule fires exactly one notification through the dispatcher; `complete` is intentionally silent in MVP. The MVP wiring routes every notification through `MockNotificationGateway` (channel `MOCK`) — every dispatched row lands in `notification_logs` at status `SENT` with a `mock-<uuid>` `provider_ref`, no external calls made.
+
+- **Best-effort error policy.** Provider failures land as `notification_logs.status = 'FAILED'` with `error_message` populated; the dispatcher catches the gateway-class exception and persists the row before returning normally. The appointment-service helpers (`notifyBusinessOwner` / `notifyCustomer`) also wrap the dispatcher in a try/catch and swallow anything that escapes — defense-in-depth against any non-gateway error class so a notification miss can never block a booking.
+- **Reminder lambda.** `backend/lambdas/scheduled/sendReminders.ts` exposes a `ScheduledHandler` entry + a pure `runReminderBatch(deps)` core. Each invocation scans ACCEPTED appointments whose `starts_at` falls in `[now + 23h45m, now + 24h00m)` via the new `AppointmentsRepository.listForReminderWindow` query, then dispatches `booking.reminder.customer` to the customer and `booking.reminder.business` to the business owner. Idempotency is enforced by `NotificationLogRepository.existsForAppointmentSlot({ templateKey, recipientUserId, startsAtUtc })` — if a log row already exists at any status, the dispatch is skipped. The handler returns a `ReminderBatchSummary { scanned, sent, skipped, failed }`. The EventBridge rule that drives the 15-minute cadence is deferred to Phase 7; the Lambda is invocable today via `aws lambda invoke`.
+- **Template registry.** `templateRegistry.ts` is the closed-union home for the eight MVP `BookingTemplateKey` values (`booking.requested.business`, `booking.accepted.customer`, `booking.rejected.customer`, `booking.cancelled.business`, `booking.cancelled.customer`, `booking.rescheduled.business`, `booking.reminder.customer`, `booking.reminder.business`). The repository layer keeps `template_key` permissive `string` so the registry can grow additively without a migration. Templates render against a shared `BookingTemplatePayload` shape; `startsAtUtc` is formatted in Addis Ababa local time via Luxon.
 
 ### Slot computation prerequisites
 
@@ -168,12 +177,13 @@ npm install
 npm test
 ```
 
-Current suite (Phase 1 through Phase 5 backend) covers:
+Current suite (Phase 1 through Phase 6) covers:
 
 - **Phase 1.** `UserService` — sync, idempotency, role mapping, get, update, missing-user. `loadConfig` — defaults, missing/invalid env vars, `PG_SSL` parsing.
 - **Phase 2.** `BusinessService` — create, update, submit state machine, ownership, listing filters, cursor-pagination roundtrip, invalid-cursor handling. `MediaService` — content-type allowlist, owner-type matrix (BUSINESS / STAFF / USER), `isPublic` derivation, `confirmUpload` storage-key prefix check. `CategoryService` — listing order, active-only filter, getBySlug/getById hit + miss + inactive-row contract.
 - **Phase 3.** `ServiceService`, `StaffService`, `AvailabilityService`, `slotComputer` (pure-function matrix over weekly + override + conflicts + buffer + 24:00 sentinel + timezone math), `SlotService` orchestrator.
 - **Phase 4.** `appointmentStateMachine` (matrix walk + terminal sealing + integrity), `AppointmentService` (cash create / online → typed error / slot misalignment / 23P01 race-loss / accept / reject / complete / cancel cutoff matrix / reschedule resets / non-owner), `paymentGateways` (CashGateway SUCCEEDED + MockOnlineGateway throws `ONLINE_PAYMENTS_UNAVAILABLE`), `ReviewService` (happy path + recompute trigger + four typed errors + 23505 race-loss + rating validation matrix + listing soft-delete filter + limit).
 - **Phase 5 backend.** `AdminBusinessService` (approve / reject / suspend / setFeaturedUntil happy paths + audit-row contents + auth matrix + invalid-transition matrix + audit invariant), `AdminUserService` (suspend / restore + DELETED-is-terminal + auth + not-found + audit invariant), `AdminCategoryService` (create / update with no-op-still-records-audit / deactivate + slug-uniqueness pre-check on create + cross-row on update + 16-case invalid-input matrix + auth + audit invariant).
+- **Phase 6.** `notificationGateways` (MockNotificationGateway always-SENT contract + SMS/Telegram stubs throw `NotificationProviderNotConfiguredError` with the stable `code`), `templateRegistry` (eight closed-union booking template keys + null-fallbacks + Addis-Ababa local-time formatting + `UnknownTemplateKeyError`), `notificationService` (happy path + provider FAILED persisted + `NotificationGatewayError` swallowed + non-provider error re-thrown after best-effort FAILED mark + `UnknownTemplateKeyError` / `NotificationRecipientNotFoundError` / `NoGatewayForChannelError` surface without writing a log row), `sendReminders` (happy path → 2 sent, idempotent second run → 2 skipped, too-early / too-late window boundaries, REQUESTED / CANCELLED / COMPLETED status filter, orphan business → `failed: 2`, partial pre-existing ledger → 1 sent + 1 skipped), and a `AppointmentService — booking lifecycle notifications` describe block (create / accept / reject / CUSTOMER cancel / BUSINESS cancel / ADMIN cancel / CUSTOMER reschedule fan-outs + `complete` produces no notification + swallow-on-dispatch-failure).
 
 All using in-memory fakes — no Postgres required.

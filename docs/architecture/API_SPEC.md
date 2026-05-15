@@ -126,6 +126,14 @@ Every admin write below persists exactly one row to `admin_actions` (append-only
 | ------ | ----------------------------- | ------ | -------------------------------------- |
 | GET    | /v1/admin/appointments        | ADMIN  | Cross-business read across all bookings. Optional filters: `status`, `businessId`, `customerId`, `from` (inclusive lower bound on `startsAt`), `to` (exclusive upper bound on `startsAt`), `limit` (1..100, default 50). Sort: `starts_at DESC, id DESC`. Returns standard `AppointmentView` items. |
 
+### Admin — notifications (read-only)
+
+Phase 6 troubleshooting surface. Every outbound notification attempt is persisted to `notification_logs` (migration 0013) and is visible to admins for diagnosing delivery issues. No mutation paths — retry / clear-failed is deferred until a matching "clear" endpoint paired with the idempotency-key story (see PHASE_6_NOTIFICATIONS.md "Known follow-ups").
+
+| Method | Path                          | Roles  | Purpose                                |
+| ------ | ----------------------------- | ------ | -------------------------------------- |
+| GET    | /v1/admin/notifications       | ADMIN  | Cross-channel listing of `notification_logs`. Optional filters: `status` (QUEUED / SENT / DELIVERED / FAILED), `channel` (SMS / EMAIL / TELEGRAM / PUSH / MOCK), `recipientUserId`, `from` (inclusive lower bound on `createdAt`), `to` (exclusive upper bound on `createdAt`), `limit` (1..100, default 100). Sort: `created_at DESC, id DESC`. Returns `NotificationLogView` items with the `payload` jsonb passed through verbatim for `<pre>` debugging. Read-only; no audit row. |
+
 ## Error codes (initial set)
 
 - `UNAUTHENTICATED` — missing or invalid token.
