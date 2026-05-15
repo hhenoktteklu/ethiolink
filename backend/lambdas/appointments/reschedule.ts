@@ -48,7 +48,10 @@ import {
     SlotStaffNotFoundError,
 } from '../../shared/domains/appointments/appointmentService.js';
 import { toAppointmentView } from '../../shared/domains/appointments/appointmentView.js';
-import { createNotificationService } from '../../shared/domains/notifications/notificationServiceFactory.js';
+import {
+    createNotificationService,
+    shouldWireSmsGateway,
+} from '../../shared/domains/notifications/notificationServiceFactory.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import { SlotService } from '../../shared/domains/availability/slotService.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
@@ -109,6 +112,7 @@ const appointmentService = new AppointmentService({
     options: {
         cancelCutoffMinutes: config.booking.cancelCutoffMinutes,
         timezone: config.booking.defaultTimezone,
+        smsRoutingEnabled: shouldWireSmsGateway(config),
     },
 });
 

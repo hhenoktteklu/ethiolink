@@ -29,6 +29,12 @@ import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
 import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
 import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import type {
+    NotificationChannel,
+    NotificationGateway,
+    NotificationSendInput,
+    NotificationSendResult,
+} from '../../shared/adapters/notifications/NotificationGateway.js';
+import type {
     Appointment,
     AppointmentStatus,
     PaymentMethod,
@@ -171,11 +177,59 @@ interface Env {
     readonly serviceRepo: InMemoryServiceRepository;
     readonly userRepo: InMemoryUserRepository;
     readonly notificationLogRepo: InMemoryNotificationLogRepository;
+    readonly smsGateway: StubChannelGateway;
+}
+
+/**
+ * Phase 9 — stub `NotificationGateway` that always succeeds and
+ * records its calls. Used to confirm the appointment service
+ * routed through the expected channel. Constructed with the
+ * channel + provider it should report; tests can wire it under
+ * any channel key in the dispatcher's `gateways` map.
+ */
+class StubChannelGateway implements NotificationGateway {
+    public readonly calls: NotificationSendInput[] = [];
+
+    constructor(
+        public readonly channel: NotificationChannel,
+        public readonly provider: string,
+    ) {}
+
+    async send(input: NotificationSendInput): Promise<NotificationSendResult> {
+        this.calls.push(input);
+        return Object.freeze({
+            status: 'SENT' as const,
+            provider: this.provider,
+            providerRef: `${this.provider}-stub-${this.calls.length}`,
+            rawResponse: null,
+            errorCode: null,
+            errorMessage: null,
+            sentAt: new Date().toISOString(),
+        });
+    }
 }
 
 interface EnvOptions {
     readonly slots?: readonly Slot[];
     readonly cancelCutoffMinutes?: number;
+    /**
+     * Phase 9 — when `true`, the service is constructed with
+     * `smsRoutingEnabled: true` and the notification dispatcher
+     * gets a stub `SMS` gateway wired alongside the mock. Each
+     * customer-side test that wants real SMS routing sets this.
+     */
+    readonly smsRoutingEnabled?: boolean;
+    /**
+     * Phase 9 — when set, overrides the customer's `phone` field
+     * via a re-seed. `null` simulates a customer with no phone
+     * registered; an empty string is treated identically.
+     */
+    readonly customerPhone?: string | null;
+    /**
+     * Phase 9 — same override for the business owner. Defaults
+     * to the seeded value (the `seedUser` default).
+     */
+    readonly ownerPhone?: string | null;
 }
 
 function buildEnv(options: EnvOptions = {}): Env {
@@ -193,8 +247,8 @@ function buildEnv(options: EnvOptions = {}): Env {
     // path on the in-memory fake; we patch the id back on through a
     // private cast so the seeded users match the constants the rest
     // of the suite expects.
-    seedUser(userRepo, CUSTOMER_ID, 'CUSTOMER', 'Henok');
-    seedUser(userRepo, OWNER_ID, 'BUSINESS_OWNER', 'Owner');
+    seedUser(userRepo, CUSTOMER_ID, 'CUSTOMER', 'Henok', options.customerPhone);
+    seedUser(userRepo, OWNER_ID, 'BUSINESS_OWNER', 'Owner', options.ownerPhone);
 
     const slots = options.slots ?? [
         Object.freeze<Slot>({ startUtc: STARTS_AT_ISO, endUtc: ENDS_AT_ISO }),
@@ -205,10 +259,21 @@ function buildEnv(options: EnvOptions = {}): Env {
         sink: { write: () => {} },
     });
 
+    // Phase 9 — when `smsRoutingEnabled` is set, wire a stub SMS
+    // gateway alongside the mock so the dispatcher has a real
+    // channel to route to. The stub just records the channel of
+    // each `send` call so tests can assert via either the gateway
+    // (`smsGateway.calls`) or the in-memory log repo
+    // (`row.channel === 'SMS'`).
+    const smsGateway = new StubChannelGateway('SMS', 'STUB_SMS');
+    const gateways = options.smsRoutingEnabled
+        ? { MOCK: new MockNotificationGateway(), SMS: smsGateway }
+        : { MOCK: new MockNotificationGateway() };
+
     const notificationService = new NotificationService({
         userRepository: userRepo,
         notificationLogRepository: notificationLogRepo,
-        gateways: { MOCK: new MockNotificationGateway() },
+        gateways,
         logger,
     });
 
@@ -226,10 +291,19 @@ function buildEnv(options: EnvOptions = {}): Env {
             cancelCutoffMinutes:
                 options.cancelCutoffMinutes ?? DEFAULT_CUTOFF_MINUTES,
             timezone: ADDIS_TZ,
+            smsRoutingEnabled: options.smsRoutingEnabled ?? false,
         },
     });
 
-    return { service, apptRepo, businessRepo, serviceRepo, userRepo, notificationLogRepo };
+    return {
+        service,
+        apptRepo,
+        businessRepo,
+        serviceRepo,
+        userRepo,
+        notificationLogRepo,
+        smsGateway,
+    };
 }
 
 /**
@@ -243,17 +317,22 @@ function seedUser(
     id: string,
     role: 'CUSTOMER' | 'BUSINESS_OWNER' | 'ADMIN',
     displayName: string,
+    phoneOverride?: string | null,
 ): void {
     const internal = userRepo as unknown as {
         rowsById: Map<string, unknown>;
         rowsBySub: Map<string, unknown>;
     };
     const now = new Date();
+    const phone =
+        phoneOverride === undefined
+            ? `+25191100${id.slice(-4)}`
+            : phoneOverride;
     const row = Object.freeze({
         id,
         cognitoSub: `sub-${id}`,
         email: `${displayName.toLowerCase()}@example.com`,
-        phone: `+25191100${id.slice(-4)}`,
+        phone,
         role,
         status: 'ACTIVE' as const,
         displayName,
@@ -727,5 +806,109 @@ describe('AppointmentService — booking lifecycle notifications', () => {
         // No log row written — the dispatcher refuses to insert when
         // the recipient doesn't resolve.
         assert.strictEqual(env.notificationLogRepo.size(), 0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 9 — SMS routing for booking lifecycle notifications
+// ---------------------------------------------------------------------------
+//
+// Three small tests covering the channel-selection branch added in
+// `AppointmentService.pickNotificationChannel`. The fourth case the
+// Phase 9 ticket called for — "dispatch failure still does not break
+// booking flow" — is already covered by
+// "swallows notification dispatch failures and does not break the
+// booking" above, which we extend implicitly here by asserting the
+// booking flow succeeds even when SMS routing is wired.
+
+describe('AppointmentService — SMS routing (Phase 9)', () => {
+    it('mock provider keeps the channel on MOCK', async () => {
+        const env = buildEnv(); // smsRoutingEnabled defaults to false
+        await env.service.create({
+            customerId: CUSTOMER_ID,
+            staffId: STAFF_ID,
+            serviceId: SERVICE_ID,
+            startsAtUtc: STARTS_AT_ISO,
+            paymentMethod: 'CASH',
+        });
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.channel, 'MOCK');
+        // SMS stub gateway is present but unused (factory-side
+        // wiring is independent of this branch).
+        assert.strictEqual(env.smsGateway.calls.length, 0);
+    });
+
+    it('sms provider + recipient with phone routes to SMS', async () => {
+        // `create` notifies the BUSINESS owner — make sure the
+        // owner has a phone (the seedUser default does).
+        const env = buildEnv({ smsRoutingEnabled: true });
+        await env.service.create({
+            customerId: CUSTOMER_ID,
+            staffId: STAFF_ID,
+            serviceId: SERVICE_ID,
+            startsAtUtc: STARTS_AT_ISO,
+            paymentMethod: 'CASH',
+        });
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.channel, 'SMS');
+        assert.strictEqual(logs[0]!.recipientUserId, OWNER_ID);
+        assert.strictEqual(logs[0]!.status, 'SENT');
+        // Stub recorded the call; recipient.phoneE164 carried through.
+        assert.strictEqual(env.smsGateway.calls.length, 1);
+        assert.strictEqual(
+            env.smsGateway.calls[0]!.recipient.phoneE164,
+            '+25191100' + OWNER_ID.slice(-4),
+        );
+    });
+
+    it('sms provider + recipient without phone falls back to MOCK', async () => {
+        // Wipe the owner's phone — sms routing should fall back.
+        const env = buildEnv({
+            smsRoutingEnabled: true,
+            ownerPhone: null,
+        });
+        await env.service.create({
+            customerId: CUSTOMER_ID,
+            staffId: STAFF_ID,
+            serviceId: SERVICE_ID,
+            startsAtUtc: STARTS_AT_ISO,
+            paymentMethod: 'CASH',
+        });
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(
+            logs[0]!.channel,
+            'MOCK',
+            'expected fallback to MOCK when recipient has no phone',
+        );
+        assert.strictEqual(env.smsGateway.calls.length, 0);
+    });
+
+    it('dispatch failure with SMS routing wired still does not break the booking', async () => {
+        // SMS routing enabled, but the dispatcher's recipient lookup
+        // fails (owner row missing). The booking must still succeed;
+        // no notification row is written.
+        const env = buildEnv({ smsRoutingEnabled: true });
+        const internal = env.userRepo as unknown as {
+            rowsById: Map<string, unknown>;
+        };
+        internal.rowsById.delete(OWNER_ID);
+
+        const result = await env.service.create({
+            customerId: CUSTOMER_ID,
+            staffId: STAFF_ID,
+            serviceId: SERVICE_ID,
+            startsAtUtc: STARTS_AT_ISO,
+            paymentMethod: 'CASH',
+        });
+
+        assert.strictEqual(result.appointment.status, 'REQUESTED');
+        assert.strictEqual(env.notificationLogRepo.size(), 0);
+        assert.strictEqual(env.smsGateway.calls.length, 0);
     });
 });

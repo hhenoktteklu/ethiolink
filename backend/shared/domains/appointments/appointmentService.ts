@@ -76,13 +76,14 @@ import {
     SlotServiceStaffMismatchError,
     SlotStaffNotFoundError,
 } from '../availability/slotService.js';
+import type { NotificationChannel } from '../../adapters/notifications/NotificationGateway.js';
 import type { NotificationService } from '../notifications/notificationService.js';
 import type {
     BookingTemplateKey,
     BookingTemplatePayload,
 } from '../notifications/templateRegistry.js';
 import type { Service, ServiceRepository } from '../services/serviceRepository.js';
-import type { UserRepository } from '../users/userRepository.js';
+import type { User, UserRepository } from '../users/userRepository.js';
 
 import {
     type AppointmentActor,
@@ -239,6 +240,29 @@ export interface AppointmentServiceOptions {
      * the appointment service does not need to crack SlotService open.
      */
     readonly timezone: string;
+    /**
+     * Phase 9 — enables SMS-channel routing for booking lifecycle
+     * notifications. When `true`, each notification fetches the
+     * recipient's `users` row and routes through the `SMS` channel
+     * if and only if the recipient has a non-empty `phone`. When
+     * `false` (the default, preserved for backward-compat and local
+     * tests that don't wire an SMS gateway), every notification
+     * routes through `MOCK` as before.
+     *
+     * The handler-side derivation is
+     * `shouldWireSmsGateway(config)` from
+     * `notificationServiceFactory.ts` — when the SMS gateway is
+     * wired into the dispatcher, this flag is also true. Keeping
+     * the two decisions in lockstep avoids the failure mode where
+     * the service routes to a channel the dispatcher hasn't been
+     * configured with (which would raise `NoGatewayForChannelError`
+     * — caught by the dispatcher but persisted as a useless
+     * `FAILED` row).
+     *
+     * Defaults to `false` when omitted so existing call sites
+     * (tests, future handlers) don't accidentally opt in.
+     */
+    readonly smsRoutingEnabled?: boolean;
 }
 
 export interface AppointmentServiceDependencies {
@@ -796,12 +820,57 @@ export class AppointmentService {
             rescheduleNotes: extras.rescheduleNotes ?? null,
         };
 
+        const channel = await this.pickNotificationChannel(
+            recipientUserId,
+            customer,
+        );
+
         await this.deps.notificationService.dispatch({
             templateKey,
             recipientUserId,
             payload,
-            channel: 'MOCK',
+            channel,
         });
+    }
+
+    /**
+     * Phase 9 — channel selection for booking-lifecycle
+     * notifications. When `smsRoutingEnabled` is `true` AND the
+     * recipient has a non-empty `phone`, return `'SMS'`.
+     * Otherwise return `'MOCK'`. Email + Telegram routing is
+     * intentionally NOT modeled here yet — those channels stay
+     * on the post-Phase-9 backlog and continue to fall through
+     * to `'MOCK'`.
+     *
+     * Optimization: when `notifyBookingEvent` has already
+     * fetched the customer (the `needCustomerName=true` path),
+     * and the recipient equals the customer (only true for
+     * business-side templates that happen to share the same id
+     * — never in MVP), we reuse that lookup. In every other
+     * case we issue one extra `userRepo.findById` to pick up
+     * the recipient's phone.
+     *
+     * When `smsRoutingEnabled` is `false`, this method short-
+     * circuits without any DB call — preserving the
+     * pre-Phase-9 wire cost for local-dev / docker-compose /
+     * unit-test paths that don't wire an SMS gateway.
+     */
+    private async pickNotificationChannel(
+        recipientUserId: string,
+        preloadedCustomer: User | null,
+    ): Promise<NotificationChannel> {
+        if (!this.deps.options.smsRoutingEnabled) {
+            return 'MOCK';
+        }
+        const recipient =
+            preloadedCustomer && preloadedCustomer.id === recipientUserId
+                ? preloadedCustomer
+                : await this.deps.userRepo.findById(recipientUserId);
+
+        if (recipient && typeof recipient.phone === 'string' && recipient.phone.trim() !== '') {
+            return 'SMS';
+        }
+        return 'MOCK';
     }
 
     private swallowNotifyError(
