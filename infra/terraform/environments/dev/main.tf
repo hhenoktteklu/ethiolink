@@ -423,5 +423,47 @@ output "waf_web_acl_arn" {
   value       = module.waf.web_acl_arn
 }
 
-# Phase 7 will add:
-#   module "cloudwatch"     { source = "../../modules/cloudwatch"     ... }
+# -----------------------------------------------------------------------------
+# Phase 7 — CloudWatch dashboards + alarms
+#
+# SNS topic + 7 alarms + 4 dashboards. `alarm_email` left empty
+# by default — the operator fills it in via `terraform.tfvars`
+# (or a CI-side secret) once a real address is finalized. The
+# SNS subscription confirmation link must be clicked manually.
+# -----------------------------------------------------------------------------
+
+variable "alarm_email" {
+  description = "Operator email for the alarms SNS topic. Empty to skip the subscription. The address must confirm the AWS subscription email after the first apply."
+  type        = string
+  default     = ""
+}
+
+module "cloudwatch" {
+  source = "../../modules/cloudwatch"
+
+  environment = "dev"
+  region      = var.region
+
+  alarm_email = var.alarm_email
+
+  rest_api_id            = module.api_gateway.rest_api_id
+  api_gateway_stage_name = module.api_gateway.stage_name
+
+  lambda_function_names = module.lambda.function_names
+
+  rds_instance_identifier = module.rds.db_instance_identifier
+
+  eventbridge_rule_name = module.eventbridge.rule_name
+
+  waf_web_acl_name = module.waf.web_acl_name
+}
+
+output "cloudwatch_alarm_sns_topic_arn" {
+  description = "ARN of the alarm SNS topic. Future migration-runner / smoke-test workflows attach here for their own alarms."
+  value       = module.cloudwatch.alarm_sns_topic_arn
+}
+
+output "cloudwatch_dashboard_names" {
+  description = "Map of dashboard key → dashboard name. Open via `aws cloudwatch get-dashboard --dashboard-name <name>` or the AWS console."
+  value       = module.cloudwatch.dashboard_names
+}

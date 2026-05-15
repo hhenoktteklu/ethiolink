@@ -279,9 +279,34 @@ Each group has a module-level `enable_*` toggle (default `true`). If a managed r
 
 ### CloudWatch
 
-- Log groups per Lambda, 30-day retention in dev, 90-day in prod.
-- Dashboards: API errors, Lambda errors/duration, RDS CPU/connections/free-storage, S3 4xx/5xx.
-- Alarms: API 5xx rate, Lambda error rate, RDS storage and CPU, RDS free memory.
+Provisioned by `infra/terraform/modules/cloudwatch/`. The integration point that turns every upstream module's signals into operator-visible alarms + dashboards.
+
+**Log groups.** Per-Lambda log groups are created by the Lambda module itself (30-day retention in dev, 90-day in prod). The CloudWatch module does not own log groups — it only consumes their metrics.
+
+**SNS topic.** One topic per env (`ethiolink-${env}-alarms`). Every alarm in the module posts both on breach (`alarm_actions`) and on recovery (`ok_actions`) so the operator sees both edges. Optional email subscription gated by the env-level `alarm_email` variable — empty string skips the subscription (useful for the initial apply when no address is finalized). The address must click the AWS confirmation link before alerts deliver.
+
+**Alarms** (every threshold is variabled so a real on-call event can tune without a module change):
+
+| Alarm                              | Source                          | Default threshold           | Rationale                                                                              |
+| ---------------------------------- | ------------------------------- | --------------------------- | -------------------------------------------------------------------------------------- |
+| API Gateway 5xx                    | `AWS/ApiGateway` `5XXError`     | ≥ 5 per 5 min               | Catches Lambda failures that surface to clients as 5xx.                                |
+| Lambda errors (aggregate)          | `AWS/Lambda` `Errors` (no dim)  | ≥ 5 per 5 min               | One alarm for "something is wrong"; the dashboard's per-function widgets are drilldown. |
+| RDS CPU                            | `AWS/RDS` `CPUUtilization`      | > 80% for 2× 5 min          | Usually the precursor to connection exhaustion.                                        |
+| RDS connections                    | `AWS/RDS` `DatabaseConnections` | ≥ 80 for 2× 5 min           | Approaches Postgres `max_connections = 100`; tune up when RDS Proxy multiplexes more.  |
+| RDS free storage                   | `AWS/RDS` `FreeStorageSpace`    | < 5 GiB                     | Storage autoscaling should already be growing; this is the fallback alarm.             |
+| EventBridge `FailedInvocations`    | `AWS/Events` `FailedInvocations` | ≥ 1 per 5 min              | Any single failure on the reminder rule is worth investigating.                        |
+| WAF blocked requests               | `AWS/WAFV2` `BlockedRequests`   | ≥ 100 per 5 min             | Real attack (rules working) or managed-rule false-positive (operator tunes).           |
+
+**Dashboards** (four total):
+
+| Dashboard             | Widgets                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `${env}-api-gateway`  | Request volume + 4xx / 5xx counts; p50 / p95 latency.                                                                  |
+| `${env}-lambda`       | Aggregate errors + invocations + throttles; per-function error counts; per-function p95 duration.                      |
+| `${env}-rds`          | CPU + connections (left / right axes); free storage; read/write IOPS + latency.                                        |
+| `${env}-waf-eventbridge` | WAF allowed / blocked counts; EventBridge `Invocations` + `FailedInvocations` on the reminder rule.                 |
+
+**Lambda alarm posture.** One aggregate alarm watches namespace-wide Lambda errors rather than 49 per-function alarms — the cost (~$5/env/month for 49 alarms) and notification noise (49 separate SNS pings on a shared-dependency outage) outweigh the per-function precision for MVP. The Lambda dashboard's per-function widgets are the drilldown when the aggregate alarm fires. Per-function alarms on a handful of critical handlers (booking lifecycle, scheduled-reminder) are a Phase 8 follow-up.
 
 ### IAM
 
