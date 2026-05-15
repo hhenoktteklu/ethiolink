@@ -45,9 +45,14 @@ variable "admin_logout_urls" {
 }
 
 variable "password_minimum_length" {
-  description = "Minimum password length enforced by Cognito."
+  description = "Minimum password length enforced by Cognito. Default 12 — the Phase 8 security-review-pass default. Combined with the module's `require_symbols = true` in main.tf, the resulting policy is: minimum 12 chars + at least one lowercase + one uppercase + one digit + one symbol. Existing users with shorter passwords keep their current credentials until the next password change."
   type        = number
-  default     = 10
+  default     = 12
+
+  validation {
+    condition     = var.password_minimum_length >= 8 && var.password_minimum_length <= 99
+    error_message = "password_minimum_length must be between 8 and 99 (Cognito limits)."
+  }
 }
 
 variable "access_token_validity_minutes" {

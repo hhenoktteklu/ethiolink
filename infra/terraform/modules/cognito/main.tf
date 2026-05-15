@@ -54,11 +54,18 @@ resource "aws_cognito_user_pool" "this" {
     enabled = true
   }
 
+  # Phase 8 password policy: 12-char minimum + symbol required.
+  # Previous Phase 1 defaults (10 / no-symbol) were the
+  # operator-friendly bootstrap stance; the tighter posture is
+  # the production-ready default that the security-review pass
+  # adopts. Existing users with passwords that satisfy only the
+  # old policy continue to authenticate — Cognito enforces the
+  # new policy on next password change, not retroactively.
   password_policy {
     minimum_length                   = var.password_minimum_length
     require_lowercase                = true
     require_numbers                  = true
-    require_symbols                  = false
+    require_symbols                  = true
     require_uppercase                = true
     temporary_password_validity_days = 7
   }

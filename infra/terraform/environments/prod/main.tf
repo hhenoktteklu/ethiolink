@@ -433,6 +433,12 @@ module "admin_frontend" {
   # Prod ships from edges closer to Ethiopia. PriceClass_200 adds
   # the Cape Town + Mumbai edges that PriceClass_100 omits.
   price_class = "PriceClass_200"
+
+  # Phase 8 — CSP origin allow-list. Same shape as dev; the prod
+  # values resolve to the real production hostnames.
+  api_gateway_origin  = module.api_gateway.invoke_url
+  cognito_origin      = "https://${module.cognito.hosted_ui_domain}.auth.${var.region}.amazoncognito.com"
+  media_public_origin = "https://${module.s3.media_public_bucket_name}.s3.${var.region}.amazonaws.com"
 }
 
 output "admin_frontend_url" {

@@ -394,6 +394,14 @@ module "admin_frontend" {
   # this URL, but registering the CloudFront-assigned domain
   # there is a Cognito follow-up the operator does after the
   # first apply (the domain is only known post-create).
+
+  # Phase 8 — CSP origin allow-list. The SPA needs to `fetch` API
+  # Gateway + Cognito and `<img>` the public-media bucket; without
+  # these the browser's CSP enforcer blocks every authenticated
+  # request and every business cover photo.
+  api_gateway_origin  = module.api_gateway.invoke_url
+  cognito_origin      = "https://${module.cognito.hosted_ui_domain}.auth.${var.region}.amazoncognito.com"
+  media_public_origin = "https://${module.s3.media_public_bucket_name}.s3.${var.region}.amazonaws.com"
 }
 
 output "admin_frontend_url" {

@@ -14,11 +14,11 @@ In scope:
 - DR runbook in `docs/operations/DR_RUNBOOK.md` covering RDS restore, Lambda redeploy, Cognito recreation guidance. *(Phase 8 commit "DR runbook + backup verification": full step-by-step playbook with per-step timing, 43-minute total wall-clock under the 60-minute SLO, fallback procedures for snapshot corruption / stuck restore / smoke-test failure, post-incident checklist.)*
 - Load testing: scripted scenarios for browse, book, accept, complete, with assertions on p95 latency. *(Phase 8 commit "k6 load tests": `infra/k6/browse.js` (100 RPS / 10 min / p95 < 800 ms), `infra/k6/book.js` (20 RPS / 9 min / p95 < 1500 ms / errors < 1 %), `infra/k6/full-lifecycle.js` (smoke flow). README documents install + env vars + thresholds + interpretation. Tuning commit follows once captured numbers exist.)*
 - Security review:
-  - All endpoint authorization matrix reviewed against `API_SPEC.md`.
+  - All endpoint authorization matrix reviewed against `API_SPEC.md`. *(Phase 8 commit "add security hardening review": full route-by-route audit in `docs/operations/SECURITY_REVIEW.md` — 8 public routes documented, 40 authenticated routes split into owner-only / customer-or-owner / admin-only, no exceptions outside the scheduled + migration runner Lambdas.)*
   - All Lambda IAM roles audited for least privilege. *(Phase 8 commit "split Lambda IAM roles by domain": shared role replaced by 11 per-domain roles; only the `media` role carries S3 statements. Per-handler narrowing on high-risk handlers remains a follow-up.)*
-  - Public S3 access limited strictly to the `media-public` bucket.
-  - Cognito password policy hardened; account lockout reviewed.
-  - CSP and security headers on the admin SPA.
+  - Public S3 access limited strictly to the `media-public` bucket. *(Phase 8 commit "add security hardening review": confirmed in `SECURITY_REVIEW.md` — `media-public` allows public reads via CORS-scoped bucket policy; `media-private`, `admin-frontend`, `logs`, and Terraform state buckets all have block-public-access fully on.)*
+  - Cognito password policy hardened; account lockout reviewed. *(Phase 8 commit "add security hardening review": `password_minimum_length` bumped from 10 to 12, `require_symbols` flipped from false to true. Existing users keep credentials until next password change. Account lockout retains Cognito's default brute-force protection.)*
+  - CSP and security headers on the admin SPA. *(Phase 8 commit "add security hardening review": `aws_cloudfront_response_headers_policy` adds HSTS preload-eligible, X-Frame-Options DENY, Referrer-Policy strict-origin-when-cross-origin, Permissions-Policy disabling 5 features, and a CSP with no `unsafe-inline`/`unsafe-eval` on script-src. Attached to both cache behaviors.)*
 - Observability gaps:
   - Structured request logs with correlation ids. *(Phase 8 commit "observability tracing": `backend/shared/observability/correlationId.ts` ships the ALS scope + `getCurrentRequestContextRecord` adapter. Logger picks up the dynamic context via the new `contextProvider` hook on `LoggerOptions`. The mechanical per-handler refactor adopting `withRequestContext` is a small follow-up.)*
   - X-Ray tracing on every Lambda. *(Phase 8 commit "observability tracing": Terraform Lambda module sets `tracing_config.mode = "Active"` on every function; baseline IAM policy adds `xray:PutTraceSegments` + `xray:PutTelemetryRecords`. Lambda-level traces light up immediately. SDK-call sub-segments via `aws-xray-sdk-core` + `captureAwsClient` are deferred to a follow-up.)*
@@ -48,7 +48,7 @@ Out of scope:
 - [ ] Backup restore test scripted and passing. *(Dry-run workflow shipped — `.github/workflows/backup-verify.yml`. Full-restore scratch-workspace remains Phase 8.5.)*
 - [ ] DR runbook validated by a tabletop exercise. *(Runbook shipped at `docs/operations/DR_RUNBOOK.md`; tabletop exercise is the operator-led validation step still to schedule.)*
 - [ ] Load test passes target p95 latency. *(Scripts shipped at `infra/k6/`; running them against dev + capturing the numbers is the operator-led step still to schedule.)*
-- [ ] Security review checklist completed and signed off.
+- [ ] Security review checklist completed and signed off. *(Engineering sign-off shipped in `docs/operations/SECURITY_REVIEW.md` alongside the Phase 8 "add security hardening review" commit. Ops + external security sign-offs are the post-prod-deploy items still to schedule — recorded inline in the doc.)*
 - [ ] All Lambdas emit structured logs with correlation ids.
 - [ ] X-Ray enabled across all Lambdas.
 - [ ] SLO dashboards live and pinned in CloudWatch.

@@ -103,6 +103,10 @@ VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope
 
   Group-level access control (only `ADMIN` group members can use the dashboard) is enforced at the application layer — both client-side (`isAdmin(session)` in `auth.ts` gates routing through `ProtectedRoute`) and server-side (`backend/lambdas/admin/_authz.ts` refuses non-`ADMIN` roles with 403 on every admin endpoint).
 
+**Password policy (Phase 8 security review).** 12-char minimum, lowercase + uppercase + digit + symbol all required, 7-day temporary-password validity. The previous Phase 1 default was 10 chars / symbol optional — the bootstrap stance for an empty pool. The Phase 8 pass tightens the policy to the production-ready posture documented in `docs/operations/SECURITY_REVIEW.md`. Existing users whose passwords satisfy only the older policy continue to authenticate; Cognito enforces the new policy on next password change, not retroactively.
+
+**MFA.** `mfa_configuration = "OPTIONAL"` with `software_token_mfa_configuration { enabled = true }` — TOTP via any authenticator app. Per-user enrollment is an operator step: an `ADMIN` user signs in via the hosted UI, navigates to the account-settings page, and follows the TOTP enrollment flow (the Cognito hosted UI shows a QR + secret). MFA-required posture for the `ADMIN` group is the next-step hardening tracked in the security review doc — flipping `mfa_configuration` to `ON` is a one-line change once every admin has enrolled.
+
 ### API Gateway
 
 Provisioned by `infra/terraform/modules/api-gateway/`. One REST API per environment (REST flavor, not HTTP API — picked for per-method Cognito user-pool authorizer support and OpenAPI parity). 48 HTTP routes — every Lambda handler under `backend/lambdas/` except `scheduled/sendReminders` (EventBridge-triggered).
@@ -242,6 +246,7 @@ Provisioned by `infra/terraform/modules/admin-frontend/`. The React admin SPA (`
 | `index.html` cache           | `no-cache, no-store, must-revalidate` | same                                                                         |
 | Hashed asset cache           | `public, max-age=31536000, immutable` | same                                                                         |
 | Force-TLS bucket policy      | yes                                  | yes                                                                           |
+| Security headers policy      | HSTS + CSP + X-Frame-Options + Referrer-Policy + Permissions-Policy | same |
 
 **Origin Access Control.** CloudFront uses `aws_cloudfront_origin_access_control` (OAC, sigv4-signed S3 reads) — the successor to the older Origin Access Identity (OAI). The bucket policy allows `s3:GetObject` only from the `cloudfront.amazonaws.com` service principal with `AWS:SourceArn` matching the distribution ARN, so a leaked bucket name still isn't readable from outside CloudFront.
 
@@ -263,6 +268,43 @@ aws cloudfront create-invalidation \
 ```
 
 **Cognito callback URL coupling.** The Cognito module's `admin_callback_urls` must include the CloudFront URL (`https://<id>.cloudfront.net/login` in dev, `https://admin.ethiolink.app/login` in prod). Until that URL is registered, the hosted-UI redirect after sign-in fails with `redirect_mismatch`. The dev environment uses a two-apply pattern: first apply creates the distribution and surfaces the CloudFront URL via `terraform output admin_frontend_url`; the operator then updates `module.cognito.admin_callback_urls` to include the URL and re-applies.
+
+**Security headers (Phase 8).** Every CloudFront response carries a five-header security baseline injected via an `aws_cloudfront_response_headers_policy` attached to both cache behaviors:
+
+| Header                      | Value                                                                                                                          | Purpose                                                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains; preload`                                                                                 | One-year HSTS, preload-eligible. Prevents protocol downgrade.                                                                                 |
+| `X-Frame-Options`           | `DENY`                                                                                                                         | Click-jacking guard for older browsers. Paired with `frame-ancestors 'none'` in the CSP for newer ones.                                       |
+| `X-Content-Type-Options`    | `nosniff`                                                                                                                      | Disables MIME sniffing — every asset is served with its declared `Content-Type` (see `local.content_types`).                                  |
+| `Referrer-Policy`           | `strict-origin-when-cross-origin`                                                                                              | Keeps full URL paths inside the admin origin; outbound requests leak the origin only.                                                         |
+| `Permissions-Policy`        | `camera=(), microphone=(), geolocation=(), payment=(), usb=()`                                                                 | Disables five powerful features the admin SPA never uses. Listed as a `custom_headers_config` item — `Permissions-Policy` isn't a first-class AWS field. |
+| `Content-Security-Policy`   | dynamic (built from `api_gateway_origin` / `cognito_origin` / `media_public_origin`)                                          | See below.                                                                                                                                    |
+
+The CSP body resolves to (with both origin variables populated):
+
+```
+default-src 'self';
+script-src 'self';
+style-src 'self' 'unsafe-inline';
+img-src 'self' data: https://<media-public-bucket>.s3.<region>.amazonaws.com;
+font-src 'self' data:;
+connect-src 'self' https://<api-id>.execute-api.<region>.amazonaws.com/<env> https://<env>.auth.<region>.amazoncognito.com;
+form-action 'self' https://<env>.auth.<region>.amazoncognito.com;
+frame-ancestors 'none';
+base-uri 'self';
+object-src 'none'
+```
+
+Notes on the policy choices:
+
+- **No `unsafe-inline` or `unsafe-eval` on `script-src`.** The Vite production build emits hashed bundles only; nothing inline lives in the resulting `index.html` script tags. If a future Vite plugin re-introduces an inline script, the operator hash-pins it via `csp_extra_script_src` rather than adding `'unsafe-inline'`.
+- **`style-src 'self' 'unsafe-inline'`.** Vite + Tailwind emit one inline `<style>` block in production for the splash-screen flash-of-unstyled-content guard. Hash-pinning the splash style is a follow-up; the in-bundle JS surface remains the high-value target.
+- **`connect-src` allow-list driven by Terraform variables.** `api_gateway_origin` and `cognito_origin` are passed by each env stack so the SPA can `fetch` the API + complete the OAuth `/oauth2/token` exchange. Empty values drop the corresponding fragment so the CSP is always syntactically valid.
+- **`form-action` lists Cognito.** The hosted-UI redirect is a `form` submission to the Cognito domain; without this fragment, the post-login redirect fails with a CSP violation.
+- **`img-src` includes the public-media bucket.** Business cover photos + staff avatars are served from S3 directly today. A future CloudFront-fronted media origin would replace this entry.
+- **`frame-ancestors 'none'`.** The admin SPA is never embedded; pairing the CSP directive with `X-Frame-Options: DENY` covers every browser version.
+
+When the CSP needs to change, edit the `local.content_security_policy` block in `infra/terraform/modules/admin-frontend/main.tf`. CloudFront propagates the policy update within minutes — no SPA re-deploy needed.
 
 ### EventBridge
 

@@ -73,6 +73,40 @@ variable "price_class" {
   }
 }
 
+# -----------------------------------------------------------------------------
+# Phase 8 security-headers inputs.
+#
+# CSP is built dynamically from the three origin allow-lists
+# below. When empty, the corresponding part of the CSP is
+# omitted — e.g. `cognito_origin = ""` drops Cognito from
+# `connect-src` + `form-action`. Operators should set these for
+# every environment that has a deployed CloudFront distribution.
+# -----------------------------------------------------------------------------
+
+variable "api_gateway_origin" {
+  description = "Origin of the API Gateway invoke URL (e.g. `https://abc123.execute-api.eu-west-1.amazonaws.com`). Added to `connect-src` so the SPA can call the API. Empty string = no API origin in CSP (admin SPA can't reach the API — only useful for the unwired bootstrap apply)."
+  type        = string
+  default     = ""
+}
+
+variable "cognito_origin" {
+  description = "Cognito hosted-UI domain origin (e.g. `https://ethiolink-dev.auth.eu-west-1.amazoncognito.com`). Added to `connect-src` for `/oauth2/token` exchanges + `form-action` for the hosted-UI redirect. Empty string = no Cognito allow-listing in CSP (only useful before Cognito has applied)."
+  type        = string
+  default     = ""
+}
+
+variable "media_public_origin" {
+  description = "S3 public-media bucket origin (e.g. `https://ethiolink-dev-media-public.s3.eu-west-1.amazonaws.com`). Added to `img-src` so the SPA can render business cover photos + staff avatars hosted in S3. Empty string = no S3 in `img-src` (admin SPA can still render `data:` URIs)."
+  type        = string
+  default     = ""
+}
+
+variable "csp_extra_script_src" {
+  description = "Optional additional `script-src` origins (e.g. analytics scripts). Defaults to the empty list — the SPA is pure-bundle, no external scripts. Operator-added entries land here without a module change."
+  type        = list(string)
+  default     = []
+}
+
 variable "tags" {
   description = "Additional tags applied to every resource created by this module."
   type        = map(string)
