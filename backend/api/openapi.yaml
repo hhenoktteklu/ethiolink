@@ -1043,6 +1043,90 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /appointments/{id}/review:
+    post:
+      tags: [auth]
+      operationId: createAppointmentReview
+      summary: Customer leaves a review for a completed appointment.
+      description: |
+        Authenticated. Requires the caller's role to be `CUSTOMER` and
+        the caller to be the customer on the appointment. The
+        appointment must be in `COMPLETED` status. One review per
+        appointment is enforced by both an application pre-check and
+        the UNIQUE constraint on `reviews.appointment_id` (migration
+        0010).
+
+        On success, the service refreshes the denormalized
+        `rating_avg` / `rating_count` on the business profile.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+          description: The appointment id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '200':
+          description: The created review.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{id}/reviews:
+    get:
+      tags: [catalog]
+      operationId: listBusinessReviews
+      summary: Public list of reviews for a business.
+      description: |
+        Public endpoint. Returns reviews for the business, newest
+        first. Soft-deleted reviews (admin-moderated) are excluded.
+        `limit` caps at 100; no cursor pagination in MVP.
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+          description: Maximum rows to return (default 100).
+      responses:
+        '200':
+          description: The reviews list.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /media/upload-url:
     post:
       tags: [media]
@@ -1964,6 +2048,60 @@ components:
           type: string
           format: date-time
           description: New UTC ISO-8601 start timestamp.
+    CreateReviewRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: [string, 'null']
+          maxLength: 2000
+    ReviewView:
+      type: object
+      required:
+        - id
+        - appointmentId
+        - customerId
+        - businessId
+        - rating
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        appointmentId:
+          type: string
+          format: uuid
+        customerId:
+          type: string
+          format: uuid
+        businessId:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    ReviewList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReviewView'
     MediaView:
       type: object
       required: [id, ownerType, ownerId, s3Key, isPublic, createdAt]
