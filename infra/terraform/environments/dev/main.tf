@@ -130,8 +130,50 @@ output "vpc_rds_security_group_id" {
   value       = module.vpc.rds_security_group_id
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — S3 buckets
+#
+# Three buckets: public media (CORS for the Vite dev origin),
+# private media (presigned uploads + downloads), and a logs target
+# for server access logging on the two media buckets. Versioning
+# stays off on the public bucket (assets are easily replaced) and
+# on the logs bucket (logs are append-only); private bucket keeps
+# versioning ON for accidental-delete recovery.
+# -----------------------------------------------------------------------------
+
+module "s3" {
+  source = "../../modules/s3"
+
+  environment = "dev"
+
+  # Admin SPA dev origin. The CloudFront URL from the admin-frontend
+  # module appends to this list in its own commit.
+  admin_allowed_origins = ["http://localhost:5173"]
+
+  # Mobile is native — no browser CORS surface in dev.
+  mobile_allowed_origins = []
+
+  # 90-day log retention in dev — short enough to keep the bill
+  # tiny, long enough to debug a week-old issue.
+  logs_expiration_days = 90
+}
+
+output "s3_media_public_bucket" {
+  description = "Public media bucket name. Maps to the `S3_BUCKET_MEDIA_PUBLIC` Lambda env."
+  value       = module.s3.media_public_bucket_name
+}
+
+output "s3_media_private_bucket" {
+  description = "Private media bucket name. Maps to the `S3_BUCKET_MEDIA_PRIVATE` Lambda env."
+  value       = module.s3.media_private_bucket_name
+}
+
+output "s3_logs_bucket" {
+  description = "Server-access-log target bucket name."
+  value       = module.s3.logs_bucket_name
+}
+
 # Phase 7 will add:
-#   module "s3"             { source = "../../modules/s3"             ... }
 #   module "rds"            { source = "../../modules/rds"            ... }
 #   module "lambda"         { source = "../../modules/lambda"         ... }
 #   module "api_gateway"    { source = "../../modules/api-gateway"    ... }

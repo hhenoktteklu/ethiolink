@@ -126,11 +126,19 @@ VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope
 
 ### S3
 
-- Three buckets per environment:
-  - `ethiolink-${env}-media-public` — publicly readable assets (business cover photos).
-  - `ethiolink-${env}-media-private` — private assets, served via pre-signed GET URLs.
-  - `ethiolink-${env}-logs` — access logs.
-- Block-public-access on the private and logs buckets.
+Provisioned by `infra/terraform/modules/s3/`. Three buckets per environment with the shared posture below.
+
+| Bucket                                | Public read | Versioning | Lifecycle                                   | Server access logging |
+| ------------------------------------- | ----------- | ---------- | ------------------------------------------- | --------------------- |
+| `ethiolink-${env}-media-public`       | yes (via bucket policy, force-TLS) | off by default (`enable_public_bucket_versioning`) | none in MVP             | writes to `logs/media-public/` |
+| `ethiolink-${env}-media-private`      | no (block-public-access all on) | on                                          | none in MVP             | writes to `logs/media-private/` |
+| `ethiolink-${env}-logs`               | no (block-public-access all on) | off                                         | expire after `logs_expiration_days` (90 dev / 365 prod) | n/a                   |
+
+Shared posture across all three buckets: SSE-AES256, `Object Ownership = BucketOwnerEnforced` (ACLs disabled), force-TLS bucket policy (`Deny s3:* when aws:SecureTransport=false`), `force_destroy = false` plus `prevent_destroy = true` on the lifecycle block (a `terraform destroy` cannot tear a bucket down if it has any content — the belt-and-braces against accidental loss of customer media).
+
+CORS for the two media buckets is driven by the `admin_allowed_origins` and `mobile_allowed_origins` inputs. The public bucket allows `GET / HEAD` from the union of those origins; the private bucket additionally allows `PUT` so a browser-side presigned upload can preflight. Native mobile clients don't enforce CORS, so `mobile_allowed_origins` is empty by default.
+
+`S3StorageGateway` (`backend/shared/adapters/storage/`) is the sole writer for both media buckets and picks the target by `IssueUploadUrlInput.isPublic`. Lambda env vars: `S3_BUCKET_MEDIA_PUBLIC` ← `media_public_bucket_name`, `S3_BUCKET_MEDIA_PRIVATE` ← `media_private_bucket_name`. A gateway-type VPC endpoint to S3 is intentionally not created in this module — it lands once the NAT egress cost on real traffic justifies the change.
 
 ### CloudWatch
 

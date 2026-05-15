@@ -149,8 +149,53 @@ output "vpc_bastion_security_group_id" {
   value       = module.vpc.bastion_security_group_id
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — S3 buckets
+#
+# Same shape as dev, with the prod admin origin pre-registered and
+# longer log retention (365d). The mobile origin list stays empty
+# — native apps don't enforce CORS.
+# -----------------------------------------------------------------------------
+
+module "s3" {
+  source = "../../modules/s3"
+
+  environment = "prod"
+
+  # Real admin domain. The admin SPA fetches public media via
+  # direct S3 URLs (or, eventually, via a CloudFront-fronted
+  # alias) — either path emits an `Origin: https://admin.ethiolink.app`
+  # header, which the bucket policy must whitelist.
+  admin_allowed_origins = ["https://admin.ethiolink.app"]
+
+  mobile_allowed_origins = []
+
+  # 365-day log retention in prod — long enough to investigate
+  # quarterly incidents; outside that window the cost of object
+  # storage exceeds the value of preservation. Phase 8 may move
+  # older logs to Glacier instead of expiring.
+  logs_expiration_days = 365
+
+  # No public-bucket versioning today; an explicit audit-replay
+  # need would flip this to `true`.
+}
+
+output "s3_media_public_bucket" {
+  description = "Public media bucket name."
+  value       = module.s3.media_public_bucket_name
+}
+
+output "s3_media_private_bucket" {
+  description = "Private media bucket name."
+  value       = module.s3.media_private_bucket_name
+}
+
+output "s3_logs_bucket" {
+  description = "Server-access-log target bucket name."
+  value       = module.s3.logs_bucket_name
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "s3"             { source = "../../modules/s3"             ... }
 #   module "rds"            { source = "../../modules/rds"            ... }  # + RDS Proxy in prod
 #   module "lambda"         { source = "../../modules/lambda"         ... }
 #   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
