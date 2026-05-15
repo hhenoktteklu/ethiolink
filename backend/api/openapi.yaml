@@ -21,6 +21,8 @@ tags:
     description: Public-facing catalog (categories, businesses).
   - name: media
     description: Media uploads via S3 presigned URLs.
+  - name: admin
+    description: Admin-only endpoints. Require the ADMIN Cognito group; every write persists an `admin_actions` audit row.
 paths:
   /categories:
     get:
@@ -1213,6 +1215,222 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /admin/businesses:
+    get:
+      tags: [admin]
+      operationId: adminListBusinesses
+      summary: List businesses across every status.
+      description: |
+        Authenticated, ADMIN-only. Returns businesses in every status
+        (DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUSPENDED). The
+        primary use is the admin "pending review" queue; the `status`
+        query parameter narrows to a single bucket.
+
+        Sort: `created_at DESC, id DESC`. No cursor pagination in MVP
+        — `limit` caps at 100, default 50.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [DRAFT, PENDING_REVIEW, APPROVED, REJECTED, SUSPENDED]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Admin businesses listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/approve:
+    post:
+      tags: [admin]
+      operationId: adminApproveBusiness
+      summary: Approve a PENDING_REVIEW business.
+      description: |
+        Authenticated, ADMIN-only. PENDING_REVIEW → APPROVED. Records
+        one `APPROVE_BUSINESS` row in `admin_actions`; the optional
+        `notes` body field is stored on that row.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesRequest'
+      responses:
+        '200':
+          description: The updated business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/reject:
+    post:
+      tags: [admin]
+      operationId: adminRejectBusiness
+      summary: Reject a PENDING_REVIEW business.
+      description: |
+        Authenticated, ADMIN-only. PENDING_REVIEW → REJECTED. Records
+        one `REJECT_BUSINESS` row in `admin_actions`; the optional
+        `notes` body field is the canonical place to record the
+        rejection reason (no dedicated column on `business_profiles`
+        in MVP — the dashboard reads the most-recent
+        `REJECT_BUSINESS` row's `notes` to display "why rejected").
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesRequest'
+      responses:
+        '200':
+          description: The updated business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/suspend:
+    post:
+      tags: [admin]
+      operationId: adminSuspendBusiness
+      summary: Suspend an APPROVED or PENDING_REVIEW business.
+      description: |
+        Authenticated, ADMIN-only. APPROVED or PENDING_REVIEW →
+        SUSPENDED. Records one `SUSPEND_BUSINESS` row in
+        `admin_actions` with the optional `notes` body field.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesRequest'
+      responses:
+        '200':
+          description: The updated business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/feature:
+    post:
+      tags: [admin]
+      operationId: adminFeatureBusiness
+      summary: Set or clear `featured_until` on an APPROVED business.
+      description: |
+        Authenticated, ADMIN-only. The body's `featuredUntil` field
+        carries either an ISO-8601 datetime (feature until that
+        instant) or `null` (unfeature, clearing the column). The
+        business must be in `APPROVED` status; any other status
+        returns 409 CONFLICT.
+
+        The audit log records either `FEATURE_BUSINESS` (when
+        setting) or `UNFEATURE_BUSINESS` (when clearing).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminFeatureRequest'
+      responses:
+        '200':
+          description: The updated business.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /me/business:
     get:
       tags: [auth]
@@ -1528,6 +1746,43 @@ components:
             Opaque cursor for the next page. `null` when there are no
             more results. Pass the value back as the `cursor` query
             parameter to fetch the next page.
+    BusinessOwnerList:
+      type: object
+      description: |
+        Admin listing of businesses. No cursor pagination in MVP;
+        `limit` caps the row count at the call site.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BusinessOwnerView'
+    AdminNotesRequest:
+      type: object
+      description: |
+        Common request body for admin action endpoints that take a
+        free-text note (approve / reject / suspend). Persisted to
+        `admin_actions.notes`.
+      properties:
+        notes:
+          type: [string, 'null']
+          maxLength: 2000
+    AdminFeatureRequest:
+      type: object
+      description: |
+        Request body for `POST /v1/admin/businesses/{id}/feature`.
+        `featuredUntil` is required-and-nullable: pass an ISO-8601
+        datetime to feature, or `null` to unfeature. `notes` is
+        optional and persisted to the audit row.
+      required: [featuredUntil]
+      properties:
+        featuredUntil:
+          type: [string, 'null']
+          format: date-time
+          description: ISO-8601 UTC datetime, or `null` to clear.
+        notes:
+          type: [string, 'null']
+          maxLength: 2000
     BusinessFieldsBase:
       type: object
       description: |

@@ -22,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 
 import { RepositoryError } from '../../shared/repositories/baseRepository.js';
 import type {
+    AdminBusinessFilters,
     Business,
     BusinessRepository,
     BusinessStatus,
@@ -185,6 +186,22 @@ export class InMemoryBusinessRepository implements BusinessRepository {
             rows = rows.filter((row) => rowComesAfterCursor(row, cursor));
         }
 
+        return rows.slice(0, limit);
+    }
+
+    async listForAdmin(
+        filters: AdminBusinessFilters,
+        limit: number,
+    ): Promise<readonly Business[]> {
+        let rows = Array.from(this.rowsById.values());
+        if (filters.status !== undefined) {
+            rows = rows.filter((b) => b.status === filters.status);
+        }
+        rows.sort(
+            (a, b) =>
+                b.createdAt.getTime() - a.createdAt.getTime() ||
+                (a.id < b.id ? 1 : -1),
+        );
         return rows.slice(0, limit);
     }
 }

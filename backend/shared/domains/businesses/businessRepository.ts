@@ -101,6 +101,16 @@ export interface PublicBusinessFilters {
 }
 
 /**
+ * Filters accepted by `listForAdmin`. Status is the dominant filter
+ * for admin queues (PENDING_REVIEW screen, SUSPENDED audit, etc.).
+ * No cursor pagination in MVP — admin listings are bounded by the
+ * `limit` parameter (default and max set at the call site).
+ */
+export interface AdminBusinessFilters {
+    readonly status?: BusinessStatus;
+}
+
+/**
  * Decoded cursor shape. The encoded form is opaque to callers
  * (`base64url(JSON.stringify(payload))`); the codec lives in
  * `businessService.ts`.
@@ -128,6 +138,16 @@ export interface BusinessRepository {
     listPublic(
         filters: PublicBusinessFilters,
         cursor: ParsedCursor | null,
+        limit: number,
+    ): Promise<readonly Business[]>;
+    /**
+     * Admin listing across all statuses. Optionally filtered by a
+     * single `status`; sorted `created_at DESC, id DESC` so the
+     * newest queue items surface first. No cursor pagination — Phase
+     * 5 caps results at the call site.
+     */
+    listForAdmin(
+        filters: AdminBusinessFilters,
         limit: number,
     ): Promise<readonly Business[]>;
 }
@@ -359,6 +379,23 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
              LIMIT ${limitParam};
             `,
             params,
+        );
+        return rows.map(mapRow);
+    }
+
+    async listForAdmin(
+        filters: AdminBusinessFilters,
+        limit: number,
+    ): Promise<readonly Business[]> {
+        const rows = await this.many<BusinessRow>(
+            `
+            SELECT ${BUSINESS_COLUMNS}
+              FROM business_profiles
+             WHERE ($1::text IS NULL OR status = $1)
+             ORDER BY created_at DESC, id DESC
+             LIMIT $2;
+            `,
+            [filters.status ?? null, limit],
         );
         return rows.map(mapRow);
     }
