@@ -66,12 +66,16 @@ import type { BusinessRepository } from '../../shared/domains/businesses/busines
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import type { NotificationLogRepository } from '../../shared/domains/notifications/notificationLogRepository.js';
 import { PgNotificationLogRepository } from '../../shared/domains/notifications/notificationLogRepository.js';
+import type { NotificationChannel } from '../../shared/adapters/notifications/NotificationGateway.js';
 import type { NotificationService } from '../../shared/domains/notifications/notificationService.js';
-import { createNotificationService } from '../../shared/domains/notifications/notificationServiceFactory.js';
+import {
+    createNotificationService,
+    shouldWireSmsGateway,
+} from '../../shared/domains/notifications/notificationServiceFactory.js';
 import type { BookingTemplateKey } from '../../shared/domains/notifications/templateRegistry.js';
 import type { ServiceRepository } from '../../shared/domains/services/serviceRepository.js';
 import { PgServiceRepository } from '../../shared/domains/services/serviceRepository.js';
-import type { UserRepository } from '../../shared/domains/users/userRepository.js';
+import type { User, UserRepository } from '../../shared/domains/users/userRepository.js';
 import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
 import type { Logger } from '../../shared/logging/logger.js';
 import { createLogger } from '../../shared/logging/logger.js';
@@ -132,6 +136,17 @@ export interface ReminderBatchDeps {
     readonly logger: Logger;
     /** Test seam — defaults to `() => new Date()`. */
     readonly now?: () => Date;
+    /**
+     * Phase 9 — enables SMS routing for reminder dispatch. Same
+     * lockstep boolean `AppointmentService` uses; the handler-side
+     * derivation is `shouldWireSmsGateway(config)`. When `true`,
+     * each reminder fetches the recipient's `users` row and routes
+     * through `SMS` if the recipient has a non-empty `phone`,
+     * falling back to `MOCK` otherwise. Defaults to `false` so
+     * existing unit tests (which don't wire an SMS gateway) keep
+     * routing through `MOCK` without any change.
+     */
+    readonly smsRoutingEnabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +187,7 @@ export const handler = async (
         notificationService,
         notificationLogRepo,
         logger,
+        smsRoutingEnabled: shouldWireSmsGateway(config),
     });
 };
 
@@ -267,6 +283,7 @@ export async function runReminderBatch(
                 businessName: business.name ?? 'your business',
                 serviceName: service.name.en,
                 customerDisplayName: customer?.displayName ?? null,
+                customer,
                 target,
                 deps,
                 scanLog,
@@ -301,6 +318,14 @@ interface DispatchOneInput {
     readonly businessName: string;
     readonly serviceName: string;
     readonly customerDisplayName: string | null;
+    /**
+     * Phase 9 — preloaded customer row used by the channel-
+     * selection helper to avoid a redundant `findById` when the
+     * customer-side reminder's recipient IS this customer. The
+     * batch loop fetches the customer once per appointment for
+     * `customerDisplayName`; we reuse it here.
+     */
+    readonly customer: User | null;
     readonly target: {
         readonly templateKey: BookingTemplateKey;
         readonly recipientUserId: string;
@@ -325,6 +350,12 @@ async function dispatchOneReminder(input: DispatchOneInput): Promise<DispatchOut
             return 'skipped';
         }
 
+        const channel = await pickReminderChannel(
+            deps,
+            target.recipientUserId,
+            input.customer,
+        );
+
         const row = await deps.notificationService.dispatch({
             templateKey: target.templateKey,
             recipientUserId: target.recipientUserId,
@@ -334,7 +365,7 @@ async function dispatchOneReminder(input: DispatchOneInput): Promise<DispatchOut
                 customerDisplayName: input.customerDisplayName,
                 startsAtUtc,
             },
-            channel: 'MOCK',
+            channel,
         });
 
         if (row.status === 'SENT') {
@@ -364,4 +395,45 @@ async function dispatchOneReminder(input: DispatchOneInput): Promise<DispatchOut
         });
         return 'failed';
     }
+}
+
+/**
+ * Phase 9 — channel selection for reminder dispatch. Mirrors
+ * `AppointmentService.pickNotificationChannel`:
+ *
+ *   * When `smsRoutingEnabled` is `false` (the default), short-
+ *     circuit to `'MOCK'` without any DB call.
+ *   * Otherwise, resolve the recipient. The batch loop has
+ *     already fetched the customer once per appointment, so we
+ *     reuse it when the recipient is the customer.
+ *   * Return `'SMS'` when the recipient has a non-empty trimmed
+ *     `phone`; otherwise fall back to `'MOCK'`.
+ *
+ * Keeps the lockstep contract with the
+ * `notificationServiceFactory`: when SMS routing is enabled at
+ * the handler boundary, the dispatcher always has an `SMS`
+ * gateway wired and the fallback to `MOCK` for phone-less
+ * recipients is harmless (the `MOCK` gateway stays wired).
+ */
+async function pickReminderChannel(
+    deps: ReminderBatchDeps,
+    recipientUserId: string,
+    preloadedCustomer: User | null,
+): Promise<NotificationChannel> {
+    if (!deps.smsRoutingEnabled) {
+        return 'MOCK';
+    }
+    const recipient =
+        preloadedCustomer && preloadedCustomer.id === recipientUserId
+            ? preloadedCustomer
+            : await deps.userRepo.findById(recipientUserId);
+
+    if (
+        recipient &&
+        typeof recipient.phone === 'string' &&
+        recipient.phone.trim() !== ''
+    ) {
+        return 'SMS';
+    }
+    return 'MOCK';
 }

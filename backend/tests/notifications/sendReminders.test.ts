@@ -23,6 +23,12 @@ import { describe, it } from 'node:test';
 
 import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import type {
+    NotificationChannel,
+    NotificationGateway,
+    NotificationSendInput,
+    NotificationSendResult,
+} from '../../shared/adapters/notifications/NotificationGateway.js';
+import type {
     Appointment,
     AppointmentStatus,
     PaymentMethod,
@@ -88,9 +94,52 @@ interface Env {
     readonly userRepo: InMemoryUserRepository;
     readonly notificationLogRepo: InMemoryNotificationLogRepository;
     readonly notificationService: NotificationService;
+    readonly smsRoutingEnabled: boolean;
+    readonly smsGateway: StubChannelGateway;
 }
 
-function buildEnv(): Env {
+interface BuildEnvOptions {
+    /**
+     * Phase 9 — when `true`, the dispatcher gets a stub SMS
+     * gateway and `runReminderBatch` is called with
+     * `smsRoutingEnabled: true`. Defaults to `false` so existing
+     * tests stay on the mock-only path.
+     */
+    readonly smsRoutingEnabled?: boolean;
+    /** Override the seeded customer's phone. `null` simulates no-phone-on-file. */
+    readonly customerPhone?: string | null;
+    /** Override the seeded business owner's phone. */
+    readonly ownerPhone?: string | null;
+}
+
+/**
+ * Phase 9 — recording stub gateway. Same shape as the appointment
+ * service tests' `StubChannelGateway`. Always succeeds; captures
+ * each `send` so tests can confirm SMS routing fired (or didn't).
+ */
+class StubChannelGateway implements NotificationGateway {
+    public readonly calls: NotificationSendInput[] = [];
+
+    constructor(
+        public readonly channel: NotificationChannel,
+        public readonly provider: string,
+    ) {}
+
+    async send(input: NotificationSendInput): Promise<NotificationSendResult> {
+        this.calls.push(input);
+        return Object.freeze({
+            status: 'SENT' as const,
+            provider: this.provider,
+            providerRef: `${this.provider}-stub-${this.calls.length}`,
+            rawResponse: null,
+            errorCode: null,
+            errorMessage: null,
+            sentAt: new Date().toISOString(),
+        });
+    }
+}
+
+function buildEnv(options: BuildEnvOptions = {}): Env {
     const appointmentsRepo = new InMemoryAppointmentsRepository();
     const businessRepo = new InMemoryBusinessRepository();
     const serviceRepo = new InMemoryServiceRepository();
@@ -130,18 +179,23 @@ function buildEnv(): Env {
         updatedAt: new Date('2026-05-13T00:00:00.000Z'),
     });
 
-    seedUserById(userRepo, CUSTOMER_ID, 'CUSTOMER', 'Henok');
-    seedUserById(userRepo, OWNER_ID, 'BUSINESS_OWNER', 'Owner');
+    seedUserById(userRepo, CUSTOMER_ID, 'CUSTOMER', 'Henok', options.customerPhone);
+    seedUserById(userRepo, OWNER_ID, 'BUSINESS_OWNER', 'Owner', options.ownerPhone);
 
     const logger = createLogger({
         level: 'error',
         sink: { write: () => {} },
     });
 
+    const smsGateway = new StubChannelGateway('SMS', 'STUB_SMS');
+    const gateways = options.smsRoutingEnabled
+        ? { MOCK: new MockNotificationGateway(), SMS: smsGateway }
+        : { MOCK: new MockNotificationGateway() };
+
     const notificationService = new NotificationService({
         userRepository: userRepo,
         notificationLogRepository: notificationLogRepo,
-        gateways: { MOCK: new MockNotificationGateway() },
+        gateways,
         logger,
     });
 
@@ -152,6 +206,8 @@ function buildEnv(): Env {
         userRepo,
         notificationLogRepo,
         notificationService,
+        smsRoutingEnabled: options.smsRoutingEnabled ?? false,
+        smsGateway,
     };
 }
 
@@ -160,17 +216,22 @@ function seedUserById(
     id: string,
     role: 'CUSTOMER' | 'BUSINESS_OWNER' | 'ADMIN',
     displayName: string,
+    phoneOverride?: string | null,
 ): void {
     const internal = userRepo as unknown as {
         rowsById: Map<string, unknown>;
         rowsBySub: Map<string, unknown>;
     };
     const now = new Date();
+    const phone =
+        phoneOverride === undefined
+            ? `+25191100${id.slice(-4)}`
+            : phoneOverride;
     const row = Object.freeze({
         id,
         cognitoSub: `sub-${id}`,
         email: `${displayName.toLowerCase()}@example.com`,
-        phone: `+25191100${id.slice(-4)}`,
+        phone,
         role,
         status: 'ACTIVE' as const,
         displayName,
@@ -198,6 +259,7 @@ async function runBatch(env: Env) {
         notificationLogRepo: env.notificationLogRepo,
         logger: silentLogger(),
         now: () => new Date(NOW_ISO),
+        smsRoutingEnabled: env.smsRoutingEnabled,
     });
 }
 
@@ -373,5 +435,121 @@ describe('runReminderBatch — partial pre-existing ledger', () => {
             skipped: 1,
             failed: 0,
         });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 9 — SMS routing for scheduled reminders
+// ---------------------------------------------------------------------------
+//
+// Mirrors the appointment-service SMS routing tests. Coverage:
+//
+//   * Mock provider keeps both reminders on `MOCK`.
+//   * SMS provider + both recipients with a phone → both
+//     reminders route through `SMS`.
+//   * SMS provider + recipients with no phone → both reminders
+//     fall back to `MOCK`. The SMS gateway stays untouched.
+//   * Dispatch failure with SMS routing wired — the failing
+//     reminder is counted, the batch keeps running, and the
+//     summary surfaces the failure without throwing.
+
+describe('runReminderBatch — SMS routing (Phase 9)', () => {
+    it('mock provider keeps both reminders on MOCK', async () => {
+        const env = buildEnv(); // smsRoutingEnabled defaults to false
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const summary = await runBatch(env);
+
+        assert.strictEqual(summary.sent, 2);
+        const channels = env.notificationLogRepo
+            .all()
+            .map((r) => r.channel)
+            .sort();
+        assert.deepStrictEqual(channels, ['MOCK', 'MOCK']);
+        assert.strictEqual(env.smsGateway.calls.length, 0);
+    });
+
+    it('sms provider + customer & business phone routes both reminders through SMS', async () => {
+        const env = buildEnv({ smsRoutingEnabled: true });
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const summary = await runBatch(env);
+
+        assert.strictEqual(summary.sent, 2);
+        const channels = env.notificationLogRepo
+            .all()
+            .map((r) => r.channel)
+            .sort();
+        assert.deepStrictEqual(channels, ['SMS', 'SMS']);
+
+        // Stub gateway captured both sends with phone numbers.
+        assert.strictEqual(env.smsGateway.calls.length, 2);
+        const phones = env.smsGateway.calls
+            .map((c) => c.recipient.phoneE164)
+            .sort();
+        assert.deepStrictEqual(phones, [
+            `+25191100${CUSTOMER_ID.slice(-4)}`,
+            `+25191100${OWNER_ID.slice(-4)}`,
+        ]);
+    });
+
+    it('sms provider + missing phone falls back to MOCK', async () => {
+        const env = buildEnv({
+            smsRoutingEnabled: true,
+            customerPhone: null,
+            ownerPhone: null,
+        });
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const summary = await runBatch(env);
+
+        assert.strictEqual(summary.sent, 2);
+        const channels = env.notificationLogRepo
+            .all()
+            .map((r) => r.channel)
+            .sort();
+        assert.deepStrictEqual(
+            channels,
+            ['MOCK', 'MOCK'],
+            'expected fallback to MOCK when neither recipient has a phone',
+        );
+        assert.strictEqual(env.smsGateway.calls.length, 0);
+    });
+
+    it('dispatch failure with SMS routing wired does not fail the whole batch', async () => {
+        // SMS routing enabled, but wipe the owner row so the
+        // dispatcher throws `NotificationRecipientNotFoundError`
+        // on the business-side reminder. The customer-side
+        // reminder still lands; the batch summary reports
+        // exactly one failure.
+        const env = buildEnv({ smsRoutingEnabled: true });
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const internal = env.userRepo as unknown as {
+            rowsById: Map<string, unknown>;
+        };
+        internal.rowsById.delete(OWNER_ID);
+
+        const summary = await runBatch(env);
+
+        assert.strictEqual(summary.scanned, 1);
+        assert.strictEqual(summary.sent, 1);
+        assert.strictEqual(summary.skipped, 0);
+        assert.strictEqual(summary.failed, 1);
+
+        // The customer-side reminder reached the SMS gateway.
+        assert.strictEqual(env.smsGateway.calls.length, 1);
+        assert.strictEqual(
+            env.smsGateway.calls[0]!.recipient.phoneE164,
+            `+25191100${CUSTOMER_ID.slice(-4)}`,
+        );
+        // Only one log row survived; the failing dispatch threw
+        // before any row was inserted for the business-side
+        // reminder (the dispatcher's recipient lookup raises
+        // before the QUEUED insert).
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 1);
+        assert.strictEqual(logs[0]!.recipientUserId, CUSTOMER_ID);
+        assert.strictEqual(logs[0]!.channel, 'SMS');
     });
 });
