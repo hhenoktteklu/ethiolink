@@ -1431,6 +1431,146 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalError'
+  /admin/users:
+    get:
+      tags: [admin]
+      operationId: adminListUsers
+      summary: List users across every status and role.
+      description: |
+        Authenticated, ADMIN-only. Returns `AdminUserView` rows
+        (extends `UserView` with `status` so the dashboard can render
+        ACTIVE / SUSPENDED / DELETED bands). `cognito_sub` stays
+        hidden.
+
+        Sort: `created_at DESC, id DESC`. No cursor pagination in
+        MVP — `limit` caps at 100, default 50.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [ACTIVE, SUSPENDED, DELETED]
+        - name: role
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [CUSTOMER, BUSINESS_OWNER, ADMIN]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Admin users listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/users/{id}/suspend:
+    post:
+      tags: [admin]
+      operationId: adminSuspendUser
+      summary: Suspend an ACTIVE user.
+      description: |
+        Authenticated, ADMIN-only. ACTIVE → SUSPENDED. Records one
+        `SUSPEND_USER` row in `admin_actions`; the optional `notes`
+        body field is stored on that row. Suspending a `SUSPENDED`
+        or `DELETED` user returns 409 CONFLICT.
+
+        MVP suspension marks the row only — Cognito tokens stay
+        valid until expiration. The API authorizer rejects suspended
+        users on next request. Token-side revocation is a future
+        hardening item.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesRequest'
+      responses:
+        '200':
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/users/{id}/restore:
+    post:
+      tags: [admin]
+      operationId: adminRestoreUser
+      summary: Restore a SUSPENDED user.
+      description: |
+        Authenticated, ADMIN-only. SUSPENDED → ACTIVE. Records one
+        `RESTORE_USER` row in `admin_actions`; the optional `notes`
+        body field is stored on that row. `DELETED` users are
+        terminal in MVP and cannot be restored through this
+        endpoint; the service refuses with 409 CONFLICT.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminNotesRequest'
+      responses:
+        '200':
+          description: The updated user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUserView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /me/business:
     get:
       tags: [auth]
@@ -1757,6 +1897,30 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BusinessOwnerView'
+    AdminUserView:
+      allOf:
+        - $ref: '#/components/schemas/User'
+        - type: object
+          description: |
+            Admin projection. Extends `User` with `status` so the
+            dashboard can render ACTIVE / SUSPENDED / DELETED bands.
+            `cognito_sub` stays hidden.
+          required: [status]
+          properties:
+            status:
+              type: string
+              enum: [ACTIVE, SUSPENDED, DELETED]
+    AdminUserList:
+      type: object
+      description: |
+        Admin listing of users. No cursor pagination in MVP; `limit`
+        caps the row count at the call site.
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminUserView'
     AdminNotesRequest:
       type: object
       description: |

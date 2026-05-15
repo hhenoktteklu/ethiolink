@@ -1,16 +1,21 @@
-// EthioLink — public JSON shape for a user row.
+// EthioLink — JSON shapes for a user row.
 //
 // The repository's `User` type carries internal fields (cognito_sub, status)
-// that should not appear in API responses. This module is the boundary
+// that should not appear in regular API responses. This module is the boundary
 // between domain types and wire types for the users domain.
 //
-// Used by `/v1/auth/sync`, `/v1/me`, and any future endpoint that needs to
-// surface a user. Keeping the projection in one place means a column added
-// to `users` does not automatically leak to clients.
+// Two projections:
+//   * `UserView` — public/self-facing. Hides `cognito_sub` and `status`.
+//     Used by `/v1/auth/sync`, `/v1/me`, and any non-admin path that
+//     surfaces a user.
+//   * `AdminUserView` — admin-facing. Extends `UserView` with `status`
+//     so the admin dashboard can render ACTIVE / SUSPENDED / DELETED
+//     bands. `cognito_sub` stays hidden — there's no admin use case
+//     for it in MVP.
 
 import type { UserRole } from '../../adapters/auth/AuthProvider.js';
 
-import type { User } from './userRepository.js';
+import type { User, UserStatus } from './userRepository.js';
 
 /** Wire shape for a user. ISO-8601 timestamps, omits internal fields. */
 export interface UserView {
@@ -32,5 +37,21 @@ export function toUserView(user: User): UserView {
         role: user.role,
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
+    });
+}
+
+/**
+ * Admin projection. Adds `status` so the dashboard can colour-code
+ * rows by suspension state; everything else mirrors `UserView`.
+ * `cognito_sub` deliberately stays hidden.
+ */
+export interface AdminUserView extends UserView {
+    readonly status: UserStatus;
+}
+
+export function toAdminUserView(user: User): AdminUserView {
+    return Object.freeze<AdminUserView>({
+        ...toUserView(user),
+        status: user.status,
     });
 }

@@ -55,6 +55,16 @@ export interface UpdateUserFields {
     readonly displayName?: string | null;
 }
 
+/**
+ * Filters accepted by `listForAdmin`. Both filters are optional;
+ * passing neither lists every user. No cursor pagination in MVP —
+ * the limit caps the result set at the call site.
+ */
+export interface AdminUserFilters {
+    readonly status?: UserStatus;
+    readonly role?: UserRole;
+}
+
 export interface UserRepository {
     upsertFromAuth(input: UpsertUserFromAuthInput): Promise<User>;
     findById(id: string): Promise<User | null>;
@@ -69,6 +79,15 @@ export interface UserRepository {
      * id is missing.
      */
     setStatus(id: string, status: UserStatus): Promise<User>;
+    /**
+     * Admin listing across every user. Optionally filtered by `status`
+     * and / or `role`. Sorted `created_at DESC, id DESC` so the
+     * newest registrations surface first.
+     */
+    listForAdmin(
+        filters: AdminUserFilters,
+        limit: number,
+    ): Promise<readonly User[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +182,24 @@ export class PgUserRepository extends BaseRepository implements UserRepository {
             throw new RepositoryError(`User ${id} not found.`);
         }
         return mapRow(row);
+    }
+
+    async listForAdmin(
+        filters: AdminUserFilters,
+        limit: number,
+    ): Promise<readonly User[]> {
+        const rows = await this.many<UserRow>(
+            `
+            SELECT ${USER_COLUMNS}
+              FROM users
+             WHERE ($1::text IS NULL OR status = $1)
+               AND ($2::text IS NULL OR role   = $2)
+             ORDER BY created_at DESC, id DESC
+             LIMIT $3;
+            `,
+            [filters.status ?? null, filters.role ?? null, limit],
+        );
+        return rows.map(mapRow);
     }
 }
 

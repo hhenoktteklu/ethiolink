@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 
 import { RepositoryError } from '../../shared/repositories/baseRepository.js';
 import type {
+    AdminUserFilters,
     UpdateUserFields,
     UpsertUserFromAuthInput,
     User,
@@ -106,5 +107,20 @@ export class InMemoryUserRepository implements UserRepository {
         this.rowsById.set(updated.id, updated);
         this.rowsBySub.set(updated.cognitoSub, updated);
         return updated;
+    }
+
+    async listForAdmin(
+        filters: AdminUserFilters,
+        limit: number,
+    ): Promise<readonly User[]> {
+        return Array.from(this.rowsById.values())
+            .filter((u) => filters.status === undefined || u.status === filters.status)
+            .filter((u) => filters.role === undefined || u.role === filters.role)
+            .sort(
+                (a, b) =>
+                    b.createdAt.getTime() - a.createdAt.getTime() ||
+                    (a.id < b.id ? 1 : -1),
+            )
+            .slice(0, limit);
     }
 }
