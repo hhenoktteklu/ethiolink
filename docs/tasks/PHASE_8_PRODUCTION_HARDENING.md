@@ -8,7 +8,7 @@ Make the platform something we can confidently leave running. Close observabilit
 
 In scope:
 
-- WAF tuning beyond the Phase 7 baseline: bot control, IP reputation list, custom rate limits per route.
+- WAF tuning beyond the Phase 7 baseline: bot control, IP reputation list, custom rate limits per route. *(Phase 8 commit "tune WAF rules": three layered rate-based rules — `rate-limit-public-read` (600 req/5 min/IP, scope-down on `GET /v1/categories|businesses*`, priority 50), `rate-limit-write` (300 req/5 min/IP, scope-down on non-GET methods, priority 60), and the existing global `rate-limit-per-ip` (2000 req/5 min/IP, priority 70) preserved verbatim as the fallback. IP reputation rule group enabled by default; Bot Control gated behind `enable_bot_control = false` until real traffic numbers justify the cost. Per-managed-group `*_count_overrides` lists added so an operator can force a noisy sub-rule to COUNT mid-incident without editing the module.)*
 - Secret rotation: rotate RDS master password and any third-party API keys via Secrets Manager managed rotation. *(Phase 8 commit "enable RDS secret rotation": AWS-managed `SecretsManagerRDSPostgreSQLRotationSingleUser` Lambda deployed via SAR; `aws_secretsmanager_secret_rotation` schedules 30-day cadence; first rotation fires immediately after apply. Third-party API keys land alongside the real SMS/Telegram provider integration follow-ups.)*
 - RDS backup verification: monthly automated restore test to a scratch RDS instance, comparing schema and row counts. *(Phase 8 commit "DR runbook + backup verification": `.github/workflows/backup-verify.yml` runs monthly + on dispatch, default dry-run mode asserts snapshot freshness + descriptors. Full-restore mode is gated behind `workflow_dispatch.inputs.full_restore = true` and emits a "not implemented" notice until the Phase 8.5 follow-up ships the `restore-test` Terraform workspace.)*
 - DR runbook in `docs/operations/DR_RUNBOOK.md` covering RDS restore, Lambda redeploy, Cognito recreation guidance. *(Phase 8 commit "DR runbook + backup verification": full step-by-step playbook with per-step timing, 43-minute total wall-clock under the 60-minute SLO, fallback procedures for snapshot corruption / stuck restore / smoke-test failure, post-incident checklist.)*
@@ -43,7 +43,7 @@ Out of scope:
 
 ## Checklist
 
-- [ ] WAF rules tuned and tested.
+- [ ] WAF rules tuned and tested. *(Tuning shipped — Phase 8 commit "tune WAF rules". Validation against the dev stage with sampled requests + per-rule CloudWatch metrics is the operator-led step still to schedule.)*
 - [ ] Secret rotation enabled for RDS and third-party providers.
 - [ ] Backup restore test scripted and passing. *(Dry-run workflow shipped — `.github/workflows/backup-verify.yml`. Full-restore scratch-workspace remains Phase 8.5.)*
 - [ ] DR runbook validated by a tabletop exercise. *(Runbook shipped at `docs/operations/DR_RUNBOOK.md`; tabletop exercise is the operator-led validation step still to schedule.)*

@@ -337,19 +337,35 @@ Provisioned by `infra/terraform/modules/secrets/`. The RDS master secret created
 
 Provisioned by `infra/terraform/modules/waf/`. One regional WAFv2 Web ACL per environment, associated with the API Gateway stage ARN.
 
-**Default action.** `allow {}` — anything not matched by the rules below passes through. The alternative (default-deny + explicit allow-list) is a Phase 8 hardening choice.
+**Default action.** `allow {}` — anything not matched by the rules below passes through. The alternative (default-deny + explicit allow-list) is a post-MVP hardening choice.
 
 **Managed rule groups** (`override_action { none {} }` on each — match decisions from the group itself are honored as-is rather than forced to `count`):
 
-| Group                                          | Purpose                                                             |
-| ---------------------------------------------- | ------------------------------------------------------------------- |
-| `AWSManagedRulesCommonRuleSet`                 | OWASP-style baseline (SQLi, XSS, path traversal, etc.).             |
-| `AWSManagedRulesKnownBadInputsRuleSet`         | Known exploit payloads (log4j signatures, common scanners).         |
-| `AWSManagedRulesAmazonIpReputationList`        | AWS-maintained IP reputation feed of known-bad sources.             |
+| Group                                          | Default state | Purpose                                                             |
+| ---------------------------------------------- | ------------- | ------------------------------------------------------------------- |
+| `AWSManagedRulesCommonRuleSet`                 | enabled       | OWASP-style baseline (SQLi, XSS, path traversal, etc.).             |
+| `AWSManagedRulesKnownBadInputsRuleSet`         | enabled       | Known exploit payloads (log4j signatures, common scanners).         |
+| `AWSManagedRulesAmazonIpReputationList`        | enabled       | AWS-maintained IP reputation feed of known-bad sources.             |
+| `AWSManagedRulesBotControlRuleSet`             | **disabled**  | Behavioral bot defense (JA3/JA4, behavioral signals). Priced per-request — gate behind `enable_bot_control = true` once real traffic numbers justify the cost. Inspection level (`COMMON` or `TARGETED`) selected via `bot_control_inspection_level`. |
 
-Each group has a module-level `enable_*` toggle (default `true`). If a managed rule false-positives a legitimate request mid-incident, the operator sets the corresponding flag to `false` and re-applies — the change is auditable in git rather than buried in a CloudWatch console toggle.
+Each group has a module-level `enable_*` toggle. If a managed rule false-positives a legitimate request mid-incident, the operator has two knobs:
 
-**Rate-based rule.** Per source IP, blocks for 5 minutes once the IP exceeds `rate_limit_per_5min` requests (default 2000 — ~6.7 req/sec sustained per IP; generous for legitimate clients, restrictive for trivial scrapers). The block action returns 403 to the offending IP. Tune via the env-level `waf_rate_limit_per_5min` variable once the first load test surfaces real per-IP rates.
+1. **Drop the whole group** by flipping the matching `enable_*` variable to `false`.
+2. **Force a specific sub-rule to `COUNT`** (observability only, no block) via the per-group `*_count_overrides` list (`common_rule_set_count_overrides`, `known_bad_inputs_count_overrides`, `ip_reputation_count_overrides`, `bot_control_count_overrides`). Each list takes sub-rule names (e.g. `SizeRestrictions_BODY`, `CrossSiteScripting_QUERYARGUMENTS`). The canonical list comes from `aws wafv2 describe-managed-rule-group --vendor-name AWS --name <Group>` or the AWS console.
+
+Both knobs are auditable in git rather than buried in a CloudWatch console toggle. To force a sub-rule to an action other than COUNT (e.g. CAPTCHA, ALLOW), edit `main.tf` directly — the `action_to_use` block accepts `allow {}` / `block {}` / `count {}` / `captcha {}` / `challenge {}`. The module's variable surface exposes COUNT only because it's the overwhelming operational use case; rarer overrides stay as explicit code changes to keep the variable surface small.
+
+**Rate-based rules — layered (Phase 8 tuning).** Three rate-based rules layer from tightest-and-narrowest to widest-and-loosest. Each maintains its own per-IP counter; they're independent. A request that violates one but not the others trips only the offended rule. All three block on match with the standard WAFv2 5-minute window.
+
+| Priority | Rule                       | Scope                                                                              | Default threshold (per IP / 5 min) | Variable                          | Purpose                                                                                                          |
+| -------- | -------------------------- | ---------------------------------------------------------------------------------- | ---------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| 50       | `rate-limit-public-read`   | `method = GET` AND uri-path CONTAINS `/v1/categories` or `/v1/businesses`           | 600 (~2 req/sec sustained)         | `rate_limit_public_read_per_5min` | Tightest. Catches anonymous catalog scraping early. Set to `null` to disable the rule.                            |
+| 60       | `rate-limit-write`         | `method != GET` (POST / PATCH / PUT / DELETE)                                       | 300 (~1 write/sec sustained)       | `rate_limit_write_per_5min`       | Catches booking-write abuse + login brute-force. Set to `null` to disable the rule.                               |
+| 70       | `rate-limit-per-ip`        | every request (no scope-down)                                                       | 2000 (~6.7 req/sec sustained)      | `rate_limit_per_5min`             | Existing global fallback. Catches volumetric abuse that flies under the scope-down rules above.                   |
+
+The 2000-req/5-min global rule is the Phase 7 default, preserved verbatim. The two scope-down rules are the Phase 8 additions. Tune each threshold via the env-stack variable (`waf_rate_limit_per_5min`, plus the two new `waf_rate_limit_*_per_5min` variables when wired) once the first load test surfaces real per-IP rates.
+
+**Path-match implementation note.** The `rate-limit-public-read` rule uses `byte_match_statement` with `positional_constraint = CONTAINS` rather than `STARTS_WITH` because API Gateway prefixes the stage name (`/dev/v1/...`, `/prod/v1/...`). Containment match avoids per-env regex without sacrificing precision — the only places `/v1/categories` or `/v1/businesses` appear in URIs are at the API Gateway root.
 
 **Observability.** Both the Web ACL and every rule have `cloudwatch_metrics_enabled = true` and `sampled_requests_enabled = true`. The `cloudwatch` module commit attaches alarms on `BlockedRequests` and per-rule-group block counts; `aws wafv2 get-sampled-requests` is the operator's mid-incident investigation surface.
 
