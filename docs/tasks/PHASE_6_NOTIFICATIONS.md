@@ -40,7 +40,7 @@ Out of scope:
 
 ## Checklist
 
-- [ ] Migration 0013 applied.
+- [ ] Migration 0013 applied.<!-- `0013_notification_logs.sql` authored: id uuid PK, `recipient_user_id` FK `ON DELETE SET NULL` (notification history outlives the recipient), `channel` CHECK in `SMS`/`EMAIL`/`TELEGRAM`/`PUSH`/`MOCK`, `template_key text` with no CHECK (app-layer enum — additive contract, same stance as `admin_actions.action`), `payload jsonb NOT NULL`, `status` default `QUEUED` CHECK in `QUEUED`/`SENT`/`DELIVERED`/`FAILED`, `provider` default `MOCK`, nullable `provider_ref` + `error_message`, `set_updated_at()` trigger reused, indexes on `(recipient_user_id, created_at DESC)` + `(status, created_at DESC)`. The mutation model documented in the header is QUEUED→SENT/FAILED only — `DELIVERED` reserved for a future read-receipt path. "Applied" needs `npm run db:migrate` locally; Phase 7 RDS provisioning for the AWS-hosted dev apply. -->
 - [ ] All booking lifecycle events dispatch the correct notifications via the gateway.
 - [ ] `notification_logs` rows reflect attempts and final status.
 - [ ] EventBridge schedule fires `sendReminders` every 15 minutes; idempotent — same appointment is not re-reminded.
