@@ -173,8 +173,55 @@ output "s3_logs_bucket" {
   value       = module.s3.logs_bucket_name
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — RDS
+#
+# Single-AZ Postgres 15 on a burstable ARM instance — the dev
+# default. No RDS Proxy in dev (Lambda concurrency is too low to
+# justify the cost). Master password lives in Secrets Manager as
+# `ethiolink/dev/rds/master`.
+# -----------------------------------------------------------------------------
+
+module "rds" {
+  source = "../../modules/rds"
+
+  environment = "dev"
+
+  vpc_id                = module.vpc.vpc_id
+  private_subnet_ids    = module.vpc.private_subnet_ids
+  rds_security_group_id = module.vpc.rds_security_group_id
+
+  instance_class        = "db.t4g.small"
+  multi_az              = false
+  allocated_storage     = 20
+  max_allocated_storage = 100
+
+  backup_retention_days = 7
+
+  enable_rds_proxy = false
+}
+
+output "rds_endpoint" {
+  description = "Direct DB endpoint. Maps to `PG_HOST` in the Lambda env (dev has no proxy)."
+  value       = module.rds.effective_endpoint
+}
+
+output "rds_port" {
+  description = "DB port. Maps to `PG_PORT`."
+  value       = module.rds.db_port
+}
+
+output "rds_database_name" {
+  description = "Initial database name. Maps to `PG_DATABASE`."
+  value       = module.rds.db_name
+}
+
+output "rds_master_secret_arn" {
+  description = "Master-credentials secret ARN. The Lambda cold-start shim fetches the password from this secret before `loadConfig` runs."
+  value       = module.rds.master_secret_arn
+}
+
 # Phase 7 will add:
-#   module "rds"            { source = "../../modules/rds"            ... }
 #   module "lambda"         { source = "../../modules/lambda"         ... }
 #   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
 #   module "eventbridge"    { source = "../../modules/eventbridge"    ... }

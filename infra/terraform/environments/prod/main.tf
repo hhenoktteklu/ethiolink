@@ -195,8 +195,68 @@ output "s3_logs_bucket" {
   value       = module.s3.logs_bucket_name
 }
 
+# -----------------------------------------------------------------------------
+# Phase 7 — RDS
+#
+# Multi-AZ Postgres 15 on a steady-state ARM instance, fronted by
+# an RDS Proxy. Backups retained for the AWS maximum (35 days).
+# Lambdas in prod target the proxy endpoint so a fan-out burst
+# doesn't exhaust the DB's connection pool. The migration runner
+# is the only client that targets the direct instance endpoint —
+# proxy prepared-statement caching interferes with DDL.
+# -----------------------------------------------------------------------------
+
+module "rds" {
+  source = "../../modules/rds"
+
+  environment = "prod"
+
+  vpc_id                = module.vpc.vpc_id
+  private_subnet_ids    = module.vpc.private_subnet_ids
+  rds_security_group_id = module.vpc.rds_security_group_id
+
+  instance_class        = "db.m6g.large"
+  multi_az              = true
+  allocated_storage     = 100
+  max_allocated_storage = 1000
+
+  backup_retention_days = 35
+
+  enable_rds_proxy              = true
+  rds_proxy_idle_client_timeout = 600
+}
+
+output "rds_endpoint" {
+  description = "RDS Proxy endpoint — the value Lambda env reads for `PG_HOST` in prod. Migration runner targets `rds_direct_endpoint` instead to bypass the proxy's prepared-statement caching."
+  value       = module.rds.effective_endpoint
+}
+
+output "rds_direct_endpoint" {
+  description = "Direct DB instance endpoint, used by the migration runner (DDL must bypass the proxy)."
+  value       = module.rds.db_endpoint
+}
+
+output "rds_port" {
+  description = "DB port."
+  value       = module.rds.db_port
+}
+
+output "rds_database_name" {
+  description = "Initial database name."
+  value       = module.rds.db_name
+}
+
+output "rds_master_secret_arn" {
+  description = "Master-credentials secret ARN."
+  value       = module.rds.master_secret_arn
+}
+
+output "rds_proxy_endpoint" {
+  description = "RDS Proxy endpoint. Same value as `rds_endpoint` in prod, but exposed separately so deploy scripts can be unambiguous about which surface they're targeting."
+  value       = module.rds.proxy_endpoint
+}
+
 # Phase 7 will add (in roughly this order):
-#   module "rds"            { source = "../../modules/rds"            ... }  # + RDS Proxy in prod
 #   module "lambda"         { source = "../../modules/lambda"         ... }
 #   module "api_gateway"    { source = "../../modules/api-gateway"    ... }
 #   module "eventbridge"    { source = "../../modules/eventbridge"    ... }

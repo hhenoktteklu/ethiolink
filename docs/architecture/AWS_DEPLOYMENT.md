@@ -118,11 +118,28 @@ VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope
 
 ### RDS
 
-- PostgreSQL 15.
-- `db.t4g.small` in dev, `db.m6g.large` in prod (revisit on first load test).
-- Multi-AZ in prod; single-AZ in dev.
-- Automated backups: 7-day retention in dev, 35-day retention in prod.
-- RDS Proxy in prod to manage Lambda connection pressure (added in Phase 7).
+Provisioned by `infra/terraform/modules/rds/`. One PostgreSQL 15 instance per environment, sitting on the VPC's private subnets with `sg-rds` attached (ingress on 5432 from `sg-lambda` only). Master credentials live in Secrets Manager under the stable name `ethiolink/${env}/rds/master` with the JSON shape `{ username, password, engine, host, port, dbname, dbInstanceIdentifier }` so the AWS-managed rotation Lambdas drop in without a value-shape change.
+
+| Property                | Dev                              | Prod                              |
+| ----------------------- | -------------------------------- | --------------------------------- |
+| Instance class          | `db.t4g.small` (ARM, burstable)  | `db.m6g.large` (ARM, steady)      |
+| Engine version          | `15.6`                           | `15.6`                            |
+| Multi-AZ                | no                               | yes                               |
+| Allocated storage       | 20 GiB (autoscale to 100)        | 100 GiB (autoscale to 1000)       |
+| Storage type            | gp3                              | gp3                               |
+| Storage encryption      | on (AWS-managed key)             | on (AWS-managed key)              |
+| Backup retention        | 7 days                           | 35 days (AWS maximum)             |
+| Backup window           | 22:00–23:00 UTC                  | 22:00–23:00 UTC                   |
+| Maintenance window      | Sun 23:00 – Mon 00:00 UTC        | Sun 23:00 – Mon 00:00 UTC         |
+| Deletion protection     | on (`prevent_destroy` + `deletion_protection`) | same                  |
+| Final snapshot          | `ethiolink-${env}-rds-final`     | same                              |
+| Performance Insights    | on (7-day retention)             | on (7-day retention)              |
+| CloudWatch log exports  | `postgresql`                     | `postgresql`                      |
+| RDS Proxy               | no                               | yes (idle-client timeout 600s)    |
+
+**RDS Proxy** (prod-only): created behind a `enable_rds_proxy` boolean. The proxy gets its own dedicated security group (`sg-rds-proxy`) plus an IAM role allowed to read the master secret. Two cross-SG rules also land alongside it: the proxy SG accepts ingress on 5432 from anything already allowed by `sg-rds` (which already includes `sg-lambda`), and `sg-rds` itself accepts ingress from the proxy SG so the proxy can reach the DB. Connection pool tuned to 90% `max_connections_percent` / 50% `max_idle_connections_percent` / 120s `connection_borrow_timeout` — revisit after the first load test.
+
+**Endpoint selection.** The module exposes both `db_endpoint` (direct instance) and `proxy_endpoint` (null when the proxy is disabled) plus a convenience `effective_endpoint` that points at the proxy when enabled, else the direct endpoint. Lambdas read `effective_endpoint`; the migration runner explicitly targets `db_endpoint` (proxy prepared-statement caching interferes with DDL).
 
 ### S3
 
