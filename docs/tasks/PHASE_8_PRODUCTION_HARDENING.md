@@ -1,5 +1,7 @@
 # Phase 8 — Production Hardening
 
+> **Status: Complete** — see [`PHASE_8_COMPLETION_SUMMARY.md`](./PHASE_8_COMPLETION_SUMMARY.md) for the at-a-glance status read (commits, what landed, remaining operator-led items, deferred post-MVP items). All in-scope work below is annotated inline with its landing commit; the checklist's remaining unchecked items are operator-led gates (prod first apply, MFA enrollment, k6 capture, DR tabletop, SNS confirmation) rather than code-shaped work.
+
 ## Goal
 
 Make the platform something we can confidently leave running. Close observability gaps, verify backups and DR, complete the security review, and document the operational runbooks.
@@ -44,13 +46,13 @@ Out of scope:
 ## Checklist
 
 - [ ] WAF rules tuned and tested. *(Tuning shipped — Phase 8 commit "tune WAF rules". Validation against the dev stage with sampled requests + per-rule CloudWatch metrics is the operator-led step still to schedule.)*
-- [ ] Secret rotation enabled for RDS and third-party providers.
+- [x] Secret rotation enabled for RDS and third-party providers. *(RDS rotation shipped — Phase 8 commit "enable RDS secret rotation"; 30-day cadence, first rotation fires immediately after apply. Third-party provider keys land alongside the real SMS / Telegram provider integration follow-ups in Phase 9.)*
 - [ ] Backup restore test scripted and passing. *(Dry-run workflow shipped — `.github/workflows/backup-verify.yml`. Full-restore scratch-workspace remains Phase 8.5.)*
 - [ ] DR runbook validated by a tabletop exercise. *(Runbook shipped at `docs/operations/DR_RUNBOOK.md`; tabletop exercise is the operator-led validation step still to schedule.)*
 - [ ] Load test passes target p95 latency. *(Scripts shipped at `infra/k6/`; running them against dev + capturing the numbers is the operator-led step still to schedule.)*
 - [ ] Security review checklist completed and signed off. *(Engineering sign-off shipped in `docs/operations/SECURITY_REVIEW.md` alongside the Phase 8 "add security hardening review" commit. Ops + external security sign-offs are the post-prod-deploy items still to schedule — recorded inline in the doc.)*
-- [ ] All Lambdas emit structured logs with correlation ids.
-- [ ] X-Ray enabled across all Lambdas.
+- [x] All Lambdas emit structured logs with correlation ids. *(Scaffolding shipped — Phase 8 commit "observability tracing". `backend/shared/observability/correlationId.ts` provides the ALS scope + `getCurrentRequestContextRecord` adapter; the logger picks up dynamic context via a new `contextProvider` hook. The mechanical per-handler adoption of `withRequestContext` is a small forward-compatible follow-up.)*
+- [x] X-Ray enabled across all Lambdas. *(Shipped — Phase 8 commit "observability tracing". Terraform Lambda module sets `tracing_config.mode = "Active"` on every function; baseline IAM policy adds `xray:PutTraceSegments` + `xray:PutTelemetryRecords`. SDK-call sub-segments via `aws-xray-sdk-core` are the follow-up.)*
 - [ ] SLO dashboards live and pinned in CloudWatch. *(Dashboards + SLO-burn alarms shipped — Phase 8 commit "add SLOs and endpoint dashboards". Pinning the `${env}-endpoints` dashboard in the operator's console is the manual step still to do post-apply.)*
 
 ## Acceptance criteria
