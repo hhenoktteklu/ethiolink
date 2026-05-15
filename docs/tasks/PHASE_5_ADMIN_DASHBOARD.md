@@ -63,8 +63,9 @@ Out of scope:
 
 ### Phase 5 React pages landed so far
 
+- `AdminLayout` — top bar (brand + email + sign-out) plus a secondary nav row of `NavLink`s for Dashboard / Businesses / Categories / Users / Bookings. Active route renders with a coloured background; `end: true` on the Dashboard link prevents `/` from matching every nested route.
 - `LoginPage` — Cognito hosted-UI redirect + PKCE callback handling.
-- `DashboardPage` — pending-review business count tile.
+- `DashboardPage` — two-card landing page: a Pending-review tile (the whole card is a link into `/businesses`) and a Shortcuts panel linking to Categories / Users / Bookings. Adapts the original single-tile design now that nav is in place.
 - `BusinessesPage` + `BusinessDetailPage` — status-filtered list + per-row approve / reject / suspend / feature / unfeature with optional notes.
 - `CategoriesPage` — single-page CRUD with isActive filter, create form, per-row Edit / Deactivate. Field-level errors via `details.field`.
 - `UsersPage` — status + role filters, per-row Suspend (ACTIVE only) / Restore (SUSPENDED only); DELETED rows show no action. Optional notes captured via `window.prompt`.
