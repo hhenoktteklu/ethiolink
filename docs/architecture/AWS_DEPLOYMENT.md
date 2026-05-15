@@ -430,8 +430,13 @@ REMINDER_FUNCTION_NAME=ethiolink-dev-scheduled-send-reminders \
     bash backend/scripts/smoke.sh
 ```
 
-## Disaster recovery (target state, Phase 8)
+## Disaster recovery
 
-- Daily logical backups (`pg_dump`) to S3 in addition to RDS automated snapshots.
-- Documented runbook to restore RDS from snapshot and re-point API Gateway to a recovered Lambda set.
-- Quarterly DR drill that restores prod to a scratch environment.
+The DR procedure is documented in [`docs/operations/DR_RUNBOOK.md`](../operations/DR_RUNBOOK.md). Highlights:
+
+- **Recovery target.** 60 minutes from "RDS lost" to "API serving from a restored database" — the Phase 8 acceptance criterion. Total expected wall-clock under the documented procedure is ~43 minutes, leaving headroom for unexpected steps.
+- **Primary recovery path.** Terraform-driven in-place restore from the most recent RDS automated snapshot. The `aws_db_instance.snapshot_identifier` field is set on a branch, applied, then unset on a follow-up commit once recovery is stable.
+- **Verification chain.** Migration runner + smoke test (`backend/scripts/smoke.sh`) prove the restored DB is reachable end-to-end before declaring recovery complete.
+- **Backup verification.** A monthly `.github/workflows/backup-verify.yml` workflow identifies the most recent automated snapshot, asserts it's less than ~30 hours old, checks the engine + encryption descriptors, and reports to the GitHub step summary. The full-restore mode (provision scratch instance → row-count compare → tear-down) is documented scaffolding gated behind a `workflow_dispatch.inputs.full_restore = true` flag; the scratch Terraform workspace itself ships in a Phase 8.5 follow-up.
+- **Daily logical backups (`pg_dump`) to S3.** Belt-and-braces on top of RDS automated snapshots — restorable even if the regional RDS service has an issue. Phase 8 follow-up; not in this commit. The `dbBackup` Lambda + EventBridge daily schedule + per-day S3 prefix all mirror the existing migration-runner pattern.
+- **Quarterly DR drill.** Manual operator-led exercise restoring prod into a scratch account, end-to-end timed. Cadence + checklist live in the runbook.

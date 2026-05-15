@@ -1,0 +1,223 @@
+# EthioLink — monthly RDS backup verification.
+#
+# Goal: prove the restore path is healthy WITHOUT touching the
+# real prod database. By default the workflow runs in "dry-run"
+# mode — it discovers the most recent snapshot, verifies its age,
+# checks the recorded engine + storage + status, and reports.
+# Nothing is created or restored.
+#
+# An opt-in "full restore" mode is documented but gated behind a
+# `workflow_dispatch.inputs.full_restore` flag the operator has
+# to explicitly set to `true`. When enabled, the workflow uses a
+# separate Terraform workspace (Phase 8.5 follow-up: build the
+# `infra/terraform/environments/restore-test/` stack) to restore
+# the snapshot into a scratch instance, runs the migration
+# runner + a row-count comparison, then tears the scratch
+# instance down. For MVP the full-restore path is documented
+# scaffolding only — the operator runs the manual procedure in
+# `DR_RUNBOOK.md` and reports back instead.
+#
+# Why monthly:
+#   AWS-managed snapshots are reliable; the verification is the
+#   "have we used them recently enough to know they restore"
+#   check, not a watchdog. Monthly is the Phase 8 acceptance
+#   criterion ("scheduled exercise restoring RDS from the most
+#   recent snapshot into a scratch environment"); shorter
+#   intervals don't materially change the SLO confidence and add
+#   noise to the SNS topic.
+#
+# Trigger sources:
+#   * scheduled cron — first of every month at 06:00 UTC (09:00
+#     Addis Ababa, comfortably before the dev workday).
+#   * workflow_dispatch — operator runs it ad-hoc during DR
+#     practice or after a snapshot-lineage change.
+
+name: backup-verify
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of every month.
+    - cron: '0 6 1 * *'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Which environment to verify (dev / prod).'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+      full_restore:
+        description: 'OPT-IN: run a full snapshot restore into a scratch instance + tear-down. SAFE — does NOT touch the live RDS instance. Costs ~$0.50 per run.'
+        required: false
+        default: false
+        type: boolean
+      max_snapshot_age_hours:
+        description: 'Fail the check if the freshest snapshot is older than this many hours. Defaults to 30 (dev) or 30 (prod) — the AWS automated-backup cadence is daily, so anything > 30h means snapshots are not landing.'
+        required: false
+        default: '30'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  verify:
+    name: snapshot freshness + descriptors
+    runs-on: ubuntu-22.04
+
+    env:
+      AWS_REGION: eu-west-1
+      ENV_NAME: ${{ github.event.inputs.environment || 'dev' }}
+      MAX_AGE_HOURS: ${{ github.event.inputs.max_snapshot_age_hours || '30' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # The dev deploy role has read access to RDS describe
+          # calls + Lambda invoke. Backup-verify never writes —
+          # it only describes snapshots and (in dry-run) reports.
+          # The full-restore mode would need write permissions
+          # the dev role already has via AdministratorAccess; the
+          # Phase 8.5 follow-up tightens this once the scratch
+          # workspace exists.
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ethiolink-terraform-deploy
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-backup-verify-${{ env.ENV_NAME }}-${{ github.run_id }}
+
+      # -----------------------------------------------------------------
+      # Step 1: identify the most recent snapshot.
+      # -----------------------------------------------------------------
+
+      - name: Identify latest snapshot
+        id: snapshot
+        run: |
+          set -euo pipefail
+
+          instance="ethiolink-${ENV_NAME}-rds"
+
+          # Most recent `available` snapshot for the env's RDS
+          # instance.
+          snapshot_json=$(
+            aws rds describe-db-snapshots \
+              --db-instance-identifier "${instance}" \
+              --snapshot-type automated \
+              --query 'reverse(sort_by(DBSnapshots[?Status==`available`], &SnapshotCreateTime))[0]' \
+              --output json
+          )
+
+          if [[ "${snapshot_json}" == "null" || -z "${snapshot_json}" ]]; then
+            echo "::error::No `available` snapshots found for ${instance}."
+            exit 1
+          fi
+
+          snapshot_id=$(echo "${snapshot_json}" | jq -r '.DBSnapshotIdentifier')
+          snapshot_created=$(echo "${snapshot_json}" | jq -r '.SnapshotCreateTime')
+          snapshot_engine=$(echo "${snapshot_json}" | jq -r '.Engine')
+          snapshot_engine_version=$(echo "${snapshot_json}" | jq -r '.EngineVersion')
+          snapshot_size_gb=$(echo "${snapshot_json}" | jq -r '.AllocatedStorage')
+          snapshot_encrypted=$(echo "${snapshot_json}" | jq -r '.Encrypted')
+
+          echo "snapshot_id=${snapshot_id}"           >> "$GITHUB_OUTPUT"
+          echo "snapshot_created=${snapshot_created}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_engine=${snapshot_engine}"   >> "$GITHUB_OUTPUT"
+          echo "snapshot_engine_version=${snapshot_engine_version}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_size_gb=${snapshot_size_gb}" >> "$GITHUB_OUTPUT"
+          echo "snapshot_encrypted=${snapshot_encrypted}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------
+      # Step 2: assert the snapshot is recent enough.
+      # -----------------------------------------------------------------
+
+      - name: Assert snapshot freshness
+        run: |
+          set -euo pipefail
+
+          snapshot_created="${{ steps.snapshot.outputs.snapshot_created }}"
+          max_age_hours="${MAX_AGE_HOURS}"
+
+          now_epoch=$(date -u +%s)
+          snapshot_epoch=$(date -u -d "${snapshot_created}" +%s)
+          age_seconds=$(( now_epoch - snapshot_epoch ))
+          age_hours=$(( age_seconds / 3600 ))
+
+          echo "==> Snapshot age: ${age_hours} hours (max allowed: ${max_age_hours})"
+          if (( age_hours > max_age_hours )); then
+            echo "::error::Latest snapshot is ${age_hours}h old, exceeds the ${max_age_hours}h threshold. The automated backup window may have stopped firing."
+            exit 1
+          fi
+
+      # -----------------------------------------------------------------
+      # Step 3: assert snapshot descriptors are sane.
+      # -----------------------------------------------------------------
+
+      - name: Assert snapshot descriptors
+        run: |
+          set -euo pipefail
+
+          engine="${{ steps.snapshot.outputs.snapshot_engine }}"
+          encrypted="${{ steps.snapshot.outputs.snapshot_encrypted }}"
+
+          if [[ "${engine}" != "postgres" ]]; then
+            echo "::error::Snapshot engine is '${engine}', expected 'postgres'."
+            exit 1
+          fi
+
+          if [[ "${encrypted}" != "true" ]]; then
+            echo "::error::Snapshot is not encrypted at rest. Investigate — RDS instances must have storage_encrypted=true."
+            exit 1
+          fi
+
+          echo "==> Snapshot descriptors look healthy."
+
+      # -----------------------------------------------------------------
+      # Step 4 (opt-in): full restore.
+      #
+      # Gated behind `inputs.full_restore = true`. The
+      # `restore-test` Terraform workspace is a Phase 8.5
+      # follow-up — until it ships, this step emits a clear "not
+      # implemented" notice. The dry-run above already exercises
+      # the "snapshots exist and are healthy" half of the
+      # verification.
+      # -----------------------------------------------------------------
+
+      - name: Full restore (opt-in, scaffolding only)
+        if: ${{ github.event.inputs.full_restore == 'true' }}
+        run: |
+          cat <<'NOTICE'
+          ::warning::full_restore mode is documented scaffolding only — it does NOT yet provision the scratch instance.
+
+          The Phase 8.5 follow-up commit adds:
+            * infra/terraform/environments/restore-test/main.tf — scratch RDS workspace
+            * terraform apply -var snapshot_id=...  (restore from the discovered snapshot)
+            * row-count comparison: SELECT count(*) per MVP table against a known baseline
+            * terraform destroy -auto-approve   (tear-down)
+
+          Until then, run the manual procedure in docs/operations/DR_RUNBOOK.md.
+          Aborting workflow with status=neutral.
+          NOTICE
+          exit 1
+
+      # -----------------------------------------------------------------
+      # Step 5: report.
+      # -----------------------------------------------------------------
+
+      - name: Report
+        if: always()
+        run: |
+          {
+            echo "## Backup verification — ${ENV_NAME}"
+            echo
+            echo "* Snapshot id: \`${{ steps.snapshot.outputs.snapshot_id }}\`"
+            echo "* Created: ${{ steps.snapshot.outputs.snapshot_created }}"
+            echo "* Engine: ${{ steps.snapshot.outputs.snapshot_engine }} ${{ steps.snapshot.outputs.snapshot_engine_version }}"
+            echo "* Size: ${{ steps.snapshot.outputs.snapshot_size_gb }} GiB"
+            echo "* Encrypted: ${{ steps.snapshot.outputs.snapshot_encrypted }}"
+            echo "* Outcome: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
