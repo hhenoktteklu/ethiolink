@@ -68,6 +68,7 @@ Out of scope:
 - `appointmentStateMachine.test.ts` — every matrix row, terminal sealing, disallowed sample, integrity invariants.
 - `paymentGateways.test.ts` — `CashGateway` SUCCEEDED contract + idempotency-key ignored; `MockOnlineGateway` throws `OnlinePaymentsUnavailableError` with code `ONLINE_PAYMENTS_UNAVAILABLE`.
 - `appointmentService.test.ts` — cash create flow, online → typed error / no row, slot misalignment, 23P01 race-loss, accept / reject / complete state transitions, cancel cutoff (customer-before / customer-after / admin-override), reschedule resets ACCEPTED → REQUESTED, invalid transitions, non-owner rejection. Uses widened `InMemoryAppointmentsRepository` (full repo surface + `failNextInsertWithExclusion` knob) and a stubbed `SlotService`.
+- `reviewService.test.ts` — happy-path create (review row + aggregate recompute triggered against the right business), `ReviewAppointmentNotFoundError` (missing and soft-deleted appointment), `ReviewNotOwnedError` (caller not the customer), `ReviewAppointmentNotCompletedError` (all five non-COMPLETED statuses), `ReviewAlreadyExistsError` via pre-check, `ReviewAlreadyExistsError` via SQLSTATE 23505 race-loss, `ReviewInvalidRatingError` (boundary + non-integer + NaN + wrong type + undefined), `listForBusiness` soft-delete filter + newest-first sort + limit + clamp-out-of-range. Uses `InMemoryReviewRepository` (full repo surface + `failNextInsertWithUniqueViolation` knob + `recomputeCallsFor(businessId)` recording).
 
 ## Rollback notes
 
