@@ -15,7 +15,7 @@ In scope:
 - Load testing: scripted scenarios for browse, book, accept, complete, with assertions on p95 latency.
 - Security review:
   - All endpoint authorization matrix reviewed against `API_SPEC.md`.
-  - All Lambda IAM roles audited for least privilege.
+  - All Lambda IAM roles audited for least privilege. *(Phase 8 commit "split Lambda IAM roles by domain": shared role replaced by 11 per-domain roles; only the `media` role carries S3 statements. Per-handler narrowing on high-risk handlers remains a follow-up.)*
   - Public S3 access limited strictly to the `media-public` bucket.
   - Cognito password policy hardened; account lockout reviewed.
   - CSP and security headers on the admin SPA.

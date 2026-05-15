@@ -319,8 +319,49 @@ locals {
 }
 
 # -----------------------------------------------------------------------------
-# IAM — one shared execution role per environment.
+# IAM — one execution role per domain area.
+#
+# Phase 8 refactor: the single shared `lambda-exec` role from
+# Phase 7 is replaced by 11 per-domain roles. Every role still
+# carries the same baseline (CloudWatch logs + VPC ENI + Secrets
+# Manager read on the RDS master secret); only the `media` area
+# gets the S3 statements layered on top. This caps the blast
+# radius of any one handler being compromised to the resources
+# its domain actually touches.
+#
+# Why per-domain instead of per-handler:
+#   Per-handler would mean 50 roles. Per-domain (11) is the
+#   pragmatic split that closes the most-relevant security gap
+#   without the operational cost of 50 trust-policy rotations.
+#   A future Phase 8 follow-up narrows specific high-risk
+#   handlers further (e.g. `admin-businesses-suspend` gets its
+#   own write-side-only role) once incident learnings surface.
+#
+# Currently NONE of the non-media areas require any AWS service
+# beyond Secrets Manager + Logs + ENI. The application layer
+# accesses Cognito via the per-token JWT verify path (no IAM call)
+# and reaches RDS via the network (no IAM call — Postgres-level
+# auth handled by the resolved password). When a future Lambda
+# needs `cognito-idp:*` or `s3:GetObject` on the logs bucket, the
+# right move is to add a new statement to that area's policy
+# rather than re-collapsing the roles.
 # -----------------------------------------------------------------------------
+
+locals {
+  lambda_areas = toset([
+    "auth",
+    "businesses",
+    "services",
+    "staff",
+    "availability",
+    "appointments",
+    "reviews",
+    "media",
+    "admin",
+    "scheduled",
+    "maintenance",
+  ])
+}
 
 data "aws_iam_policy_document" "lambda_assume" {
   statement {
@@ -335,27 +376,34 @@ data "aws_iam_policy_document" "lambda_assume" {
 }
 
 resource "aws_iam_role" "lambda_exec" {
-  name               = "${local.base_name}-lambda-exec"
+  for_each = local.lambda_areas
+
+  name               = "${local.base_name}-lambda-exec-${each.key}"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
 
-  description = "EthioLink ${var.environment} Lambda execution role. Carries CloudWatch logs + VPC ENI permissions (via AWS-managed policy), Secrets Manager read on the RDS master secret, and read/write on the two media S3 buckets."
+  description = "EthioLink ${var.environment} Lambda execution role for the `${each.key}` domain. Carries CloudWatch logs + VPC ENI permissions (via AWS-managed policy) + Secrets Manager read on the RDS master secret. Media role additionally has S3 read/write on the media buckets."
 
-  tags = local.common_tags
+  tags = merge(local.common_tags, {
+    Area = each.key
+  })
 }
 
 # AWS-managed policy covers `logs:CreateLogGroup` /
 # `CreateLogStream` / `PutLogEvents` AND the EC2 ENI lifecycle
-# permissions Lambda needs to attach into the VPC. Using the
-# managed policy keeps us in sync with AWS's own evolution of
-# that permission set.
+# permissions Lambda needs to attach into the VPC.
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  role       = aws_iam_role.lambda_exec.name
+  for_each = local.lambda_areas
+
+  role       = aws_iam_role.lambda_exec[each.key].name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
 }
 
-data "aws_iam_policy_document" "lambda_inline" {
-  # Resolve the RDS master secret at cold-start. Scoped to the
-  # single secret ARN this env was wired with.
+# Baseline inline policy — every role gets `secretsmanager:GetSecretValue`
+# on the RDS master secret. Without this the cold-start
+# `loadSecretsThenConfig` shim throws before any handler logic
+# runs, so EVERY domain needs it (including `maintenance`, which
+# is the migration runner).
+data "aws_iam_policy_document" "lambda_baseline" {
   statement {
     sid    = "ReadRdsMasterSecret"
     effect = "Allow"
@@ -367,12 +415,21 @@ data "aws_iam_policy_document" "lambda_inline" {
 
     resources = [var.rds_master_secret_arn]
   }
+}
 
-  # Media uploads + reads. The public bucket is world-readable
-  # via its bucket policy, but the Lambdas still need
-  # `s3:GetObject` to validate ownership-of-key on the confirm
-  # path and to issue presigned reads when a future signed-URL
-  # download endpoint lands.
+resource "aws_iam_role_policy" "lambda_baseline" {
+  for_each = local.lambda_areas
+
+  name   = "${local.base_name}-lambda-baseline-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_baseline.json
+}
+
+# Media-only S3 policy. Only `media-upload-url` + `media-confirm`
+# Lambdas touch S3 directly; the rest of the platform reads
+# public media via direct-CDN URLs (no IAM call) and the private
+# bucket via presigned URLs the media Lambdas already issue.
+data "aws_iam_policy_document" "lambda_media_s3" {
   statement {
     sid    = "MediaBucketReadWrite"
     effect = "Allow"
@@ -415,10 +472,10 @@ data "aws_iam_policy_document" "lambda_inline" {
   }
 }
 
-resource "aws_iam_role_policy" "lambda_inline" {
-  name   = "${local.base_name}-lambda-inline"
-  role   = aws_iam_role.lambda_exec.id
-  policy = data.aws_iam_policy_document.lambda_inline.json
+resource "aws_iam_role_policy" "lambda_media_s3" {
+  name   = "${local.base_name}-lambda-media-s3"
+  role   = aws_iam_role.lambda_exec["media"].id
+  policy = data.aws_iam_policy_document.lambda_media_s3.json
 }
 
 # -----------------------------------------------------------------------------
@@ -447,7 +504,10 @@ resource "aws_lambda_function" "function" {
   function_name = "${local.base_name}-${each.key}"
   description   = "EthioLink ${var.environment} — ${each.key}"
 
-  role             = aws_iam_role.lambda_exec.arn
+  # Pick the per-domain role keyed by the function's `area` tag.
+  # Every function in the same domain shares one role; the
+  # cross-domain blast-radius cap is what this Phase 8 split buys.
+  role             = aws_iam_role.lambda_exec[each.value.area].arn
   runtime          = var.runtime
   handler          = each.value.handler
   filename         = var.package_zip_path
@@ -487,10 +547,14 @@ resource "aws_lambda_function" "function" {
   # Ensure the log group exists with the desired retention before
   # the function logs anything — otherwise Lambda auto-creates the
   # log group with the AWS default ("never expire"), which we
-  # override here.
+  # override here. The IAM `depends_on` entries make sure every
+  # role-attached policy is in place before Lambda tries to use
+  # the role (otherwise the first invocation can race the policy
+  # propagation and 403 on Secrets Manager).
   depends_on = [
     aws_cloudwatch_log_group.function,
-    aws_iam_role_policy.lambda_inline,
+    aws_iam_role_policy.lambda_baseline,
+    aws_iam_role_policy.lambda_media_s3,
     aws_iam_role_policy_attachment.lambda_vpc_access,
   ]
 }

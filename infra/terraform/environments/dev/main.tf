@@ -295,9 +295,9 @@ output "lambda_db_migrate_function_name" {
   value       = module.lambda.db_migrate_function_name
 }
 
-output "lambda_execution_role_arn" {
-  description = "Shared Lambda execution role ARN."
-  value       = module.lambda.execution_role_arn
+output "lambda_execution_role_arns" {
+  description = "Per-domain Lambda execution-role ARNs (Phase 8 refactor — was a single shared role)."
+  value       = module.lambda.execution_role_arns
 }
 
 output "lambda_function_names" {

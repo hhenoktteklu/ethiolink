@@ -10,14 +10,14 @@
 #   * Manual operator surfaces — `aws lambda invoke` for smoke
 #     tests against a specific function.
 
-output "execution_role_arn" {
-  description = "ARN of the shared Lambda execution role. Useful for downstream modules that want to grant additional permissions (e.g. CloudWatch metric publishing) by attaching their own policy."
-  value       = aws_iam_role.lambda_exec.arn
+output "execution_role_arns" {
+  description = "Map of domain area → execution-role ARN (e.g. `auth` → `arn:aws:iam::123:role/ethiolink-dev-lambda-exec-auth`). Phase 8 replaced the single shared role with per-domain roles; downstream modules that want to attach additional permissions should target the specific area's role."
+  value       = { for k, role in aws_iam_role.lambda_exec : k => role.arn }
 }
 
-output "execution_role_name" {
-  description = "Name of the shared Lambda execution role."
-  value       = aws_iam_role.lambda_exec.name
+output "execution_role_names" {
+  description = "Map of domain area → execution-role name."
+  value       = { for k, role in aws_iam_role.lambda_exec : k => role.name }
 }
 
 output "function_names" {
