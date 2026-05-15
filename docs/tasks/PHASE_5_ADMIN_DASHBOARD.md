@@ -41,7 +41,7 @@ Out of scope:
 ## Checklist
 
 - [ ] Migration 0012 applied.<!-- `0012_admin_actions.sql` authored: append-only audit log (no updated_at / deleted_at / no UPDATE or DELETE paths), `admin_user_id` FK ON DELETE RESTRICT, no CHECK on `action` (app layer owns the enum), polymorphic `target_id uuid NOT NULL` paired with `target_type`. Indexes on `(admin_user_id, created_at DESC)` and `(target_type, target_id, created_at DESC)` back the two documented read paths. "Applied" needs `npm run db:migrate` locally and `terraform apply` + RDS-side run for AWS-hosted dev (Phase 7). -->
-- [ ] All admin write endpoints persist an `admin_actions` row.
+- [ ] All admin write endpoints persist an `admin_actions` row.<!-- Repository in place: `backend/shared/domains/admin/adminActionRepository.ts` exposes `insert` + `listByAdmin` + `listForTarget` only (append-only, no `update` / `delete`). `AdminAction` and `AdminTargetType` unions are application-layer enums — additive contract; no DB CHECK. View module (`adminActionView.ts`) returns JSON with ISO-8601 timestamps. The per-area admin write services (next commits — business / user / category) will compose this repository alongside their domain mutations. -->
 - [ ] React app initialized; routes set up; protected routes redirect to `/login` if not in `ADMIN` group.
 - [ ] Login uses Cognito hosted UI or AWS Amplify Auth.
 - [ ] Businesses page: filter by status, click into detail, approve/reject/suspend.
