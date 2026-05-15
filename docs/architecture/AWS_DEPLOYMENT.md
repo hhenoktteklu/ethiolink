@@ -4,6 +4,61 @@
 
 Primary region: `eu-west-1` (Ireland). This is the closest AWS region to Ethiopia with the full set of services we need and acceptable latency. Re-evaluate when AWS Cape Town (`af-south-1`) gains parity for Cognito and RDS Proxy.
 
+## Bootstrap (one-time)
+
+Before any per-environment stack can apply, the shared S3 backend, DynamoDB lock table, GitHub OIDC provider, and `terraform-deploy` IAM role must exist. These four resources live in `infra/terraform/bootstrap/` and are created exactly once per AWS account by an operator from their laptop. After that, every other apply runs from CI against the remote state this bootstrap created.
+
+### What it provisions
+
+- **S3 bucket** `ethiolink-terraform-state` — holds every environment's `terraform.tfstate` at `env/<name>/terraform.tfstate`. Versioned, SSE-AES256 encrypted, block-public-access enabled, force-TLS bucket policy. `prevent_destroy = true`.
+- **DynamoDB table** `ethiolink-terraform-locks` — `LockID` string hash key, pay-per-request billing. Shared across environments (Terraform's `LockID` already namespaces by `bucket/key`, so concurrent dev + prod applies don't block each other). `prevent_destroy = true`.
+- **GitHub OIDC identity provider** — trust anchor at `https://token.actions.githubusercontent.com`, audience `sts.amazonaws.com`. Lets workflows obtain short-lived AWS credentials without long-lived access keys in the repo.
+- **`ethiolink-terraform-deploy` IAM role** — assumed by GitHub Actions via OIDC. Trust condition restricts the `sub` claim to `repo:hhenoktteklu/ethiolink:*` so only Actions runs inside this repository can assume it. Currently carries `AdministratorAccess` as a deliberate temporary choice while the Phase 7 modules land; tightened in a follow-up commit once a clean dev apply has been captured in CloudTrail to author the real least-privilege policy.
+
+### One-time procedure
+
+The bootstrap stack stores its own state on the operator's laptop — it can't store state in the bucket it's about to create. After the initial apply, the state file under `infra/terraform/bootstrap/.terraform/` may be left in place or optionally migrated into the bucket; the stack is small and rarely changes either way.
+
+```bash
+# 1. Authenticate to AWS as a principal with permission to create
+#    the bootstrap resources (S3, DynamoDB, IAM). Typically the
+#    account root or a one-shot operator IAM user with
+#    AdministratorAccess.
+aws sts get-caller-identity  # sanity check
+
+# 2. Apply the bootstrap stack.
+cd infra/terraform/bootstrap
+terraform init
+terraform plan
+terraform apply
+
+# 3. Note the `terraform_deploy_role_arn` output — its account-id
+#    component is the value of `AWS_ACCOUNT_ID` referenced by the
+#    GitHub Actions workflows. Add it as a repository secret in
+#    GitHub:
+#      Settings → Secrets and variables → Actions → New repository secret
+#      Name: AWS_ACCOUNT_ID
+#      Value: <12-digit account id>
+terraform output terraform_deploy_role_arn
+
+# 4. Verify the dev environment can `terraform init` against the
+#    new remote backend (no apply yet — modules land in Phase 7
+#    commits 2+).
+cd ../environments/dev
+terraform init
+```
+
+After step 4 succeeds, every subsequent Terraform action on dev or prod runs from CI via the `terraform-deploy` role. The PR plan workflow (`.github/workflows/terraform-plan.yml`) is the first such surface; the deploy workflows follow in later Phase 7 commits.
+
+### Tightening the deploy-role policy
+
+`AdministratorAccess` is the right tradeoff during bootstrap but the wrong shape for a steady-state CI role. The follow-up commit will:
+
+1. Apply the dev environment from scratch once with `AdministratorAccess` to capture every real API call in CloudTrail.
+2. Generate a least-privilege policy from those captured calls (`iamlive` or the AWS-managed `Access Analyzer` policy-generation surface).
+3. Replace the `AdministratorAccess` attachment with the generated policy and re-apply the bootstrap.
+4. Split the role: keep the broad role for the PR plan workflow (already read-only at the AWS surface because `terraform plan` is a no-op against API state) and add tighter, ref-scoped roles for the dev and prod apply workflows.
+
 ## Accounts and environments
 
 - One AWS account.

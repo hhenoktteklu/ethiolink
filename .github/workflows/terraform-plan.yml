@@ -1,0 +1,118 @@
+# EthioLink — Terraform PR plan workflow.
+#
+# Runs on every pull request that touches anything under `infra/`,
+# authenticates to AWS via OIDC (no long-lived secrets), and posts
+# the result of `terraform plan` against the dev environment as a
+# step summary. This is the first workflow the Phase 7 plan named;
+# `deploy-dev.yml` and `deploy-prod.yml` follow in later commits.
+#
+# Why dev-only:
+#   - Plans against the prod state require a separately-scoped role.
+#     The bootstrap commit ships one role (`ethiolink-terraform-deploy`)
+#     with `AdministratorAccess` — fine for dev planning, deliberately
+#     too broad to point at a production state file from a PR. The
+#     prod-plan workflow lands alongside the tighter role.
+#   - Most infra changes touch dev first anyway. A second PR-time
+#     prod plan would slow the loop without much added safety.
+#
+# OIDC trust:
+#   The `terraform-deploy` role's trust policy already restricts the
+#   OIDC `sub` claim to this repository (`repo:hhenoktteklu/ethiolink:*`),
+#   so a PR from a fork CANNOT obtain credentials — GitHub does not
+#   issue OIDC tokens for fork-origin runs by default, and even if it
+#   did, the `sub` filter would reject them.
+
+name: terraform-plan
+
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/terraform-plan.yml'
+
+# Cancel an in-flight plan for the same PR when a new push arrives —
+# only the most recent plan is interesting.
+concurrency:
+  group: terraform-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+# Default-deny everything; the per-job block re-enables only what's
+# needed. `id-token: write` is required for the AWS OIDC exchange.
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+jobs:
+  plan-dev:
+    name: terraform plan (dev)
+    runs-on: ubuntu-22.04
+
+    env:
+      AWS_REGION: eu-west-1
+      # Pin Terraform to the same minimum version `required_version`
+      # in every stack declares. Bumping happens deliberately in a
+      # follow-up commit when a real reason surfaces.
+      TF_VERSION: '1.6.6'
+      TF_IN_AUTOMATION: 'true'
+      # Suppress the upgrade-prompt noise in CI logs.
+      TF_INPUT: 'false'
+
+    defaults:
+      run:
+        working-directory: infra/terraform/environments/dev
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          # The role lives in the bootstrap stack — see
+          # `infra/terraform/bootstrap/main.tf`. ARN is repeated
+          # here as a literal string because GitHub Actions doesn't
+          # have a clean "read this from a Terraform output" path.
+          # If the bootstrap is re-applied with a different
+          # `name_prefix`, update this value.
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/ethiolink-terraform-deploy
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gha-terraform-plan-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt (check)
+        run: terraform fmt -check -recursive ../..
+
+      - name: terraform init
+        run: terraform init -lockfile=readonly
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        id: plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -detailed-exitcode -out=tfplan.binary \
+            | tee plan.txt
+        # `-detailed-exitcode`: 0 = no changes, 2 = changes, 1 = error.
+        # We want the job to succeed when there are changes (so the
+        # PR can land), and fail only on real errors. The shell-OR
+        # below maps exit 2 → 0 while preserving 1.
+        continue-on-error: false
+
+      - name: Post plan to step summary
+        if: always()
+        run: |
+          {
+            echo "## Terraform plan (dev)"
+            echo
+            echo '```'
+            tail -c 60000 plan.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
