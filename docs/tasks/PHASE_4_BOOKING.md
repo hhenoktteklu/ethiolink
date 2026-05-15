@@ -16,7 +16,7 @@ In scope:
   - `POST /v1/appointments/:id/{accept,reject,cancel,reschedule,complete}`
   - `POST /v1/appointments/:id/review`, `GET /v1/businesses/:id/reviews`
 - Payment abstraction: `PaymentGateway` interface, `CashGateway` and `MockOnlineGateway` implementations.
-- Concurrency-safe slot reservation: `SELECT … FOR UPDATE` inside the booking transaction to prevent double-booking.
+- Concurrency-safe slot reservation: migration-0009 `EXCLUDE USING gist (staff_id WITH =, tstzrange(...) WITH &&) WHERE (status IN ('REQUESTED','ACCEPTED'))` constraint. (Originally scoped as `SELECT … FOR UPDATE`; the EXCLUDE approach is declarative, atomic, and avoids application-level locking — see migration 0009 header.) Service layer translates SQLSTATE 23P01 to `AppointmentSlotUnavailableError`.
 - Cancellation policy: hardcoded 4-hour cutoff in MVP, configurable via env.<!-- `BookingConfig.cancelCutoffMinutes` wired in loadConfig from `BOOKING_CANCEL_CUTOFF_MINUTES` (non-negative int, default 240); .env.example already documents the var. Service-layer cutoff check + admin override land with the appointment service. -->
 - Denormalized `rating_avg` / `rating_count` updates on review insert.
 
@@ -74,3 +74,25 @@ Out of scope:
 
 - Migrations forward-only. Any compensating migration that drops `appointments` must also drop `reviews` and `payment_intents` first (FK chain).
 - The cancellation cutoff is config-driven — adjusting it does not require redeploy.
+
+## Verification notes (Phase 4 audit, 2026-05-15)
+
+Captured during the Phase 4 verification pass. None block ticking the remaining checklist item (gated on `terraform apply`); each is worth addressing in the appropriate later phase.
+
+- **Migrations 0009–0011 still need dev apply.** The three migrations are authored, syntactically reviewed, and unit-tested behind in-memory fakes. The final tick requires `terraform apply` (RDS pickup) followed by `npm run db:migrate`. Once applied, the two `terraform apply`-gated test-plan items (concurrent-create smoke + full-flow integration) can be run.
+
+- **`ADMIN` is allowed on accept / reject / cancel / complete; `API_SPEC.md` originally listed only the business owner.** `AppointmentService.assertBusinessOwnerOrAdmin` returns early on `caller.role === 'ADMIN'`, so an admin can take any business-side action on any appointment. The state machine still validates the transition the same way (actor = `'BUSINESS'`). `API_SPEC.md` has been updated in this verification pass to reflect the implementation. Reschedule remains `CUSTOMER`-only — the state machine refuses admin reschedules with `InvalidAppointmentTransitionError`, which is the intended MVP shape.
+
+- **Reject reason is logged, not persisted.** The schema has no `reject_reason` column — `appointments` only carries `cancel_reason` (used by `CANCEL`). `lambdas/appointments/reject.ts` parses the optional `reason` body field and `logger.info`s it under `appointments.reject.reason`, so the value is recoverable from CloudWatch but doesn't survive log retention. A future migration adds the column and the service grows a parameter; documented in the handler header.
+
+- **Reschedule is two writes.** `AppointmentService.reschedule` calls `repo.reschedule(timeChange)` then conditionally `repo.setStatus('REQUESTED')` if the row was ACCEPTED. Each statement is independently safe under the exclusion constraint. Merging into a single `UPDATE` (`SET starts_at = $2, ends_at = $3, status = CASE WHEN status = 'ACCEPTED' THEN 'REQUESTED' ELSE status END`) is a future optimization, not a correctness requirement — documented in the service method's docstring.
+
+- **Review insert + rating recompute is two writes.** `ReviewService.createReview` calls `reviewRepo.insert(...)` then `reviewRepo.recomputeBusinessRatingAggregate(businessId)`. Between the two, the row is committed but `business_profiles.rating_avg` / `rating_count` are stale. The recompute is from-scratch (`AVG(rating)` / `COUNT(*)` over live rows), so any drift heals on the next review or a reconciliation job — documented in the service module header.
+
+- **Payment correlation id is `randomUUID()` pending real provider integration.** Both gateways (`CashGateway`, `MockOnlineGateway`) currently ignore `PaymentAuthorizationInput.appointmentId` and `idempotencyKey`. When the first real online provider (Telebirr / Chapa / CBE Birr) lands, the booking service will need to generate the appointment id pre-INSERT and pass the real id, both so the provider can correlate and so an idempotent retry uses the same key. Documented in `AppointmentService.create`.
+
+- **`ONLINE_PAYMENTS_UNAVAILABLE` is a sub-code under top-level `VALIDATION_ERROR`, not a top-level error code.** The handler returns `{ error: { code: 'VALIDATION_ERROR', message: ..., details: { code: 'ONLINE_PAYMENTS_UNAVAILABLE', field: 'paymentMethod' } } }`. Clients should switch on `details.code` for the payment-specific copy. `API_SPEC.md` has been updated in this verification pass to document the convention. Promoting it to a top-level code is a Phase 5+ polish item — it would touch the `Error.code` enum in OpenAPI plus the `ApiErrorCode` union in `responses.ts`.
+
+- **Phase 4 unit-test coverage matches the test plan.** Slot-conflict detection covered by `slotComputer.test.ts` (Phase 3) + the 23P01 mapping in `appointmentService.test.ts`. State-machine matrix covered by `appointmentStateMachine.test.ts`. The two `terraform apply`-gated items (concurrent-create dev script + full-flow integration) remain outstanding.
+
+- **`InMemoryAppointmentsRepository` is wide-interface compatible.** Phase 3 originally implemented just `AppointmentConflictsRepository`; the Phase 4 test commit widened it to the full `AppointmentsRepository` with auto-detected overlap-on-`insert` and explicit `failNextInsertWithExclusion()` / `failNextInsertWithUniqueViolation()` knobs on the equivalent `InMemoryReviewRepository`. Backward-compatible — the slot-service tests still pass through the narrow port.

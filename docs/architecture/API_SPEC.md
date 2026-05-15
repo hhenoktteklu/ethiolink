@@ -87,13 +87,13 @@ This document is the contract between mobile, admin, and backend. Detailed OpenA
 | Method | Path                                      | Roles                                     | Purpose                                          |
 | ------ | ----------------------------------------- | ----------------------------------------- | ------------------------------------------------ |
 | POST   | /v1/appointments                          | CUSTOMER                                  | Create appointment in REQUESTED status           |
-| GET    | /v1/me/appointments                       | CUSTOMER                                  | List own appointments                            |
+| GET    | /v1/me/appointments                       | any authenticated                         | List the caller's customer-side appointments (BUSINESS_OWNER / ADMIN see only rows where they were the customer — typically empty) |
 | GET    | /v1/businesses/:businessId/appointments   | BUSINESS_OWNER (owner) or ADMIN           | List incoming appointments for a business        |
-| POST   | /v1/appointments/:id/accept               | BUSINESS_OWNER (owner)                    | REQUESTED → ACCEPTED                             |
-| POST   | /v1/appointments/:id/reject               | BUSINESS_OWNER (owner)                    | REQUESTED → REJECTED                             |
-| POST   | /v1/appointments/:id/cancel               | CUSTOMER (own) or BUSINESS_OWNER (owner)  | ACCEPTED/REQUESTED → CANCELLED                   |
-| POST   | /v1/appointments/:id/reschedule           | CUSTOMER (own)                            | Move starts_at within cancellation window        |
-| POST   | /v1/appointments/:id/complete             | BUSINESS_OWNER (owner)                    | ACCEPTED → COMPLETED                             |
+| POST   | /v1/appointments/:id/accept               | BUSINESS_OWNER (owner) or ADMIN           | REQUESTED → ACCEPTED                             |
+| POST   | /v1/appointments/:id/reject               | BUSINESS_OWNER (owner) or ADMIN           | REQUESTED → REJECTED (optional `reason` logged, not persisted in MVP) |
+| POST   | /v1/appointments/:id/cancel               | CUSTOMER (own), BUSINESS_OWNER (owner), or ADMIN | ACCEPTED/REQUESTED → CANCELLED. CUSTOMER actor obeys `BOOKING_CANCEL_CUTOFF_MINUTES`; BUSINESS_OWNER and ADMIN bypass the cutoff. |
+| POST   | /v1/appointments/:id/reschedule           | CUSTOMER (own)                            | Customer-only. Re-validates the new slot through the same `SlotService`; ACCEPTED rows reset to REQUESTED so the business must re-accept. |
+| POST   | /v1/appointments/:id/complete             | BUSINESS_OWNER (owner) or ADMIN           | ACCEPTED → COMPLETED                             |
 
 ### Reviews
 
@@ -129,7 +129,13 @@ This document is the contract between mobile, admin, and backend. Detailed OpenA
 - `FORBIDDEN` — authenticated but lacks the required role / ownership.
 - `NOT_FOUND` — target resource not found.
 - `VALIDATION_ERROR` — input failed schema validation; `details` contains field errors.
-- `CONFLICT` — state transition not allowed (e.g., approve a non-PENDING business).
-- `SLOT_UNAVAILABLE` — requested appointment slot is taken or outside availability.
+- `CONFLICT` — state transition not allowed (e.g., approve a non-PENDING business, customer cancel past the cancellation cutoff, accept a non-REQUESTED appointment, second review for the same appointment).
+- `SLOT_UNAVAILABLE` — requested appointment slot is taken or outside availability. Surfaced both pre-INSERT (when the requested instant isn't in the computed slot list) and post-INSERT (when the migration-0009 EXCLUDE constraint loses a race; SQLSTATE 23P01 translated by the service).
 - `RATE_LIMITED` — too many requests.
 - `INTERNAL_ERROR` — unexpected server-side failure.
+
+### Sub-codes inside `details.code`
+
+Some responses carry a more specific identifier nested in `details.code` underneath one of the top-level codes above. Clients should switch on `details.code` when present for localized copy.
+
+- `ONLINE_PAYMENTS_UNAVAILABLE` (under `VALIDATION_ERROR`, 400) — `paymentMethod: ONLINE_PENDING` is currently refused by `MockOnlineGateway`. Real online providers (Telebirr / Chapa / CBE Birr) ship post-MVP behind the same gateway port; until then, customers must select `CASH`.
