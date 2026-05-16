@@ -84,6 +84,11 @@ class FakeBusinessesRepository implements BusinessesRepository {
     String? category,
     String? cursor,
     int? limit,
+    String? q,
+    String? city,
+    double? ratingMin,
+    bool? featuredOnly,
+    BusinessSort? sort,
   }) {
     calls.add((category: category, cursor: cursor, limit: limit));
     if (_queue.isEmpty) {

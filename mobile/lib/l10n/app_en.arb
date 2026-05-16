@@ -196,5 +196,55 @@
     "commonTryAgain": "Try again",
     "@commonTryAgain": {
         "description": "Retry button shown on error states across the app."
+    },
+
+    "searchHint": "Search businesses",
+    "@searchHint": {
+        "description": "Placeholder text inside the search input on the browse tab."
+    },
+
+    "searchResultsTitle": "Search results",
+    "@searchResultsTitle": {
+        "description": "AppBar title on the SearchResultsScreen."
+    },
+
+    "searchEmptyTitle": "No businesses found",
+    "@searchEmptyTitle": {
+        "description": "Empty-state title shown when a search returns zero results."
+    },
+
+    "searchClearFiltersAction": "Clear filters",
+    "@searchClearFiltersAction": {
+        "description": "Action button on the empty-state that clears every filter chip and re-runs the search."
+    },
+
+    "searchSortBestMatch": "Best match",
+    "@searchSortBestMatch": {
+        "description": "Sort menu option that picks sort=relevance on the API."
+    },
+
+    "searchSortTopRated": "Top rated",
+    "@searchSortTopRated": {
+        "description": "Sort menu option that picks sort=rating on the API."
+    },
+
+    "searchSortNewest": "Newest",
+    "@searchSortNewest": {
+        "description": "Sort menu option that picks sort=newest on the API."
+    },
+
+    "searchSortFeaturedFirst": "Featured first",
+    "@searchSortFeaturedFirst": {
+        "description": "Sort menu option that picks sort=featured on the API (the API default)."
+    },
+
+    "searchFeaturedOnly": "Featured only",
+    "@searchFeaturedOnly": {
+        "description": "FilterChip label that flips featuredOnly=true on the API."
+    },
+
+    "searchRating4Plus": "★ 4 and up",
+    "@searchRating4Plus": {
+        "description": "FilterChip label that sets ratingMin=4 on the API."
     }
 }

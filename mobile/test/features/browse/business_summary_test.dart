@@ -76,6 +76,34 @@ void main() {
         throwsFormatException,
       );
     });
+
+    test('parses optional searchRank (Phase 9 Track 6)', () {
+      final ranked = BusinessSummary.fromJson(<String, dynamic>{
+        'id': 'x',
+        'categoryId': 'y',
+        'ratingAvg': 4.0,
+        'ratingCount': 1,
+        'searchRank': 0.357,
+      });
+      expect(ranked.searchRank, 0.357);
+
+      final unranked = BusinessSummary.fromJson(<String, dynamic>{
+        'id': 'x',
+        'categoryId': 'y',
+        'ratingAvg': 4.0,
+        'ratingCount': 1,
+        'searchRank': null,
+      });
+      expect(unranked.searchRank, isNull);
+
+      final absent = BusinessSummary.fromJson(<String, dynamic>{
+        'id': 'x',
+        'categoryId': 'y',
+        'ratingAvg': 4.0,
+        'ratingCount': 1,
+      });
+      expect(absent.searchRank, isNull);
+    });
   });
 
   group('BusinessListPage.fromJson', () {

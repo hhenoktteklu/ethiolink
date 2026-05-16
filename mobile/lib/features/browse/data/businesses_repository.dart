@@ -6,23 +6,57 @@
 // `HttpBusinessesRepository` over `ApiClient`; widget tests pass
 // a fake.
 //
-// The MVP listing exposes only `category` + `cursor` + `limit`
-// today. `city` / `query` / `ratingMin` filters land alongside
-// the filter-chip UI in a follow-up commit.
+// Phase 9 Track 6 widened the query surface from
+// `category` + `cursor` + `limit` to the full filter + sort set:
+//
+//   * `q`            — free-text search; matches against name +
+//                      description.en + description.am via the
+//                      backend's GIN-indexed tsvector (with a
+//                      trigram `lower(name)` fallback). Sent as
+//                      `?q=<value>` on the wire. The `query`
+//                      param name remains accepted by the API but
+//                      this repository always emits `q` —
+//                      `category` and `q` are independent and may
+//                      be combined.
+//   * `city`         — case-insensitive exact match.
+//   * `ratingMin`    — number 0..5.
+//   * `featuredOnly` — boolean; restricts to rows where
+//                      `featured_until > now()`.
+//   * `sort`         — one of `featured` (default), `relevance`,
+//                      `rating`, `newest`. Only `featured`
+//                      supports cursor pagination today; the
+//                      repository forwards the value verbatim and
+//                      the API replies with `nextCursor: null`
+//                      for the other three.
 
 import '../../../core/api/api_client.dart';
 import '../models/business_summary.dart';
 
+/// Phase 9 Track 6 — sort mode wire values. The repository forwards
+/// the matching `?sort=<value>` query-string param to the API.
+enum BusinessSort {
+  featured('featured'),
+  relevance('relevance'),
+  rating('rating'),
+  newest('newest');
+
+  const BusinessSort(this.wire);
+  final String wire;
+}
+
 abstract class BusinessesRepository {
-  /// Page of APPROVED businesses, optionally filtered to one
-  /// category slug. `cursor` is the opaque token from the
-  /// previous response's `nextCursor`. `limit` caps page size
-  /// (1..100 per API contract; null defers to the server default,
-  /// currently 20).
+  /// Page of APPROVED businesses, optionally filtered + sorted.
+  /// Every parameter except `limit` corresponds 1:1 to a
+  /// `GET /v1/businesses` query-string field.
   Future<BusinessListPage> list({
     String? category,
     String? cursor,
     int? limit,
+    String? q,
+    String? city,
+    double? ratingMin,
+    bool? featuredOnly,
+    BusinessSort? sort,
   });
 }
 
@@ -41,11 +75,21 @@ class HttpBusinessesRepository implements BusinessesRepository {
     String? category,
     String? cursor,
     int? limit,
+    String? q,
+    String? city,
+    double? ratingMin,
+    bool? featuredOnly,
+    BusinessSort? sort,
   }) async {
     final query = <String, dynamic>{};
     if (category != null && category.isNotEmpty) query['category'] = category;
     if (cursor != null && cursor.isNotEmpty) query['cursor'] = cursor;
     if (limit != null) query['limit'] = limit;
+    if (q != null && q.trim().isNotEmpty) query['q'] = q.trim();
+    if (city != null && city.trim().isNotEmpty) query['city'] = city.trim();
+    if (ratingMin != null) query['ratingMin'] = ratingMin;
+    if (featuredOnly == true) query['featuredOnly'] = 'true';
+    if (sort != null) query['sort'] = sort.wire;
 
     try {
       return await _apiClient.getJson<BusinessListPage>(

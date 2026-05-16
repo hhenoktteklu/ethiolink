@@ -16,6 +16,7 @@ class BusinessSummary {
     required this.ratingAvg,
     required this.ratingCount,
     required this.featuredUntil,
+    this.searchRank,
   });
 
   final String id;
@@ -39,6 +40,13 @@ class BusinessSummary {
   /// featured. Tap-handlers can show a "Featured" chip; the list
   /// item rendering checks this against `DateTime.now()`.
   final DateTime? featuredUntil;
+
+  /// Phase 9 Track 6 — full-text rank for the matching row. Non-null
+  /// only when the listing was issued with `sort=relevance` and a
+  /// non-empty `q`. Higher = better match. Mirrors the
+  /// `BusinessPublicView.searchRank` field in the OpenAPI spec.
+  /// Most call paths leave this `null`.
+  final double? searchRank;
 
   /// True when this business is presently featured. The check is
   /// computed every read so a card watching the clock can flip
@@ -96,6 +104,13 @@ class BusinessSummary {
       featuredUntil = DateTime.parse(featuredUntilRaw);
     }
 
+    // Phase 9 Track 6 — `searchRank` is optional. The backend
+    // emits `null` for non-relevance queries and a `number` for
+    // `sort=relevance` matches.
+    final searchRankRaw = json['searchRank'];
+    final double? searchRank =
+        searchRankRaw is num ? searchRankRaw.toDouble() : null;
+
     return BusinessSummary(
       id: id,
       categoryId: categoryId,
@@ -104,6 +119,7 @@ class BusinessSummary {
       ratingAvg: ratingAvg.toDouble(),
       ratingCount: ratingCount,
       featuredUntil: featuredUntil,
+      searchRank: searchRank,
     );
   }
 }

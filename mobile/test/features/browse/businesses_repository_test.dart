@@ -167,4 +167,88 @@ void main() {
       }
     });
   });
+
+  group('HttpBusinessesRepository.list — Phase 9 Track 6 search params', () {
+    test('passes q, city, ratingMin, featuredOnly, and sort verbatim',
+        () async {
+      final adapter = _RecordingAdapter([
+        _AdapterResponse(
+          200,
+          json.encode({'items': [], 'nextCursor': null}),
+        ),
+      ]);
+      final repo = HttpBusinessesRepository(_clientFor(adapter));
+
+      await repo.list(
+        q: 'habesha',
+        city: 'Addis Ababa',
+        ratingMin: 4.0,
+        featuredOnly: true,
+        sort: BusinessSort.relevance,
+      );
+
+      final req = adapter.captured.single;
+      expect(req.path, '/v1/businesses');
+      expect(req.queryParameters['q'], 'habesha');
+      expect(req.queryParameters['city'], 'Addis Ababa');
+      expect(req.queryParameters['ratingMin'], 4.0);
+      expect(req.queryParameters['featuredOnly'], 'true');
+      expect(req.queryParameters['sort'], 'relevance');
+    });
+
+    test('trims and drops whitespace-only q + city', () async {
+      final adapter = _RecordingAdapter([
+        _AdapterResponse(
+          200,
+          json.encode({'items': [], 'nextCursor': null}),
+        ),
+      ]);
+      final repo = HttpBusinessesRepository(_clientFor(adapter));
+
+      await repo.list(q: '   ', city: '\t');
+
+      final req = adapter.captured.single;
+      expect(req.queryParameters.containsKey('q'), isFalse);
+      expect(req.queryParameters.containsKey('city'), isFalse);
+    });
+
+    test('omits featuredOnly when false (preserves backwards-compat shape)',
+        () async {
+      final adapter = _RecordingAdapter([
+        _AdapterResponse(
+          200,
+          json.encode({'items': [], 'nextCursor': null}),
+        ),
+      ]);
+      final repo = HttpBusinessesRepository(_clientFor(adapter));
+
+      await repo.list(q: 'habesha', featuredOnly: false);
+
+      final req = adapter.captured.single;
+      expect(req.queryParameters['q'], 'habesha');
+      expect(req.queryParameters.containsKey('featuredOnly'), isFalse);
+    });
+
+    test('emits sort=rating / sort=newest / sort=featured wire values',
+        () async {
+      for (final pair in [
+        [BusinessSort.rating, 'rating'],
+        [BusinessSort.newest, 'newest'],
+        [BusinessSort.featured, 'featured'],
+      ]) {
+        final adapter = _RecordingAdapter([
+          _AdapterResponse(
+            200,
+            json.encode({'items': [], 'nextCursor': null}),
+          ),
+        ]);
+        final repo = HttpBusinessesRepository(_clientFor(adapter));
+        await repo.list(q: 'habesha', sort: pair[0] as BusinessSort);
+        expect(
+          adapter.captured.single.queryParameters['sort'],
+          pair[1] as String,
+        );
+      }
+    });
+  });
 }

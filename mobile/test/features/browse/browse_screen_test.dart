@@ -82,8 +82,34 @@ class _NavTestBusinessesRepo implements BusinessesRepository {
     String? category,
     String? cursor,
     int? limit,
+    String? q,
+    String? city,
+    double? ratingMin,
+    bool? featuredOnly,
+    BusinessSort? sort,
   }) async {
     lastCategory = category;
+    return const BusinessListPage(items: [], nextCursor: null);
+  }
+}
+
+/// Phase 9 Track 6 — captures the `q` arg on the first `list`
+/// call so the search-submit test can assert
+/// `SearchResultsScreen` was pushed with the right query.
+class _StubBusinessesRepo implements BusinessesRepository {
+  String? lastQuery;
+  @override
+  Future<BusinessListPage> list({
+    String? category,
+    String? cursor,
+    int? limit,
+    String? q,
+    String? city,
+    double? ratingMin,
+    bool? featuredOnly,
+    BusinessSort? sort,
+  }) async {
+    lastQuery ??= q;
     return const BusinessListPage(items: [], nextCursor: null);
   }
 }
@@ -255,5 +281,61 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('My Business'), findsNothing);
+  });
+
+  // ----------------------------------------------------------------
+  // Phase 9 Track 6 — search input on the browse tab.
+  // ----------------------------------------------------------------
+
+  testWidgets('renders the search input', (tester) async {
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value(<Category>[]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('browseSearchInput')), findsOneWidget);
+    expect(find.text('Search businesses'), findsOneWidget);
+  });
+
+  testWidgets('search submit pushes SearchResultsScreen', (tester) async {
+    final businessesRepo = _StubBusinessesRepo();
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value(<Category>[]),
+      businessesRepository: businessesRepo,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('browseSearchInput')),
+      'habesha',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    // SearchResultsScreen issued its initial fetch with q=habesha.
+    expect(businessesRepo.lastQuery, 'habesha');
+  });
+
+  testWidgets('empty search submit is ignored', (tester) async {
+    final businessesRepo = _StubBusinessesRepo();
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value(<Category>[]),
+      businessesRepository: businessesRepo,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const ValueKey('browseSearchInput')),
+      '   ',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    // No navigation happened — the businesses repo was not called
+    // by a SearchResultsScreen.
+    expect(businessesRepo.lastQuery, isNull);
   });
 }

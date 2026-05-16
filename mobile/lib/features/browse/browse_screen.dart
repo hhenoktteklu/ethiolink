@@ -41,6 +41,7 @@ import 'businesses_screen.dart';
 import 'data/businesses_repository.dart';
 import 'data/categories_repository.dart';
 import 'models/category.dart';
+import 'search_results_screen.dart';
 
 class BrowseScreen extends StatefulWidget {
   const BrowseScreen({
@@ -170,6 +171,7 @@ class _BrowseTab extends StatefulWidget {
 
 class _BrowseTabState extends State<_BrowseTab> {
   Future<List<Category>>? _future;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -177,10 +179,33 @@ class _BrowseTabState extends State<_BrowseTab> {
     _refresh();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _refresh() {
     setState(() {
       _future = widget.repository.list();
     });
+  }
+
+  void _onSearchSubmitted(String raw) {
+    final query = raw.trim();
+    // Empty submits are intentionally a no-op — the user sees no
+    // navigation jolt, the keyboard simply dismisses. Mirrors the
+    // browse tab's "tap a category" path.
+    if (query.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SearchResultsScreen(
+          query: query,
+          businessesRepositoryOverride: widget.businessesRepositoryOverride,
+          categoriesRepositoryOverride: widget.repository,
+        ),
+      ),
+    );
   }
 
   @override
@@ -199,7 +224,32 @@ class _BrowseTabState extends State<_BrowseTab> {
             floating: true,
           ),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            sliver: SliverToBoxAdapter(
+              child: TextField(
+                key: const ValueKey('browseSearchInput'),
+                controller: _searchController,
+                textInputAction: TextInputAction.search,
+                onSubmitted: _onSearchSubmitted,
+                decoration: InputDecoration(
+                  hintText: l10n.searchHint,
+                  prefixIcon: const Icon(Icons.search),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    borderSide: BorderSide.none,
+                  ),
+                  filled: true,
+                  fillColor: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16),
+                ),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
             sliver: SliverToBoxAdapter(
               child: Text(
                 l10n.browseWelcomeBack(widget.session.email),

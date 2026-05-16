@@ -46,5 +46,16 @@
     "ownerCardAvailability": "ሰሌዳ",
     "ownerCardBookings": "ቀጠሮዎች",
 
-    "commonTryAgain": "እንደገና ይሞክሩ"
+    "commonTryAgain": "እንደገና ይሞክሩ",
+
+    "searchHint": "ቢዝነሶችን ይፈልጉ",
+    "searchResultsTitle": "የፍለጋ ውጤቶች",
+    "searchEmptyTitle": "ምንም ቢዝነስ አልተገኘም",
+    "searchClearFiltersAction": "ማጣሪያዎችን አጽዱ",
+    "searchSortBestMatch": "ምርጥ ግጥሚያ",
+    "searchSortTopRated": "ከፍተኛ ደረጃ የተሰጣቸው",
+    "searchSortNewest": "አዲሶቹ",
+    "searchSortFeaturedFirst": "የተለዩ ቅድሚያ",
+    "searchFeaturedOnly": "የተለዩ ብቻ",
+    "searchRating4Plus": "★ 4 እና ከዚያ በላይ"
 }
