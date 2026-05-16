@@ -18,7 +18,7 @@ output "web_acl_arn" {
 }
 
 output "web_acl_name" {
-  description = "Web ACL name (`ethiolink-${var.environment}-api-waf`). Useful for `aws wafv2` CLI calls that prefer name over ARN."
+  description = "Web ACL name (`ethiolink-<environment>-api-waf`). Useful for `aws wafv2` CLI calls that prefer name over ARN."
   value       = aws_wafv2_web_acl.this.name
 }
 

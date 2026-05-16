@@ -7,7 +7,7 @@
 # in a follow-up commit so each step is reviewable independently.
 
 variable "environment" {
-  description = "Deployment environment name (e.g. \"dev\", \"prod\"). Threaded into key aliases (`alias/ethiolink-${environment}-<service>`) and resource tags so a CloudTrail log query can attribute key usage back to a single env."
+  description = "Deployment environment name (e.g. \"dev\", \"prod\"). Threaded into key aliases (`alias/ethiolink-<environment>-<service>`) and resource tags so a CloudTrail log query can attribute key usage back to a single env."
   type        = string
 
   validation {
@@ -17,7 +17,7 @@ variable "environment" {
 }
 
 variable "name_prefix" {
-  description = "Resource name prefix. Defaults to \"ethiolink\". Combined with environment + service to form alias names (`alias/${name_prefix}-${environment}-<service>`)."
+  description = "Resource name prefix. Defaults to \"ethiolink\". Combined with environment + service to form alias names (`alias/<name_prefix>-<environment>-<service>`)."
   type        = string
   default     = "ethiolink"
 }

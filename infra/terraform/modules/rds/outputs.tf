@@ -42,7 +42,7 @@ output "master_secret_arn" {
 }
 
 output "master_secret_name" {
-  description = "Stable name of the master credentials secret (`ethiolink/${var.environment}/rds/master`). Useful for `aws secretsmanager` CLI calls that prefer name over ARN."
+  description = "Stable name of the master credentials secret (`ethiolink/<environment>/rds/master`). Useful for `aws secretsmanager` CLI calls that prefer name over ARN."
   value       = aws_secretsmanager_secret.master.name
 }
 

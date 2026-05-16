@@ -11,7 +11,7 @@ output "rotation_lambda_arn" {
 }
 
 output "rotation_lambda_name" {
-  description = "Name of the rotation Lambda (`${name_prefix}-${environment}-rds-rotation`). `null` when rotation is disabled. Useful for `aws logs tail /aws/lambda/<name>` during incident response."
+  description = "Name of the rotation Lambda (`<name_prefix>-<environment>-rds-rotation`). `null` when rotation is disabled. Useful for `aws logs tail /aws/lambda/<name>` during incident response."
   value       = var.enabled ? data.aws_lambda_function.rotation[0].function_name : null
 }
 

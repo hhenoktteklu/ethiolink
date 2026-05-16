@@ -40,7 +40,7 @@ variable "environment" {
 }
 
 variable "name_prefix" {
-  description = "Resource name prefix. Defaults to \"ethiolink\". Combined with environment to form the bucket name (`ethiolink-${var.environment}-admin-frontend`)."
+  description = "Resource name prefix. Defaults to \"ethiolink\". Combined with environment to form the bucket name (`ethiolink-<environment>-admin-frontend`)."
   type        = string
   default     = "ethiolink"
 }

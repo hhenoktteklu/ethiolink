@@ -17,7 +17,7 @@ variable "environment" {
 }
 
 variable "name_prefix" {
-  description = "Resource name prefix. Defaults to \"ethiolink\". Combined with environment to form the rotation Lambda name (`ethiolink-${env}-rds-rotation`)."
+  description = "Resource name prefix. Defaults to \"ethiolink\". Combined with environment to form the rotation Lambda name (`ethiolink-<environment>-rds-rotation`)."
   type        = string
   default     = "ethiolink"
 }

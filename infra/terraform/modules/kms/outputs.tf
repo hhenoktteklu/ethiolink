@@ -49,7 +49,7 @@ output "s3_admin_frontend_key_id" {
 }
 
 output "secrets_key_arn" {
-  description = "ARN of the Secrets Manager encryption key. Covers `ethiolink/${env}/rds/master` today; future third-party API-key secrets (SMS, Telegram, payment provider) will use the same key."
+  description = "ARN of the Secrets Manager encryption key. Covers `ethiolink/<environment>/rds/master` today; future third-party API-key secrets (SMS, Telegram, payment provider) will use the same key."
   value       = aws_kms_key.secrets.arn
 }
 

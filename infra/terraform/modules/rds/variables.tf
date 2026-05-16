@@ -152,7 +152,7 @@ variable "kms_key_id" {
 }
 
 variable "secrets_kms_key_id" {
-  description = "ARN (or key id) of the customer-managed KMS key used to encrypt the `ethiolink/${env}/rds/master` Secrets Manager secret. `null` (the default) preserves AWS-managed `aws/secretsmanager` encryption. Unlike RDS, Secrets Manager re-encrypts the secret value in place on the next version write — the runbook describes triggering one rotation post-CMK-flip to cycle existing versions onto the CMK."
+  description = "ARN (or key id) of the customer-managed KMS key used to encrypt the `ethiolink/<environment>/rds/master` Secrets Manager secret. `null` (the default) preserves AWS-managed `aws/secretsmanager` encryption. Unlike RDS, Secrets Manager re-encrypts the secret value in place on the next version write — the runbook describes triggering one rotation post-CMK-flip to cycle existing versions onto the CMK."
   type        = string
   default     = null
 }
