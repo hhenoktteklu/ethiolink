@@ -293,6 +293,51 @@ locals {
       area    = "scheduled"
       handler = "lambdas/scheduled/sendReminders.handler"
     }
+    # Phase 9 Track 6 — paid featuring sweep. Runs every 15 minutes
+    # (rule in the EventBridge module) to expire ACTIVE rows past
+    # ends_at, GC PENDING_PAYMENT rows past their 10-minute TTL,
+    # and recompute `business_profiles.featured_until`.
+    "scheduled-featuring-sweep" = {
+      area    = "scheduled"
+      handler = "lambdas/scheduled/featuringSweep.handler"
+    }
+
+    # Phase 9 Track 6 — paid featuring HTTP handlers. All four
+    # owner endpoints live under the dedicated `featuring` area so
+    # the IAM split keeps featuring writes confined to a single
+    # role.
+    "featuring-list-packages" = {
+      area    = "featuring"
+      handler = "lambdas/featuring/listPackages.handler"
+    }
+    "featuring-get-active" = {
+      area    = "featuring"
+      handler = "lambdas/featuring/getActive.handler"
+    }
+    "featuring-subscribe" = {
+      area    = "featuring"
+      handler = "lambdas/featuring/subscribe.handler"
+    }
+    "featuring-list-history" = {
+      area    = "featuring"
+      handler = "lambdas/featuring/listHistory.handler"
+    }
+    # Phase 9 Track 6 — admin-side featuring endpoints. Kept in
+    # the `admin` area to inherit the existing admin-role IAM
+    # posture; the application layer enforces ADMIN role via
+    # `authorizeAdmin`.
+    "admin-featuring-list-history" = {
+      area    = "admin"
+      handler = "lambdas/admin/featuring/listHistory.handler"
+    }
+    "admin-featuring-comp" = {
+      area    = "admin"
+      handler = "lambdas/admin/featuring/comp.handler"
+    }
+    "admin-featuring-cancel" = {
+      area    = "admin"
+      handler = "lambdas/admin/featuring/cancel.handler"
+    }
 
     # ----- Maintenance -----------------------------------------------------
     # Manually invoked via `aws lambda invoke` after every Terraform
@@ -342,6 +387,13 @@ locals {
     BOOKING_SLOT_STEP_MINUTES      = tostring(var.booking_slot_step_minutes)
     BOOKING_BUFFER_MINUTES         = tostring(var.booking_buffer_minutes)
     DEFAULT_TIMEZONE               = var.default_timezone
+    # Phase 9 Track 6 — paid featuring config. `FEATURING_ENABLED`
+    # gates the owner-facing endpoints; the sweep Lambda runs
+    # regardless so existing ACTIVE rows expire on schedule. Prices
+    # are env-tuneable so the operator can adjust without a deploy.
+    FEATURING_ENABLED              = tostring(var.featuring_enabled)
+    FEATURING_7D_PRICE_ETB         = tostring(var.featuring_7d_price_etb)
+    FEATURING_30D_PRICE_ETB        = tostring(var.featuring_30d_price_etb)
   }
 }
 
@@ -389,6 +441,10 @@ locals {
     "scheduled",
     "maintenance",
     "integrations",
+    # Phase 9 Track 6 — paid featuring HTTP handlers run under
+    # this dedicated role so featuring writes can be scoped
+    # independently from the broader `businesses` area.
+    "featuring",
   ])
 }
 

@@ -50,6 +50,16 @@ output "scheduled_reminders_function_name" {
   value       = aws_lambda_function.function["scheduled-send-reminders"].function_name
 }
 
+output "featuring_sweep_function_arn" {
+  description = "Convenience output: ARN of the `scheduled-featuring-sweep` function. Consumed by the EventBridge module's featuring-sweep rule target."
+  value       = aws_lambda_function.function["scheduled-featuring-sweep"].arn
+}
+
+output "featuring_sweep_function_name" {
+  description = "Convenience output: name of the `scheduled-featuring-sweep` function. Useful for `aws lambda invoke --function-name <name>` smoke tests."
+  value       = aws_lambda_function.function["scheduled-featuring-sweep"].function_name
+}
+
 output "db_migrate_function_arn" {
   description = "Convenience output: the ARN of the `maintenance-db-migrate` function. Operators run `aws lambda invoke --function-name <name>` against this after every Terraform apply that ships a new migration."
   value       = aws_lambda_function.function["maintenance-db-migrate"].arn

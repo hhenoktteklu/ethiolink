@@ -53,3 +53,37 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 6 — paid featuring sweep.
+#
+# Wires the `scheduled-featuring-sweep` Lambda to a 15-minute
+# cron (same cadence as the reminders rule; cheap, fine-grained
+# enough that an expired featured-listing never lingers more than
+# 15 minutes). The Lambda is idempotent — a re-fire on the same
+# minute is a no-op — so jitter doesn't cause double work.
+# -----------------------------------------------------------------------------
+
+variable "featuring_sweep_function_name" {
+  description = "Name of the featuring sweep Lambda. Sourced from `module.lambda.featuring_sweep_function_name`."
+  type        = string
+  default     = ""
+}
+
+variable "featuring_sweep_function_arn" {
+  description = "ARN of the featuring sweep Lambda. Sourced from `module.lambda.featuring_sweep_function_arn`."
+  type        = string
+  default     = ""
+}
+
+variable "featuring_sweep_schedule_expression" {
+  description = "EventBridge schedule expression for the featuring sweep. Default `cron(0/15 * * * ? *)` matches the reminders cadence; jitter is absorbed by the Lambda's idempotent design."
+  type        = string
+  default     = "cron(0/15 * * * ? *)"
+}
+
+variable "featuring_sweep_enabled" {
+  description = "Whether the featuring sweep rule is active. Defaults to `true` so ACTIVE rows expire on schedule even when the public featuring opt-in (`featuring_enabled` on the Lambda module) is `false`."
+  type        = bool
+  default     = true
+}

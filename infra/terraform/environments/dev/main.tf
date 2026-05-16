@@ -388,6 +388,11 @@ module "eventbridge" {
   scheduled_reminders_function_arn  = module.lambda.scheduled_reminders_function_arn
 
   enabled = true
+
+  # Phase 9 Track 6 — paid featuring sweep rule.
+  featuring_sweep_function_name = module.lambda.featuring_sweep_function_name
+  featuring_sweep_function_arn  = module.lambda.featuring_sweep_function_arn
+  featuring_sweep_enabled       = true
 }
 
 output "eventbridge_rule_arn" {

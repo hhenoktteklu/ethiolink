@@ -20,3 +20,13 @@ output "rule_state" {
   description = "ENABLED / DISABLED depending on `var.enabled`. Returned so a downstream module / smoke test can verify the rule is firing as expected."
   value       = aws_cloudwatch_event_rule.send_reminders.state
 }
+
+output "featuring_sweep_rule_arn" {
+  description = "ARN of the Phase 9 Track 6 featuring sweep EventBridge rule, or `null` when not wired in this env."
+  value       = length(aws_cloudwatch_event_rule.featuring_sweep) > 0 ? aws_cloudwatch_event_rule.featuring_sweep[0].arn : null
+}
+
+output "featuring_sweep_rule_name" {
+  description = "Name of the Phase 9 Track 6 featuring sweep EventBridge rule, or `null` when not wired in this env."
+  value       = length(aws_cloudwatch_event_rule.featuring_sweep) > 0 ? aws_cloudwatch_event_rule.featuring_sweep[0].name : null
+}

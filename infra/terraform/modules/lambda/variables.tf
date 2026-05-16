@@ -371,6 +371,35 @@ variable "tags" {
 }
 
 # -----------------------------------------------------------------------------
+# Phase 9 Track 6 — paid featuring config.
+#
+# `featuring_enabled` is the master opt-in: until an env stack
+# flips it to `true`, every owner-facing featuring endpoint
+# returns 503 FEATURING_DISABLED. The sweep Lambda runs regardless
+# so admin-comp'd ACTIVE rows still expire on schedule. Prices
+# are env-tuneable so the operator can change them without
+# redeploying.
+# -----------------------------------------------------------------------------
+
+variable "featuring_enabled" {
+  description = "Master enable flag for paid featuring. `false` (the default) returns 503 from every owner-facing featuring endpoint; admin endpoints + the sweep Lambda run regardless."
+  type        = bool
+  default     = false
+}
+
+variable "featuring_7d_price_etb" {
+  description = "Price of the 7-day featuring package in ETB. Defaults to 500 per the Phase 9 Track 6 product estimate."
+  type        = number
+  default     = 500
+}
+
+variable "featuring_30d_price_etb" {
+  description = "Price of the 30-day featuring package in ETB. Defaults to 1500."
+  type        = number
+  default     = 1500
+}
+
+# -----------------------------------------------------------------------------
 # Phase 9 Track 4 — KMS inputs.
 #
 # Five nullable CMK ARNs threaded down from the `kms` module via

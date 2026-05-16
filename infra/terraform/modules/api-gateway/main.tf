@@ -149,6 +149,12 @@ locals {
     { path = "v1/businesses/{businessId}/staff/{staffId}/availability/override", parent = "v1/businesses/{businessId}/staff/{staffId}/availability" },
     { path = "v1/businesses/{businessId}/staff/{staffId}/slots", parent = "v1/businesses/{businessId}/staff/{staffId}" },
     { path = "v1/businesses/{businessId}/appointments", parent = "v1/businesses/{businessId}" },
+    # Phase 9 Track 6 — paid featuring sub-tree.
+    { path = "v1/businesses/{businessId}/featuring", parent = "v1/businesses/{businessId}" },
+    { path = "v1/businesses/{businessId}/featuring/packages", parent = "v1/businesses/{businessId}/featuring" },
+    { path = "v1/businesses/{businessId}/featuring/subscribe", parent = "v1/businesses/{businessId}/featuring" },
+    { path = "v1/businesses/{businessId}/featuring/active", parent = "v1/businesses/{businessId}/featuring" },
+    { path = "v1/businesses/{businessId}/featuring/history", parent = "v1/businesses/{businessId}/featuring" },
     { path = "v1/media", parent = "v1" },
     { path = "v1/media/upload-url", parent = "v1/media" },
     { path = "v1/appointments", parent = "v1" },
@@ -166,6 +172,11 @@ locals {
     { path = "v1/admin/businesses/{id}/reject", parent = "v1/admin/businesses/{id}" },
     { path = "v1/admin/businesses/{id}/suspend", parent = "v1/admin/businesses/{id}" },
     { path = "v1/admin/businesses/{id}/feature", parent = "v1/admin/businesses/{id}" },
+    # Phase 9 Track 6 — admin-side paid featuring sub-tree.
+    { path = "v1/admin/businesses/{id}/featuring", parent = "v1/admin/businesses/{id}" },
+    { path = "v1/admin/businesses/{id}/featuring/history", parent = "v1/admin/businesses/{id}/featuring" },
+    { path = "v1/admin/businesses/{id}/featuring/comp", parent = "v1/admin/businesses/{id}/featuring" },
+    { path = "v1/admin/businesses/{id}/featuring/cancel", parent = "v1/admin/businesses/{id}/featuring" },
     { path = "v1/admin/users", parent = "v1/admin" },
     { path = "v1/admin/users/{id}", parent = "v1/admin/users" },
     { path = "v1/admin/users/{id}/suspend", parent = "v1/admin/users/{id}" },
@@ -278,6 +289,19 @@ locals {
     "GET_v1_businesses_id_appointments" = {
       path = "v1/businesses/{businessId}/appointments", method = "GET", function = "appointments-list-for-business", auth = "COGNITO"
     }
+    # Phase 9 Track 6 — paid featuring owner-side routes.
+    "GET_v1_businesses_id_featuring_packages" = {
+      path = "v1/businesses/{businessId}/featuring/packages", method = "GET", function = "featuring-list-packages", auth = "COGNITO"
+    }
+    "POST_v1_businesses_id_featuring_subscribe" = {
+      path = "v1/businesses/{businessId}/featuring/subscribe", method = "POST", function = "featuring-subscribe", auth = "COGNITO"
+    }
+    "GET_v1_businesses_id_featuring_active" = {
+      path = "v1/businesses/{businessId}/featuring/active", method = "GET", function = "featuring-get-active", auth = "COGNITO"
+    }
+    "GET_v1_businesses_id_featuring_history" = {
+      path = "v1/businesses/{businessId}/featuring/history", method = "GET", function = "featuring-list-history", auth = "COGNITO"
+    }
     "POST_v1_media_upload_url" = {
       path = "v1/media/upload-url", method = "POST", function = "media-upload-url", auth = "COGNITO"
     }
@@ -321,6 +345,16 @@ locals {
     }
     "POST_v1_admin_businesses_id_feature" = {
       path = "v1/admin/businesses/{id}/feature", method = "POST", function = "admin-businesses-feature", auth = "COGNITO"
+    }
+    # Phase 9 Track 6 — admin-side paid featuring routes.
+    "GET_v1_admin_businesses_id_featuring_history" = {
+      path = "v1/admin/businesses/{id}/featuring/history", method = "GET", function = "admin-featuring-list-history", auth = "COGNITO"
+    }
+    "POST_v1_admin_businesses_id_featuring_comp" = {
+      path = "v1/admin/businesses/{id}/featuring/comp", method = "POST", function = "admin-featuring-comp", auth = "COGNITO"
+    }
+    "POST_v1_admin_businesses_id_featuring_cancel" = {
+      path = "v1/admin/businesses/{id}/featuring/cancel", method = "POST", function = "admin-featuring-cancel", auth = "COGNITO"
     }
     "GET_v1_admin_users" = {
       path = "v1/admin/users", method = "GET", function = "admin-users-list", auth = "COGNITO"

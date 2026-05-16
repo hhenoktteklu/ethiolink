@@ -91,3 +91,42 @@ resource "aws_lambda_permission" "allow_eventbridge" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.send_reminders.arn
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 6 — paid featuring sweep rule (15-minute cron).
+#
+# Only created when `var.featuring_sweep_function_name` is set —
+# env stacks that have not yet wired the featuring Lambda set the
+# var to "" and this block creates nothing.
+# -----------------------------------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "featuring_sweep" {
+  count = var.featuring_sweep_function_name == "" ? 0 : 1
+
+  name                = "${local.base_name}-featuring-sweep"
+  description         = "EthioLink ${var.environment} paid-featuring sweep. Fires every 15 minutes; expires ACTIVE rows past ends_at, GCs PENDING_PAYMENT rows past the 10-minute TTL, and recomputes business_profiles.featured_until."
+  schedule_expression = var.featuring_sweep_schedule_expression
+  state               = var.featuring_sweep_enabled ? "ENABLED" : "DISABLED"
+
+  tags = merge(local.common_tags, {
+    Name = "${local.base_name}-featuring-sweep"
+  })
+}
+
+resource "aws_cloudwatch_event_target" "featuring_sweep" {
+  count = var.featuring_sweep_function_name == "" ? 0 : 1
+
+  rule      = aws_cloudwatch_event_rule.featuring_sweep[0].name
+  target_id = "${local.base_name}-featuring-sweep-target"
+  arn       = var.featuring_sweep_function_arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge_featuring_sweep" {
+  count = var.featuring_sweep_function_name == "" ? 0 : 1
+
+  statement_id  = "AllowEventBridgeInvokeFeaturingSweep-${var.environment}"
+  action        = "lambda:InvokeFunction"
+  function_name = var.featuring_sweep_function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.featuring_sweep[0].arn
+}

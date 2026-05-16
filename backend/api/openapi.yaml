@@ -785,6 +785,173 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/featuring/packages:
+    get:
+      tags: [auth]
+      operationId: listFeaturingPackages
+      summary: List paid featuring packages available for the business.
+      description: |
+        Authenticated. Caller must own the business. Phase 9 Track 6.
+        Returns the configured packages (7-day / 30-day) with their
+        env-configured ETB prices. 503 `FEATURING_DISABLED` when the
+        operator hasn't enabled featuring in this env.
+      parameters:
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The list of available featuring packages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturingPackageList'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '503':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/featuring/subscribe:
+    post:
+      tags: [auth]
+      operationId: subscribeFeaturing
+      summary: Purchase a paid featuring subscription.
+      description: |
+        Authenticated. Caller must own the business. Phase 9 Track 6.
+        Creates a `PENDING_PAYMENT` subscription, calls the payment
+        gateway, then transitions to `ACTIVE` on synchronous
+        SUCCEEDED (CASH gateway in MVP). When the gateway returns
+        PENDING (future Telebirr), the subscription stays
+        PENDING_PAYMENT and a webhook flips it to ACTIVE.
+
+        Error codes:
+          * 400 VALIDATION_ERROR — unknown `packageCode`.
+          * 402 PAYMENT_REQUIRED — gateway returned FAILED (declined).
+          * 403 FORBIDDEN — caller does not own the business.
+          * 409 CONFLICT — business already has an ACTIVE subscription.
+          * 503 FEATURING_DISABLED — featuring not enabled in this env.
+          * 503 ONLINE_PAYMENTS_UNAVAILABLE — gateway not yet wired.
+      parameters:
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubscribeFeaturingRequest'
+      responses:
+        '200':
+          description: The created (and potentially-activated) subscription.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturingSubscription'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '402':
+          $ref: '#/components/responses/ValidationError'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/featuring/active:
+    get:
+      tags: [auth]
+      operationId: getActiveFeaturing
+      summary: Read the business's currently-ACTIVE subscription.
+      description: |
+        Authenticated. Caller must own the business. Phase 9 Track 6.
+        Returns `{ active: <FeaturingSubscription> }` or
+        `{ active: null }` when not currently featured. Independent of
+        the `FEATURING_ENABLED` flag — owners on a disabled env can
+        still read an admin-comp'd active row.
+      parameters:
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The active subscription (or null).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [active]
+                properties:
+                  active:
+                    oneOf:
+                      - $ref: '#/components/schemas/FeaturingSubscription'
+                      - type: 'null'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /businesses/{businessId}/featuring/history:
+    get:
+      tags: [auth]
+      operationId: listFeaturingHistory
+      summary: List the business's featuring subscriptions newest-first.
+      description: |
+        Authenticated. Caller must own the business. Phase 9 Track 6.
+        Returns up to `limit` (default 50, max 100) subscriptions.
+      parameters:
+        - name: businessId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: The subscription history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturingSubscriptionList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /businesses/{businessId}/appointments:
     get:
       tags: [auth]
@@ -1468,6 +1635,130 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BusinessOwnerView'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/featuring/history:
+    get:
+      tags: [admin]
+      operationId: adminListFeaturingHistory
+      summary: List every featuring subscription for a business.
+      description: |
+        Authenticated, ADMIN-only. Phase 9 Track 6. Returns up to
+        `limit` (default 50, max 200) subscriptions newest-first.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: The subscription history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturingSubscriptionList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/featuring/comp:
+    post:
+      tags: [admin]
+      operationId: adminCompFeaturing
+      summary: Create an admin-comp featuring subscription.
+      description: |
+        Authenticated, ADMIN-only. Phase 9 Track 6. Creates an
+        ACTIVE featuring subscription with `source = ADMIN_COMP`
+        and `price_etb = 0`. Refuses when the business already has
+        an ACTIVE subscription (409 CONFLICT).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCompFeaturingRequest'
+      responses:
+        '200':
+          description: The created subscription.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturingSubscription'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/featuring/cancel:
+    post:
+      tags: [admin]
+      operationId: adminCancelFeaturing
+      summary: Force-cancel the active featuring subscription.
+      description: |
+        Authenticated, ADMIN-only. Phase 9 Track 6. Flips the
+        ACTIVE subscription to `CANCELLED`, records the admin's
+        reason, and recomputes `business_profiles.featured_until`.
+        Refund handling is out-of-band.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCancelFeaturingRequest'
+      responses:
+        '200':
+          description: The cancelled subscription.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeaturingSubscription'
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -2530,6 +2821,133 @@ components:
         notes:
           type: [string, 'null']
           maxLength: 2000
+    FeaturingPackage:
+      type: object
+      description: |
+        Phase 9 Track 6 — a paid featuring package. Server-priced;
+        owners never send a price on the wire.
+      required: [code, durationDays, priceEtb]
+      properties:
+        code:
+          type: string
+          enum: [FEATURING_7D, FEATURING_30D]
+        durationDays:
+          type: integer
+          minimum: 1
+        priceEtb:
+          type: number
+          minimum: 0
+    FeaturingPackageList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturingPackage'
+    FeaturingSubscription:
+      type: object
+      description: |
+        Phase 9 Track 6 — a featuring subscription row. The
+        `status` value drives the lifecycle. ACTIVE rows project
+        `endsAt` into `business_profiles.featured_until`. Sweep
+        Lambda runs every 15 minutes to expire past-due ACTIVE
+        rows.
+      required:
+        - id
+        - businessId
+        - packageCode
+        - priceEtb
+        - startsAt
+        - endsAt
+        - status
+        - source
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        businessId:
+          type: string
+          format: uuid
+        packageCode:
+          type: string
+          enum: [FEATURING_7D, FEATURING_30D]
+        priceEtb:
+          type: number
+          minimum: 0
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [PENDING_PAYMENT, ACTIVE, EXPIRED, CANCELLED, REFUNDED]
+        source:
+          type: string
+          enum: [OWNER_PURCHASE, ADMIN_COMP]
+        cancelledAt:
+          type: [string, 'null']
+          format: date-time
+        cancelledReason:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    FeaturingSubscriptionList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FeaturingSubscription'
+    SubscribeFeaturingRequest:
+      type: object
+      description: |
+        Request body for
+        `POST /v1/businesses/{businessId}/featuring/subscribe`.
+        Server-priced — owners pick the package, the server picks
+        the amount.
+      required: [packageCode]
+      properties:
+        packageCode:
+          type: string
+          enum: [FEATURING_7D, FEATURING_30D]
+    AdminCompFeaturingRequest:
+      type: object
+      description: |
+        Request body for
+        `POST /v1/admin/businesses/{id}/featuring/comp`. Creates an
+        ACTIVE subscription with `source = ADMIN_COMP` and price 0.
+      required: [durationDays, reason]
+      properties:
+        durationDays:
+          type: integer
+          minimum: 1
+          maximum: 365
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    AdminCancelFeaturingRequest:
+      type: object
+      description: |
+        Request body for
+        `POST /v1/admin/businesses/{id}/featuring/cancel`. Cancels
+        the currently-ACTIVE subscription and records the reason.
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     BusinessFieldsBase:
       type: object
       description: |
