@@ -1,5 +1,7 @@
 # Phase 10 — Real Payments Roadmap
 
+> **Phase 10 is engineering-complete.** Every commit in the checklist below has shipped its code-side surface. The remaining open work is the operator-led Chapa rollout (merchant onboarding, Secrets Manager population, dev → prod cutover). At-a-glance status, the 7-commit ledger, and the operator checklist live in [`PHASE_10_COMPLETION_SUMMARY.md`](./PHASE_10_COMPLETION_SUMMARY.md). The operator runbook lives at [`docs/operations/runbooks/payments-provider.md`](../operations/runbooks/payments-provider.md).
+
 > Phase 9 closed the platform's engineering surface (see [`PHASE_9_COMPLETION_SUMMARY.md`](./PHASE_9_COMPLETION_SUMMARY.md)). Phase 10 turns "the platform is live" into "the platform captures revenue end-to-end" by retiring the `MockOnlineGateway` placeholder with a real Ethiopian payments provider (Chapa) and threading the redirect-then-confirm flow through every consumer.
 
 The scoping deliverable lived in chat; this doc is the executable checklist + commit ledger.
@@ -95,7 +97,11 @@ Recommended first provider: **Chapa** (https://chapa.co). Aggregator: under one 
 4. Force a payment-intents-row failure (use a Chapa sandbox failure card) — confirm the row appears with status FAILED + red badge.
 5. (Backend-only QA for the cross-business endpoint) `curl` `GET /v1/admin/payment-intents?from=<24h-ago>&status=SUCCEEDED` as an admin; expect the same wire shape with every recent SUCCEEDED row across all businesses.
 
-### Commit 7 — operator runbook
+### Commit 7 — operator runbook + completion summary (landed: this commit)
+
+- [x] `docs/operations/runbooks/payments-provider.md` — operator playbook covering Chapa merchant onboarding, Secrets Manager secret shapes (plain + JSON + bundled-resource), Terraform apply walkthrough, webhook registration in Chapa's dashboard, dev sandbox smoke (online appointment + featuring purchase + webhook success + admin reconciliation), mobile smoke (redirect / return / polling / failure / timeout), admin QA (Payments panel + cross-business endpoint), three rollback paths (`payments_provider = mock` flip / mobile feature-flag / Chapa key rotation), six-case troubleshooting table (signature mismatch / 503 not configured / unknown tx_ref / Chapa 5xx / mobile launcher refused / PENDING stuck), and the security / PCI scope note (SAQ-A equivalent — hosted checkout means we never see PAN / CVV).
+- [x] `docs/tasks/PHASE_10_COMPLETION_SUMMARY.md` — Phase 10 close-out: goal recap, 7-commit ledger with hashes, completed backend / mobile / admin SPA / Terraform / tests surfaces, 10-item operator-led launch checklist, six deferred follow-ups (refunds, receipts, payment analytics, direct Telebirr, auto-cancel TTL, payment_status column on appointments), and the final launch-vs-code recommendation split.
+- [x] This doc (`PHASE_10_REAL_PAYMENTS.md`) — added the top-of-doc pointer to the completion summary + runbook so anyone landing here sees the operator path first.
 
 - [ ] Booking flow on the Flutter customer app — toggle `paymentMethod` between cash / online; on online confirm, open `data.payment.redirectUrl` via `url_launcher`; transition to `PaymentWaitingScreen` polling `GET /v1/me/appointments/{id}` every 3s up to 90s.
 - [ ] Owner featuring screen — same dance on the Promote screen. After return, poll `GET /v1/businesses/{id}/featuring/active`.
