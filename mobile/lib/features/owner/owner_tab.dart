@@ -24,15 +24,31 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
+import '../browse/data/categories_repository.dart';
+import 'create_business_flow.dart';
+import 'data/business_actions_repository.dart';
 import 'data/owner_business_repository.dart';
 import 'models/owner_business_view.dart';
 
 class OwnerTab extends StatefulWidget {
-  const OwnerTab({this.repositoryOverride, super.key});
+  const OwnerTab({
+    this.repositoryOverride,
+    this.actionsRepositoryOverride,
+    this.categoriesRepositoryOverride,
+    super.key,
+  });
 
   /// Test seam. Production builds an `HttpOwnerBusinessRepository`
   /// over the `AppConfigScope` `AppConfig`.
   final OwnerBusinessRepository? repositoryOverride;
+
+  /// Test seam for the action repository the create-business flow
+  /// and the DRAFT "Submit for review" button drive.
+  final BusinessActionsRepository? actionsRepositoryOverride;
+
+  /// Test seam for the categories dropdown inside the
+  /// `CreateBusinessFlow` we push from the 404 CTA.
+  final CategoriesRepository? categoriesRepositoryOverride;
 
   @override
   State<OwnerTab> createState() => _OwnerTabState();
@@ -40,6 +56,7 @@ class OwnerTab extends StatefulWidget {
 
 class _OwnerTabState extends State<OwnerTab> {
   OwnerBusinessRepository? _repo;
+  BusinessActionsRepository? _actionsRepo;
   Future<OwnerBusinessView>? _future;
 
   @override
@@ -50,6 +67,10 @@ class _OwnerTabState extends State<OwnerTab> {
         HttpOwnerBusinessRepository(
           ApiClient(config: AppConfigScope.of(context)),
         );
+    _actionsRepo = widget.actionsRepositoryOverride ??
+        HttpBusinessActionsRepository(
+          ApiClient(config: AppConfigScope.of(context)),
+        );
     _refresh();
   }
 
@@ -57,6 +78,23 @@ class _OwnerTabState extends State<OwnerTab> {
     setState(() {
       _future = _repo!.getMine();
     });
+  }
+
+  /// Push the multi-step `CreateBusinessFlow`. The flow pops back
+  /// with the freshly-created `OwnerBusinessView` (or `null` if
+  /// the user backed out). Either way we refresh — the server is
+  /// the source of truth.
+  Future<void> _openCreateFlow() async {
+    await Navigator.of(context).push<OwnerBusinessView?>(
+      MaterialPageRoute<OwnerBusinessView?>(
+        builder: (_) => CreateBusinessFlow(
+          categoriesRepositoryOverride: widget.categoriesRepositoryOverride,
+          actionsRepositoryOverride: widget.actionsRepositoryOverride,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    _refresh();
   }
 
   @override
@@ -77,9 +115,17 @@ class _OwnerTabState extends State<OwnerTab> {
               return const _LoadingBody();
             }
             if (snapshot.hasError) {
-              return _ErrorBranch(error: snapshot.error!, onRetry: _refresh);
+              return _ErrorBranch(
+                error: snapshot.error!,
+                onRetry: _refresh,
+                onCreateBusiness: _openCreateFlow,
+              );
             }
-            return OwnerDashboard(business: snapshot.data!);
+            return OwnerDashboard(
+              business: snapshot.data!,
+              actionsRepository: _actionsRepo!,
+              onChanged: _refresh,
+            );
           },
         ),
       ),
@@ -106,9 +152,14 @@ class _LoadingBody extends StatelessWidget {
 }
 
 class _ErrorBranch extends StatelessWidget {
-  const _ErrorBranch({required this.error, required this.onRetry});
+  const _ErrorBranch({
+    required this.error,
+    required this.onRetry,
+    required this.onCreateBusiness,
+  });
   final Object error;
   final VoidCallback onRetry;
+  final VoidCallback onCreateBusiness;
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +169,10 @@ class _ErrorBranch extends StatelessWidget {
     if (error is OwnerBusinessLoadFailure) {
       switch ((error as OwnerBusinessLoadFailure).kind) {
         case OwnerBusinessLoadFailureKind.notFound:
-          return _CreateBusinessCta(onRetry: onRetry);
+          return _CreateBusinessCta(
+            onRetry: onRetry,
+            onCreate: onCreateBusiness,
+          );
         case OwnerBusinessLoadFailureKind.forbidden:
           return _ForbiddenBanner();
         case OwnerBusinessLoadFailureKind.unauthenticated:
@@ -154,8 +208,9 @@ class _ErrorBranch extends StatelessWidget {
 }
 
 class _CreateBusinessCta extends StatelessWidget {
-  const _CreateBusinessCta({required this.onRetry});
+  const _CreateBusinessCta({required this.onRetry, required this.onCreate});
   final VoidCallback onRetry;
+  final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
@@ -186,18 +241,7 @@ class _CreateBusinessCta extends StatelessWidget {
         const SizedBox(height: 24),
         Center(
           child: FilledButton.icon(
-            onPressed: () {
-              // Phase 9 Track 3.5 placeholder. The multi-step
-              // creation form is the next commit on this track.
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Create-business form lands in the next mobile commit.',
-                  ),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
+            onPressed: onCreate,
             icon: const Icon(Icons.add_business),
             label: const Text('Create your business'),
           ),
@@ -303,10 +347,22 @@ class _GenericErrorBanner extends StatelessWidget {
 /// for a follow-up commit; tap → SnackBar pointing at the
 /// upcoming work. Status-aware: PENDING_REVIEW / REJECTED /
 /// SUSPENDED render a status banner above the cards explaining
-/// the current state.
+/// the current state. DRAFT / REJECTED render a banner with a
+/// "Submit for review" action that hits
+/// `POST /v1/businesses/{id}/submit`.
 class OwnerDashboard extends StatelessWidget {
-  const OwnerDashboard({required this.business, super.key});
+  const OwnerDashboard({
+    required this.business,
+    required this.actionsRepository,
+    required this.onChanged,
+    super.key,
+  });
   final OwnerBusinessView business;
+  final BusinessActionsRepository actionsRepository;
+
+  /// Fired after a successful submit so the OwnerTab can refresh
+  /// its loader and pick up the new status.
+  final VoidCallback onChanged;
 
   static const _cards = <_DashboardCardSpec>[
     _DashboardCardSpec(
@@ -344,7 +400,12 @@ class OwnerDashboard extends StatelessWidget {
         _BusinessHeader(business: business),
         const SizedBox(height: 8),
         if (business.isReadOnly) _PendingBanner(status: business.status),
-        if (business.isSubmittable) _SubmittableBanner(status: business.status),
+        if (business.isSubmittable)
+          _SubmittableBanner(
+            business: business,
+            actionsRepository: actionsRepository,
+            onSubmitted: onChanged,
+          ),
         const SizedBox(height: 16),
         for (final spec in _cards) ...[
           _DashboardCard(spec: spec),
@@ -450,14 +511,48 @@ class _PendingBanner extends StatelessWidget {
   }
 }
 
-class _SubmittableBanner extends StatelessWidget {
-  const _SubmittableBanner({required this.status});
-  final String status;
+class _SubmittableBanner extends StatefulWidget {
+  const _SubmittableBanner({
+    required this.business,
+    required this.actionsRepository,
+    required this.onSubmitted,
+  });
+  final OwnerBusinessView business;
+  final BusinessActionsRepository actionsRepository;
+
+  /// Invoked after a successful submit so the OwnerTab can refresh
+  /// the loader and re-render the now-PENDING_REVIEW state.
+  final VoidCallback onSubmitted;
+
+  @override
+  State<_SubmittableBanner> createState() => _SubmittableBannerState();
+}
+
+class _SubmittableBannerState extends State<_SubmittableBanner> {
+  bool _busy = false;
+  BusinessActionFailure? _error;
+
+  Future<void> _submit() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.actionsRepository.submitBusiness(widget.business.id);
+      if (!mounted) return;
+      widget.onSubmitted();
+    } on BusinessActionFailure catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final (title, body) = status == 'REJECTED'
+    final (title, body) = widget.business.status == 'REJECTED'
         ? (
             'Rejected',
             'Your previous submission was rejected. Fix the noted issues '
@@ -465,8 +560,8 @@ class _SubmittableBanner extends StatelessWidget {
           )
         : (
             'Draft',
-            'Your business is in draft. Add services + staff + availability, '
-                'then submit for review.',
+            'Your business is in draft. Submit it for admin review when '
+                'you are ready.',
           );
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -491,9 +586,57 @@ class _SubmittableBanner extends StatelessWidget {
                   color: colors.onTertiaryContainer,
                 ),
           ),
+          if (_error != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              _errorCopy(_error!),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.error,
+                  ),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: _busy ? null : _submit,
+              icon: _busy
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.send),
+              label: const Text('Submit for review'),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Maps the action-failure kind to user-facing copy for the
+  /// inline message under the banner. Mirrors the
+  /// `CreateBusinessFlow._ErrorBanner` mapping but lives separately
+  /// because the banner inside the dashboard is space-constrained.
+  String _errorCopy(BusinessActionFailure e) {
+    switch (e.kind) {
+      case BusinessActionFailureKind.validation:
+        return e.message;
+      case BusinessActionFailureKind.conflict:
+        return 'This business is not in a submittable state right now.';
+      case BusinessActionFailureKind.forbidden:
+        return 'Access denied — sign out and back in to refresh your role.';
+      case BusinessActionFailureKind.unauthenticated:
+        return 'Sign in again to continue.';
+      case BusinessActionFailureKind.network:
+        return "Can't reach the server. Check your connection and retry.";
+      case BusinessActionFailureKind.serverError:
+      case BusinessActionFailureKind.notFound:
+      case BusinessActionFailureKind.malformedResponse:
+      case BusinessActionFailureKind.other:
+        return 'Something went wrong. ${e.message}';
+    }
   }
 }
 

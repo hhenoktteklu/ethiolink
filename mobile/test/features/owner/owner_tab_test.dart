@@ -7,7 +7,11 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/config/app_config.dart';
 import 'package:ethiolink/core/config/app_config_scope.dart';
+import 'package:ethiolink/features/browse/data/categories_repository.dart';
 import 'package:ethiolink/features/browse/models/business_detail.dart';
+import 'package:ethiolink/features/browse/models/category.dart';
+import 'package:ethiolink/features/owner/create_business_flow.dart';
+import 'package:ethiolink/features/owner/data/business_actions_repository.dart';
 import 'package:ethiolink/features/owner/data/owner_business_repository.dart';
 import 'package:ethiolink/features/owner/models/owner_business_view.dart';
 import 'package:ethiolink/features/owner/owner_tab.dart';
@@ -53,15 +57,53 @@ class _FakeRepo implements OwnerBusinessRepository {
   Future<OwnerBusinessView> getMine() => _completer.future;
 }
 
+/// Stub action repository for tests that exercise the submit path
+/// or the create-business CTA. Tests that don't care just leave
+/// it null and `_pump` constructs a no-op stub on the fly.
+class _StubActionsRepo implements BusinessActionsRepository {
+  _StubActionsRepo({this.submitResult, this.submitError});
+
+  String? lastSubmitId;
+  CreateBusinessRequest? lastCreateRequest;
+  OwnerBusinessView? submitResult;
+  Object? submitError;
+
+  @override
+  Future<OwnerBusinessView> createBusiness(CreateBusinessRequest req) async {
+    lastCreateRequest = req;
+    throw UnimplementedError('createBusiness not exercised in this test');
+  }
+
+  @override
+  Future<OwnerBusinessView> submitBusiness(String id) async {
+    lastSubmitId = id;
+    if (submitError != null) throw submitError!;
+    return submitResult!;
+  }
+}
+
+class _FakeCategoriesRepo implements CategoriesRepository {
+  _FakeCategoriesRepo(this.items);
+  final List<Category> items;
+  @override
+  Future<List<Category>> list() async => items;
+}
+
 Future<void> _pump(
   WidgetTester tester, {
   required OwnerBusinessRepository repo,
+  BusinessActionsRepository? actionsRepo,
+  CategoriesRepository? categoriesRepo,
 }) async {
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,
       child: MaterialApp(
-        home: OwnerTab(repositoryOverride: repo),
+        home: OwnerTab(
+          repositoryOverride: repo,
+          actionsRepositoryOverride: actionsRepo ?? _StubActionsRepo(),
+          categoriesRepositoryOverride: categoriesRepo,
+        ),
       ),
     ),
   );
@@ -118,7 +160,55 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Draft'), findsOneWidget);
-    expect(find.textContaining('submit for review'), findsOneWidget);
+    expect(
+      find.widgetWithText(FilledButton, 'Submit for review'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('DRAFT banner submit button calls the actions repo',
+      (tester) async {
+    final actions = _StubActionsRepo(
+      submitResult: _sampleBusiness(status: 'PENDING_REVIEW'),
+    );
+    await _pump(
+      tester,
+      repo: _FakeRepo.value(_sampleBusiness(status: 'DRAFT')),
+      actionsRepo: actions,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Submit for review'));
+    await tester.pumpAndSettle();
+
+    expect(actions.lastSubmitId, 'biz-1');
+  });
+
+  testWidgets('tapping "Create your business" pushes CreateBusinessFlow',
+      (tester) async {
+    final repo = _FakeRepo.error(
+      OwnerBusinessLoadFailure(
+        kind: OwnerBusinessLoadFailureKind.notFound,
+        message: 'no business',
+        statusCode: 404,
+      ),
+    );
+    await _pump(
+      tester,
+      repo: repo,
+      actionsRepo: _StubActionsRepo(),
+      categoriesRepo: _FakeCategoriesRepo(const []),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.widgetWithText(FilledButton, 'Create your business'),
+    );
+    await tester.pumpAndSettle();
+
+    // CreateBusinessFlow is on top of the stack.
+    expect(find.byType(CreateBusinessFlow), findsOneWidget);
+    expect(find.text('Tell us about your business'), findsOneWidget);
   });
 
   testWidgets('renders the create-business CTA on 404', (tester) async {
