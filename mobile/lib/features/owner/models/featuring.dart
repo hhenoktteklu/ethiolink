@@ -165,3 +165,98 @@ class FeaturingSubscription {
     );
   }
 }
+
+/// Phase 10 — wire shape returned by
+/// `POST /v1/businesses/{businessId}/featuring/subscribe`. Pairs
+/// the subscription with the gateway-issued payment authorization.
+/// Mobile reads `payment.redirectUrl` and opens the hosted-checkout
+/// URL via `url_launcher` when the gateway returned `PENDING`. Cash
+/// settlement returns `payment.redirectUrl: null` and the
+/// subscription already ACTIVE.
+class SubscribeFeaturingResult {
+  const SubscribeFeaturingResult({
+    required this.subscription,
+    required this.payment,
+  });
+
+  final FeaturingSubscription subscription;
+  final FeaturingPaymentSummary payment;
+
+  factory SubscribeFeaturingResult.fromJson(dynamic json) {
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException(
+        'SubscribeFeaturingResult JSON must be an object.',
+      );
+    }
+    final sub = json['subscription'];
+    final pay = json['payment'];
+    if (sub is! Map<String, dynamic>) {
+      throw const FormatException(
+        'SubscribeFeaturingResult.subscription missing.',
+      );
+    }
+    if (pay is! Map<String, dynamic>) {
+      throw const FormatException(
+        'SubscribeFeaturingResult.payment missing.',
+      );
+    }
+    return SubscribeFeaturingResult(
+      subscription: FeaturingSubscription.fromJson(sub),
+      payment: FeaturingPaymentSummary.fromJson(pay),
+    );
+  }
+}
+
+/// Phase 10 — featuring-side `PaymentSummary`. Defined here
+/// alongside the featuring models rather than imported from the
+/// booking package so the owner code stays free of customer-side
+/// imports. Same shape as the OpenAPI `PaymentSummary`.
+class FeaturingPaymentSummary {
+  const FeaturingPaymentSummary({
+    required this.status,
+    required this.provider,
+    required this.providerRef,
+    required this.redirectUrl,
+    required this.errorCode,
+    required this.errorMessage,
+  });
+
+  final String status;
+  final String provider;
+  final String? providerRef;
+  final String? redirectUrl;
+  final String? errorCode;
+  final String? errorMessage;
+
+  bool get isPending => status == 'PENDING';
+  bool get isSucceeded => status == 'SUCCEEDED';
+  bool get isFailed => status == 'FAILED';
+
+  factory FeaturingPaymentSummary.fromJson(dynamic json) {
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException(
+        'FeaturingPaymentSummary JSON must be an object.',
+      );
+    }
+    final status = json['status'];
+    final provider = json['provider'];
+    if (status is! String || status.isEmpty) {
+      throw const FormatException('PaymentSummary.status missing.');
+    }
+    if (provider is! String || provider.isEmpty) {
+      throw const FormatException('PaymentSummary.provider missing.');
+    }
+    String? optString(String key) {
+      final v = json[key];
+      return v is String && v.isNotEmpty ? v : null;
+    }
+    return FeaturingPaymentSummary(
+      status: status,
+      provider: provider,
+      providerRef: optString('providerRef'),
+      redirectUrl: optString('redirectUrl'),
+      errorCode: optString('errorCode'),
+      errorMessage: optString('errorMessage'),
+    );
+  }
+}

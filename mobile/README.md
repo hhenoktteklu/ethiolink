@@ -220,6 +220,19 @@ If the browser closes but the app stays on the LoginScreen, the deep link didn't
 - `redirectUri` env value doesn't match Cognito's `callback_urls` exactly (Cognito is strict — `ethiolink://auth/callback/` with trailing slash is a different URL).
 - Cognito client ID typo — the IdP returns an error page in the browser; check the URL bar before the browser closes.
 
+### Phase 10 — Chapa hosted-checkout deep link
+
+Online bookings + paid featuring open Chapa's hosted checkout in the system browser via `url_launcher.launchUrl(uri, mode: LaunchMode.externalApplication)`. After the customer completes (or cancels) payment, Chapa redirects to the operator-configured `chapa_return_url` — the backend env stack sets this to `ethiolink://payments/return`. The mobile app doesn't strictly need to consume the return URL — both the booking and the promote screens poll the relevant API endpoint after the launcher fires and surface the payment outcome from the server state — but registering the scheme means deep links from Chapa back into the app surface as a clean foreground transition rather than a "no app handles this URL" toast.
+
+The Android intent filter + iOS `CFBundleURLSchemes` entries from the Cognito setup above already cover the `ethiolink://` scheme — no additional native edits are needed for the `ethiolink://payments/return` path. The backend env-stack variable name is `chapa_return_url` (commit `eed6885`) and the value must match the schemed URL exactly; trailing slashes are significant.
+
+The screens that consume the redirect URL today:
+
+- **Customer booking** — `BookingFlowScreen` confirm step shows a Cash / "Pay now (Chapa)" radio. Picking online + tapping Book hits `POST /v1/appointments` with `paymentMethod = "ONLINE_PENDING"`, opens `payment.redirectUrl` via the launcher, and transitions to a `_PaymentWaitingStep` that polls `GET /v1/me/appointments` every 3 s up to 90 s. CANCELLED rows surface as the failed branch; other statuses optimistically succeed (the server-side webhook is the canonical record).
+- **Owner promote** — `OwnerPromoteScreen` purchase tap drives the same flow: `POST /v1/businesses/{id}/featuring/subscribe` → open Chapa checkout → poll `GET /v1/businesses/{id}/featuring/active` until it returns an ACTIVE subscription (or the budget exhausts). The screen replaces its body with a full-screen waiting overlay so the dashboard returns to the package cards on dismiss.
+
+Both screens expose a `paymentRedirectorOverride` test seam so widget tests inject a fake launcher and never open a real browser.
+
 ## What the scaffold ships
 
 - ✅ Material 3 themed root app with a single navigator stack.

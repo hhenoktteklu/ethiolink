@@ -77,20 +77,61 @@ ApiClient _clientFor(_RecordingAdapter adapter, {String? token}) {
   );
 }
 
+/// Phase 10 — the wrapped `CreateAppointmentResponse` shape. Cash
+/// bookings ship `payment.redirectUrl: null` and `status:
+/// SUCCEEDED`.
 const _validResponse = '''
 {
-  "id": "apt-1",
-  "customerId": "cust-1",
-  "businessId": "biz-1",
-  "serviceId": "srv-1",
-  "staffId": "stf-1",
-  "startsAt": "2026-05-15T09:30:00.000Z",
-  "endsAt": "2026-05-15T10:00:00.000Z",
-  "status": "REQUESTED",
-  "paymentMethod": "CASH",
-  "priceEtb": 300,
-  "createdAt": "2026-05-14T00:00:00.000Z",
-  "updatedAt": "2026-05-14T00:00:00.000Z"
+  "appointment": {
+    "id": "apt-1",
+    "customerId": "cust-1",
+    "businessId": "biz-1",
+    "serviceId": "srv-1",
+    "staffId": "stf-1",
+    "startsAt": "2026-05-15T09:30:00.000Z",
+    "endsAt": "2026-05-15T10:00:00.000Z",
+    "status": "REQUESTED",
+    "paymentMethod": "CASH",
+    "priceEtb": 300,
+    "createdAt": "2026-05-14T00:00:00.000Z",
+    "updatedAt": "2026-05-14T00:00:00.000Z"
+  },
+  "payment": {
+    "status": "SUCCEEDED",
+    "provider": "CASH",
+    "providerRef": null,
+    "redirectUrl": null,
+    "errorCode": null,
+    "errorMessage": null
+  }
+}
+''';
+
+/// Phase 10 — Chapa PENDING wrapper response.
+const _pendingChapaResponse = '''
+{
+  "appointment": {
+    "id": "apt-1",
+    "customerId": "cust-1",
+    "businessId": "biz-1",
+    "serviceId": "srv-1",
+    "staffId": "stf-1",
+    "startsAt": "2026-05-15T09:30:00.000Z",
+    "endsAt": "2026-05-15T10:00:00.000Z",
+    "status": "REQUESTED",
+    "paymentMethod": "ONLINE_PENDING",
+    "priceEtb": 300,
+    "createdAt": "2026-05-14T00:00:00.000Z",
+    "updatedAt": "2026-05-14T00:00:00.000Z"
+  },
+  "payment": {
+    "status": "PENDING",
+    "provider": "CHAPA",
+    "providerRef": "apt-1-aaaaaaaa",
+    "redirectUrl": "https://checkout.chapa.test/sess-001",
+    "errorCode": null,
+    "errorMessage": null
+  }
 }
 ''';
 
@@ -122,10 +163,38 @@ void main() {
       expect(body['startsAt'], '2026-05-15T09:30:00.000Z');
       expect(body['paymentMethod'], 'CASH');
       expect(body.containsKey('notes'), isFalse);
-      // Response decoded.
-      expect(apt.id, 'apt-1');
-      expect(apt.status, 'REQUESTED');
+      // Phase 10 — response decoded into the wrapper shape.
+      expect(apt.appointment.id, 'apt-1');
+      expect(apt.appointment.status, 'REQUESTED');
+      expect(apt.payment.status, 'SUCCEEDED');
+      expect(apt.payment.provider, 'CASH');
+      expect(apt.payment.redirectUrl, isNull);
     });
+
+    test(
+      'Phase 10 — Chapa PENDING response surfaces redirectUrl + providerRef',
+      () async {
+        final adapter = _RecordingAdapter([
+          _AdapterResponse(200, _pendingChapaResponse),
+        ]);
+        final repo = HttpAppointmentsRepository(_clientFor(adapter));
+
+        final result = await repo.create(
+          staffId: 'stf-1',
+          serviceId: 'srv-1',
+          startsAtIso: '2026-05-15T09:30:00.000Z',
+          paymentMethod: 'ONLINE_PENDING',
+        );
+        expect(result.payment.status, 'PENDING');
+        expect(result.payment.provider, 'CHAPA');
+        expect(result.payment.providerRef, 'apt-1-aaaaaaaa');
+        expect(
+          result.payment.redirectUrl,
+          'https://checkout.chapa.test/sess-001',
+        );
+        expect(result.payment.isPending, isTrue);
+      },
+    );
 
     test('includes notes when provided', () async {
       final adapter = _RecordingAdapter([_AdapterResponse(200, _validResponse)]);

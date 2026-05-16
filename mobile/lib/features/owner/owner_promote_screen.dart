@@ -34,13 +34,26 @@
 // regardless of the active state so owners can audit past
 // subscriptions (including admin comps).
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
 import 'data/featuring_repository.dart';
 import 'models/featuring.dart';
 import 'owner_featuring_history_screen.dart';
+
+/// Phase 10 — `Future<bool>` mirrors `url_launcher.launchUrl`'s
+/// return value. Test seam: injected so widget tests don't open a
+/// real browser.
+typedef PaymentRedirector = Future<bool> Function(String url);
+
+Future<bool> _defaultPaymentRedirector(String url) async {
+  final uri = Uri.parse(url);
+  return launchUrl(uri, mode: LaunchMode.externalApplication);
+}
 
 /// Snapshot of the parallel load. Both queries succeed before the
 /// screen renders the success branch — if either fails, we surface
@@ -59,6 +72,9 @@ class OwnerPromoteScreen extends StatefulWidget {
   const OwnerPromoteScreen({
     required this.businessId,
     this.repositoryOverride,
+    this.paymentRedirectorOverride,
+    this.paymentPollInterval = const Duration(seconds: 3),
+    this.paymentPollMaxAttempts = 30,
     super.key,
   });
 
@@ -70,12 +86,25 @@ class OwnerPromoteScreen extends StatefulWidget {
   /// from the `AppConfigScope` `AppConfig`.
   final FeaturingRepository? repositoryOverride;
 
+  /// Phase 10 — test seam for `url_launcher`. Tests inject a fake
+  /// that records the URL without opening a browser.
+  final PaymentRedirector? paymentRedirectorOverride;
+
+  /// Phase 10 — interval between active-status polls during the
+  /// Chapa hosted-checkout wait. Production default 3 s.
+  final Duration paymentPollInterval;
+
+  /// Phase 10 — max number of active-status polls before showing
+  /// the timed-out branch. Production default 30 (90 s wall-clock).
+  final int paymentPollMaxAttempts;
+
   @override
   State<OwnerPromoteScreen> createState() => _OwnerPromoteScreenState();
 }
 
 class _OwnerPromoteScreenState extends State<OwnerPromoteScreen> {
   FeaturingRepository? _repo;
+  late final PaymentRedirector _redirector;
   Future<_PromoteSnapshot>? _future;
 
   /// `true` while a subscribe request is in flight. Disables the
@@ -86,6 +115,15 @@ class _OwnerPromoteScreenState extends State<OwnerPromoteScreen> {
   /// above the package cards. Cleared on the next successful load.
   FeaturingFailure? _subscribeError;
 
+  /// Phase 10 — payment-waiting state. When the subscribe gateway
+  /// returns PENDING + a redirectUrl, the screen transitions to a
+  /// modal full-screen overlay that opens Chapa and polls
+  /// `getActive` for the transition to ACTIVE.
+  _PromotePaymentPhase? _payingPhase;
+  Timer? _payingTimer;
+  int _payingAttempt = 0;
+  String? _payingErrorMessage;
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -94,7 +132,15 @@ class _OwnerPromoteScreenState extends State<OwnerPromoteScreen> {
         HttpFeaturingRepository(
           ApiClient(config: AppConfigScope.of(context)),
         );
+    _redirector =
+        widget.paymentRedirectorOverride ?? _defaultPaymentRedirector;
     _refresh();
+  }
+
+  @override
+  void dispose() {
+    _payingTimer?.cancel();
+    super.dispose();
   }
 
   void _refresh() {
@@ -119,11 +165,27 @@ class _OwnerPromoteScreenState extends State<OwnerPromoteScreen> {
       _subscribeError = null;
     });
     try {
-      final sub = await _repo!.subscribe(widget.businessId, pkg.code);
+      final result = await _repo!.subscribe(widget.businessId, pkg.code);
       if (!mounted) return;
+      // Phase 10 — synchronous SUCCEEDED (cash settlement) lands
+      // directly. PENDING + redirectUrl dives into the Chapa
+      // hosted-checkout dance. SUCCEEDED with the subscription
+      // ACTIVE both run through the same SnackBar + refresh.
+      if (result.payment.isPending &&
+          result.payment.redirectUrl != null) {
+        setState(() {
+          _busyPackageCode = null;
+          _payingPhase = _PromotePaymentPhase.opening;
+          _payingAttempt = 0;
+          _payingErrorMessage = null;
+        });
+        await _openChapaAndPoll(result.payment.redirectUrl!);
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Featured until ${_formatDate(sub.endsAt)}.'),
+          content:
+              Text('Featured until ${_formatDate(result.subscription.endsAt)}.'),
           duration: const Duration(seconds: 3),
         ),
       );
@@ -134,6 +196,74 @@ class _OwnerPromoteScreenState extends State<OwnerPromoteScreen> {
     } finally {
       if (mounted) setState(() => _busyPackageCode = null);
     }
+  }
+
+  Future<void> _openChapaAndPoll(String redirectUrl) async {
+    bool launched;
+    try {
+      launched = await _redirector(redirectUrl);
+    } catch (err) {
+      launched = false;
+      _payingErrorMessage = err.toString();
+    }
+    if (!mounted) return;
+    if (!launched) {
+      setState(() {
+        _payingPhase = _PromotePaymentPhase.failed;
+        _payingErrorMessage ??=
+            'Could not open the Chapa checkout. Try again or pick cash.';
+      });
+      return;
+    }
+    setState(() => _payingPhase = _PromotePaymentPhase.polling);
+    _schedulePoll();
+  }
+
+  void _schedulePoll() {
+    _payingTimer?.cancel();
+    _payingTimer = Timer(widget.paymentPollInterval, _pollActive);
+  }
+
+  Future<void> _pollActive() async {
+    if (!mounted) return;
+    _payingAttempt += 1;
+    try {
+      final active = await _repo!.getActive(widget.businessId);
+      if (active != null && active.isActive) {
+        setState(() {
+          _payingPhase = _PromotePaymentPhase.succeeded;
+        });
+        return;
+      }
+    } catch (_) {
+      // Swallow a poll error and try again. The attempt budget
+      // protects against an indefinite loop.
+    }
+    if (!mounted) return;
+    if (_payingPhase == _PromotePaymentPhase.succeeded ||
+        _payingPhase == _PromotePaymentPhase.failed) {
+      return;
+    }
+    if (_payingAttempt >= widget.paymentPollMaxAttempts) {
+      setState(() => _payingPhase = _PromotePaymentPhase.timedOut);
+      return;
+    }
+    _schedulePoll();
+  }
+
+  void _retryPollNow() {
+    _payingTimer?.cancel();
+    _pollActive();
+  }
+
+  void _dismissPayingOverlay() {
+    _payingTimer?.cancel();
+    setState(() {
+      _payingPhase = null;
+      _payingAttempt = 0;
+      _payingErrorMessage = null;
+    });
+    _refresh();
   }
 
   void _openHistory() {
@@ -160,37 +290,201 @@ class _OwnerPromoteScreenState extends State<OwnerPromoteScreen> {
           ),
         ],
       ),
-      body: RefreshIndicator(
-        onRefresh: () async {
-          _refresh();
-          try {
-            await _future;
-          } catch (_) {/* surfaced in FutureBuilder */}
-        },
-        child: FutureBuilder<_PromoteSnapshot>(
-          future: _future,
-          builder: (context, snap) {
-            if (snap.connectionState == ConnectionState.waiting) {
-              return const _Loading();
-            }
-            if (snap.hasError) {
-              return _LoadErrorBranch(
-                error: snap.error!,
-                onRetry: _refresh,
-                onOpenHistory: _openHistory,
-              );
-            }
-            final data = snap.data!;
-            return _PromoteBody(
-              active: data.active,
-              packages: data.packages,
-              subscribeError: _subscribeError,
-              busyPackageCode: _busyPackageCode,
-              onPurchase: _subscribe,
-              onOpenHistory: _openHistory,
-            );
-          },
-        ),
+      body: _payingPhase != null
+          ? _PromotePaymentWaitingBody(
+              phase: _payingPhase!,
+              attempt: _payingAttempt,
+              maxAttempts: widget.paymentPollMaxAttempts,
+              errorMessage: _payingErrorMessage,
+              onCheckNow: _retryPollNow,
+              onClose: _dismissPayingOverlay,
+            )
+          : RefreshIndicator(
+              onRefresh: () async {
+                _refresh();
+                try {
+                  await _future;
+                } catch (_) {/* surfaced in FutureBuilder */}
+              },
+              child: FutureBuilder<_PromoteSnapshot>(
+                future: _future,
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const _Loading();
+                  }
+                  if (snap.hasError) {
+                    return _LoadErrorBranch(
+                      error: snap.error!,
+                      onRetry: _refresh,
+                      onOpenHistory: _openHistory,
+                    );
+                  }
+                  final data = snap.data!;
+                  return _PromoteBody(
+                    active: data.active,
+                    packages: data.packages,
+                    subscribeError: _subscribeError,
+                    busyPackageCode: _busyPackageCode,
+                    onPurchase: _subscribe,
+                    onOpenHistory: _openHistory,
+                  );
+                },
+              ),
+            ),
+    );
+  }
+}
+
+/// Phase 10 — Chapa hosted-checkout waiting overlay state.
+enum _PromotePaymentPhase { opening, polling, succeeded, failed, timedOut }
+
+class _PromotePaymentWaitingBody extends StatelessWidget {
+  const _PromotePaymentWaitingBody({
+    required this.phase,
+    required this.attempt,
+    required this.maxAttempts,
+    required this.errorMessage,
+    required this.onCheckNow,
+    required this.onClose,
+  });
+
+  final _PromotePaymentPhase phase;
+  final int attempt;
+  final int maxAttempts;
+  final String? errorMessage;
+  final VoidCallback onCheckNow;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    switch (phase) {
+      case _PromotePaymentPhase.opening:
+        return _OverlayColumn(
+          icon: Icons.open_in_new,
+          iconColor: colors.primary,
+          title: 'Opening Chapa checkout…',
+          message:
+              "We're opening the Chapa hosted checkout in your browser. "
+              'Complete the payment, then return to this screen.',
+          children: const [
+            SizedBox(height: 16),
+            CircularProgressIndicator(),
+          ],
+        );
+      case _PromotePaymentPhase.polling:
+        return _OverlayColumn(
+          icon: Icons.hourglass_top,
+          iconColor: colors.primary,
+          title: 'Waiting for payment…',
+          message:
+              "We'll automatically refresh when Chapa confirms your "
+              "payment. Don't close the app — checking $attempt of $maxAttempts.",
+          children: [
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onCheckNow,
+              icon: const Icon(Icons.refresh),
+              label: const Text('I paid — check now'),
+            ),
+          ],
+        );
+      case _PromotePaymentPhase.succeeded:
+        return _OverlayColumn(
+          icon: Icons.check_circle,
+          iconColor: colors.primary,
+          title: 'Featured!',
+          message:
+              'Your business is now featured. The card you see next '
+              'reflects the new status.',
+          children: [
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: onClose,
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      case _PromotePaymentPhase.failed:
+        return _OverlayColumn(
+          icon: Icons.error_outline,
+          iconColor: colors.error,
+          title: 'Payment failed',
+          message: errorMessage ??
+              'We could not complete the Chapa payment. Try again, or '
+                  'contact support if the issue persists.',
+          children: [
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onClose,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back to packages'),
+            ),
+          ],
+        );
+      case _PromotePaymentPhase.timedOut:
+        return _OverlayColumn(
+          icon: Icons.hourglass_disabled,
+          iconColor: colors.onSurfaceVariant,
+          title: 'Still processing',
+          message:
+              'Chapa is taking longer than expected to confirm your '
+              'payment. Check this screen in a few minutes — featured '
+              "status appears automatically once payment lands.",
+          children: [
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onCheckNow,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Check again'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: onClose,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Back to packages'),
+            ),
+          ],
+        );
+    }
+  }
+}
+
+class _OverlayColumn extends StatelessWidget {
+  const _OverlayColumn({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.message,
+    this.children = const [],
+  });
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String message;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: iconColor),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.titleLarge,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(message, textAlign: TextAlign.center),
+          ...children,
+        ],
       ),
     );
   }

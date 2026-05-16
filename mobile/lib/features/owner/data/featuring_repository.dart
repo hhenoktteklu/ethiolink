@@ -21,7 +21,13 @@ import '../models/featuring.dart';
 /// pass a fake.
 abstract class FeaturingRepository {
   Future<List<FeaturingPackage>> listPackages(String businessId);
-  Future<FeaturingSubscription> subscribe(
+
+  /// Phase 10 — returns the wrapped `SubscribeFeaturingResult`
+  /// (`{ subscription, payment }`) so the owner-side UI can read
+  /// `payment.redirectUrl` for the Chapa hosted-checkout dance.
+  /// Cash settlement ships `payment.redirectUrl: null` and the
+  /// subscription already ACTIVE.
+  Future<SubscribeFeaturingResult> subscribe(
     String businessId,
     String packageCode,
   );
@@ -156,15 +162,15 @@ class HttpFeaturingRepository implements FeaturingRepository {
   }
 
   @override
-  Future<FeaturingSubscription> subscribe(
+  Future<SubscribeFeaturingResult> subscribe(
     String businessId,
     String packageCode,
   ) async {
     try {
-      return await _client.postJson<FeaturingSubscription>(
+      return await _client.postJson<SubscribeFeaturingResult>(
         _subscribePath(businessId),
         body: <String, dynamic>{'packageCode': packageCode},
-        parse: FeaturingSubscription.fromJson,
+        parse: SubscribeFeaturingResult.fromJson,
       );
     } on FormatException catch (e) {
       throw FeaturingFailure(

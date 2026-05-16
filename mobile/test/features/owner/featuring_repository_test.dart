@@ -194,14 +194,30 @@ void main() {
   group('HttpFeaturingRepository.subscribe', () {
     test('POSTs the subscribe path with {packageCode} and decodes',
         () async {
+      // Phase 10 — the wire shape is now wrapped:
+      // `{ subscription, payment }`. Cash settlement ships
+      // payment.redirectUrl = null + status SUCCEEDED.
+      final wrappedJson = json.encode({
+        'subscription': json.decode(_subscriptionJson()),
+        'payment': {
+          'status': 'SUCCEEDED',
+          'provider': 'CASH',
+          'providerRef': null,
+          'redirectUrl': null,
+          'errorCode': null,
+          'errorMessage': null,
+        },
+      });
       final adapter = _RecordingAdapter([
-        _AdapterResponse(200, _subscriptionJson()),
+        _AdapterResponse(200, wrappedJson),
       ]);
       final repo = HttpFeaturingRepository(_clientFor(adapter));
 
-      final sub = await repo.subscribe('biz-1', 'FEATURING_7D');
-      expect(sub.id, 'sub-1');
-      expect(sub.isActive, isTrue);
+      final result = await repo.subscribe('biz-1', 'FEATURING_7D');
+      expect(result.subscription.id, 'sub-1');
+      expect(result.subscription.isActive, isTrue);
+      expect(result.payment.isSucceeded, isTrue);
+      expect(result.payment.redirectUrl, isNull);
 
       final req = adapter.captured[0];
       expect(req.method, 'POST');
@@ -209,6 +225,36 @@ void main() {
       final body = req.data as Map<String, dynamic>;
       expect(body['packageCode'], 'FEATURING_7D');
     });
+
+    test(
+      'Phase 10 — Chapa PENDING response surfaces redirectUrl',
+      () async {
+        final wrappedJson = json.encode({
+          'subscription': json.decode(
+              _subscriptionJson(status: 'PENDING_PAYMENT')),
+          'payment': {
+            'status': 'PENDING',
+            'provider': 'CHAPA',
+            'providerRef': 'feat-1-aaaa',
+            'redirectUrl': 'https://checkout.chapa.test/sess-001',
+            'errorCode': null,
+            'errorMessage': null,
+          },
+        });
+        final adapter = _RecordingAdapter([
+          _AdapterResponse(200, wrappedJson),
+        ]);
+        final repo = HttpFeaturingRepository(_clientFor(adapter));
+
+        final result = await repo.subscribe('biz-1', 'FEATURING_7D');
+        expect(result.payment.isPending, isTrue);
+        expect(
+          result.payment.redirectUrl,
+          'https://checkout.chapa.test/sess-001',
+        );
+        expect(result.payment.providerRef, 'feat-1-aaaa');
+      },
+    );
 
     test('409 CONFLICT → kind=alreadyActive', () async {
       final adapter = _RecordingAdapter([

@@ -131,3 +131,111 @@ class Appointment {
     return [for (final item in items) Appointment.fromJson(item)];
   }
 }
+
+/// Phase 10 — payment-gateway authorization summary attached to
+/// the appointment + featuring create responses. Mirrors the
+/// OpenAPI `PaymentSummary` schema. `redirectUrl` carries the
+/// Chapa hosted-checkout URL when the gateway returned `PENDING`;
+/// cash bookings ship `redirectUrl: null` and `status:
+/// SUCCEEDED`.
+class PaymentSummary {
+  const PaymentSummary({
+    required this.status,
+    required this.provider,
+    required this.providerRef,
+    required this.redirectUrl,
+    required this.errorCode,
+    required this.errorMessage,
+  });
+
+  /// One of `SUCCEEDED` / `PENDING` / `FAILED`.
+  final String status;
+
+  /// One of `CASH` / `MOCK` / `TELEBIRR` / `CHAPA` / `CBE_BIRR`.
+  final String provider;
+
+  /// Upstream-issued transaction reference (Chapa `tx_ref`).
+  /// `null` for synchronous gateways like CASH.
+  final String? providerRef;
+
+  /// Provider-hosted checkout URL. Non-null only when
+  /// `status == PENDING` AND the gateway uses a redirect-then-confirm
+  /// model (Chapa, future Telebirr). The booking + featuring screens
+  /// open this via `url_launcher` and transition to the waiting
+  /// screen.
+  final String? redirectUrl;
+
+  /// Short stable code on FAILED outcomes; null otherwise.
+  final String? errorCode;
+
+  /// Human-readable failure reason; null otherwise.
+  final String? errorMessage;
+
+  bool get isPending => status == 'PENDING';
+  bool get isSucceeded => status == 'SUCCEEDED';
+  bool get isFailed => status == 'FAILED';
+
+  factory PaymentSummary.fromJson(dynamic json) {
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException('PaymentSummary JSON must be an object.');
+    }
+    final status = json['status'];
+    final provider = json['provider'];
+    if (status is! String || status.isEmpty) {
+      throw const FormatException('PaymentSummary.status missing.');
+    }
+    if (provider is! String || provider.isEmpty) {
+      throw const FormatException('PaymentSummary.provider missing.');
+    }
+    String? optString(String key) {
+      final v = json[key];
+      return v is String && v.isNotEmpty ? v : null;
+    }
+
+    return PaymentSummary(
+      status: status,
+      provider: provider,
+      providerRef: optString('providerRef'),
+      redirectUrl: optString('redirectUrl'),
+      errorCode: optString('errorCode'),
+      errorMessage: optString('errorMessage'),
+    );
+  }
+}
+
+/// Phase 10 — wire shape returned by `POST /v1/appointments`.
+/// Wraps the appointment with a `payment` block carrying
+/// `redirectUrl` / status / providerRef.
+class CreateAppointmentResponse {
+  const CreateAppointmentResponse({
+    required this.appointment,
+    required this.payment,
+  });
+
+  final Appointment appointment;
+  final PaymentSummary payment;
+
+  factory CreateAppointmentResponse.fromJson(dynamic json) {
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException(
+        'CreateAppointmentResponse JSON must be an object.',
+      );
+    }
+    final appointment = json['appointment'];
+    final payment = json['payment'];
+    if (appointment is! Map<String, dynamic>) {
+      throw const FormatException(
+        'CreateAppointmentResponse.appointment missing.',
+      );
+    }
+    if (payment is! Map<String, dynamic>) {
+      throw const FormatException(
+        'CreateAppointmentResponse.payment missing.',
+      );
+    }
+    return CreateAppointmentResponse(
+      appointment: Appointment.fromJson(appointment),
+      payment: PaymentSummary.fromJson(payment),
+    );
+  }
+}

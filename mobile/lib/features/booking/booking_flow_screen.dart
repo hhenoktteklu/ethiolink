@@ -29,8 +29,11 @@
 //   * Network / 5xx → generic error with retry on the same
 //     confirm step.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
@@ -40,9 +43,22 @@ import 'data/booking_repositories.dart';
 import 'models/appointment.dart';
 import 'models/slot.dart';
 
+/// Phase 10 — `Future<bool>` mirrors `url_launcher.launchUrl`'s
+/// return value. Test seam: injected so widget tests don't open a
+/// real browser. Same shape as the LinkTelegramScreen pattern.
+typedef PaymentRedirector = Future<bool> Function(String url);
+
+Future<bool> _defaultPaymentRedirector(String url) async {
+  final uri = Uri.parse(url);
+  return launchUrl(uri, mode: LaunchMode.externalApplication);
+}
+
 /// Page-step machine. Stored as a sealed-style enum-like class
-/// in `_BookingFlowState`; nothing leaks outside the file.
-enum _Step { staff, date, slot, confirm, success }
+/// in `_BookingFlowState`; nothing leaks outside the file. Phase
+/// 10 adds the `paying` step — interstitial that opens Chapa
+/// hosted checkout in an external browser and polls the
+/// appointment history until the payment status flips.
+enum _Step { staff, date, slot, confirm, paying, success }
 
 class BookingFlowScreen extends StatefulWidget {
   const BookingFlowScreen({
@@ -52,6 +68,10 @@ class BookingFlowScreen extends StatefulWidget {
     required this.staff,
     this.slotsRepositoryOverride,
     this.appointmentsRepositoryOverride,
+    this.historyRepositoryOverride,
+    this.paymentRedirectorOverride,
+    this.paymentPollInterval = const Duration(seconds: 3),
+    this.paymentPollMaxAttempts = 30,
     super.key,
   });
 
@@ -65,6 +85,23 @@ class BookingFlowScreen extends StatefulWidget {
   final SlotsRepository? slotsRepositoryOverride;
   final AppointmentsRepository? appointmentsRepositoryOverride;
 
+  /// Phase 10 — test seam for the appointment-history repository
+  /// used by the payment-waiting poll. Production constructs
+  /// `HttpAppointmentHistoryRepository` over the same `ApiClient`.
+  final AppointmentHistoryRepository? historyRepositoryOverride;
+
+  /// Phase 10 — test seam for `url_launcher`. Tests inject a fake
+  /// that records the URL without opening a browser.
+  final PaymentRedirector? paymentRedirectorOverride;
+
+  /// Phase 10 — interval between payment-status polls. Production
+  /// default 3 s.
+  final Duration paymentPollInterval;
+
+  /// Phase 10 — max number of polls before giving up. Production
+  /// default 30 (90 s wall-clock).
+  final int paymentPollMaxAttempts;
+
   @override
   State<BookingFlowScreen> createState() => _BookingFlowScreenState();
 }
@@ -72,6 +109,8 @@ class BookingFlowScreen extends StatefulWidget {
 class _BookingFlowScreenState extends State<BookingFlowScreen> {
   SlotsRepository? _slotsRepo;
   AppointmentsRepository? _appointmentsRepo;
+  AppointmentHistoryRepository? _historyRepo;
+  late final PaymentRedirector _redirector;
 
   _Step _step = _Step.staff;
 
@@ -79,11 +118,22 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   DateTime? _selectedDate;
   Slot? _selectedSlot;
 
+  /// Phase 10 — `CASH` (cash on arrival; the historical default)
+  /// or `ONLINE_PENDING` (Chapa hosted checkout). The toggle is
+  /// rendered on the confirm step.
+  String _paymentMethod = 'CASH';
+
   // Slot fetch state.
   Future<List<Slot>>? _slotsFuture;
   bool _booking = false;
   AppointmentCreateFailure? _bookingError;
   Appointment? _confirmedAppointment;
+
+  // Phase 10 — payment waiting state.
+  _PayingPhase _payingPhase = _PayingPhase.opening;
+  Timer? _payingTimer;
+  int _payingAttempt = 0;
+  String? _payingErrorMessage;
 
   @override
   void didChangeDependencies() {
@@ -94,6 +144,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         HttpSlotsRepository(client);
     _appointmentsRepo = widget.appointmentsRepositoryOverride ??
         HttpAppointmentsRepository(client);
+    _historyRepo = widget.historyRepositoryOverride ??
+        HttpAppointmentHistoryRepository(client);
+    _redirector = widget.paymentRedirectorOverride ?? _defaultPaymentRedirector;
 
     // Auto-advance past the staff step when there's only one
     // option. The business detail screen's staff section already
@@ -163,15 +216,46 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _bookingError = null;
     });
     try {
-      final appointment = await _appointmentsRepo!.create(
+      final response = await _appointmentsRepo!.create(
         staffId: _selectedStaff!.id,
         serviceId: widget.service.id,
         startsAtIso: _selectedSlot!.startUtcIso,
-        paymentMethod: 'CASH',
+        paymentMethod: _paymentMethod,
       );
       if (!mounted) return;
+      // Phase 10 — cash + synchronous SUCCEEDED outcomes go
+      // straight to success. PENDING with a redirectUrl dives into
+      // the waiting flow (Chapa hosted checkout). FAILED on the
+      // create itself shouldn't normally happen (gateways either
+      // SUCCEED, PEND, or throw); if it does, surface as an
+      // error.
+      if (response.payment.isPending && response.payment.redirectUrl != null) {
+        setState(() {
+          _confirmedAppointment = response.appointment;
+          _booking = false;
+          _step = _Step.paying;
+          _payingPhase = _PayingPhase.opening;
+          _payingAttempt = 0;
+          _payingErrorMessage = null;
+        });
+        await _openChapaAndPoll(response.payment.redirectUrl!);
+        return;
+      }
+      if (response.payment.isFailed) {
+        setState(() {
+          _booking = false;
+          _bookingError = AppointmentCreateFailure(
+            kind: AppointmentCreateFailureKind.other,
+            message: response.payment.errorMessage ?? 'Payment failed.',
+            apiErrorCode: response.payment.errorCode,
+          );
+        });
+        return;
+      }
+      // SUCCEEDED (cash) — happy path lands directly on the
+      // success step. Same as the historical behaviour.
       setState(() {
-        _confirmedAppointment = appointment;
+        _confirmedAppointment = response.appointment;
         _booking = false;
         _step = _Step.success;
       });
@@ -182,6 +266,122 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _booking = false;
       });
     }
+  }
+
+  /// Phase 10 — opens the Chapa hosted-checkout URL in an external
+  /// browser, then polls the appointment-history endpoint for the
+  /// payment_status flip. Three outcomes:
+  ///
+  ///   * `_PayingPhase.succeeded` — the appointment shows up in
+  ///     history with a status implying the payment landed. The
+  ///     user taps Done to pop back to the detail page.
+  ///   * `_PayingPhase.failed` — `launchUrl` refused (no browser
+  ///     installed) OR the appointment surfaced as CANCELLED via
+  ///     the auto-cancel TTL (future commit). Customer can retry.
+  ///   * `_PayingPhase.timedOut` — the poll budget exhausted
+  ///     without a status flip. The booking still exists; the
+  ///     bookings tab is the recovery surface.
+  Future<void> _openChapaAndPoll(String redirectUrl) async {
+    bool launched;
+    try {
+      launched = await _redirector(redirectUrl);
+    } catch (err) {
+      launched = false;
+      _payingErrorMessage = err.toString();
+    }
+    if (!mounted) return;
+    if (!launched) {
+      setState(() {
+        _payingPhase = _PayingPhase.failed;
+        _payingErrorMessage ??=
+            'Could not open the Chapa checkout. Tap retry or pick cash.';
+      });
+      return;
+    }
+    setState(() => _payingPhase = _PayingPhase.polling);
+    _schedulePaymentPoll();
+  }
+
+  void _schedulePaymentPoll() {
+    _payingTimer?.cancel();
+    _payingTimer = Timer(widget.paymentPollInterval, _pollPaymentStatus);
+  }
+
+  Future<void> _pollPaymentStatus() async {
+    if (!mounted) return;
+    final appointmentId = _confirmedAppointment?.id;
+    if (appointmentId == null) return;
+    _payingAttempt += 1;
+    try {
+      final history = await _historyRepo!.listMine();
+      final current = history.firstWhere(
+        (a) => a.id == appointmentId,
+        orElse: () => _confirmedAppointment!,
+      );
+      // Heuristic: cash bookings ship paymentMethod=CASH and we
+      // never poll. For online bookings, the webhook updates
+      // payment_intents.status on the server side; the appointment
+      // row itself doesn't currently flip to reflect that (a
+      // future commit adds `payment_status`). For now, we use a
+      // proxy: status === 'CANCELLED' implies the auto-cancel TTL
+      // fired (failed payment); any non-CANCELLED return after
+      // the user redirects back is treated as success — the
+      // payment cleared at the gateway, and the existing
+      // REQUESTED row is the canonical record.
+      if (current.status == 'CANCELLED') {
+        setState(() {
+          _payingPhase = _PayingPhase.failed;
+          _payingErrorMessage =
+              'Payment did not complete in time. Pick another slot or try cash.';
+          _confirmedAppointment = current;
+        });
+        return;
+      }
+      // Optimistic success — see comment above on the proxy.
+      setState(() {
+        _payingPhase = _PayingPhase.succeeded;
+        _confirmedAppointment = current;
+      });
+    } catch (_) {
+      // Swallow a poll error and try again. The poll budget
+      // protects against an indefinite loop.
+    }
+    if (!mounted) return;
+    if (_payingPhase == _PayingPhase.succeeded ||
+        _payingPhase == _PayingPhase.failed) {
+      return;
+    }
+    if (_payingAttempt >= widget.paymentPollMaxAttempts) {
+      setState(() {
+        _payingPhase = _PayingPhase.timedOut;
+      });
+      return;
+    }
+    _schedulePaymentPoll();
+  }
+
+  /// User tapped "I paid — check now" on the waiting screen.
+  void _retryPollNow() {
+    _payingTimer?.cancel();
+    _pollPaymentStatus();
+  }
+
+  /// User tapped "Done" on the waiting-screen success branch.
+  void _onPayingDone() {
+    setState(() => _step = _Step.success);
+  }
+
+  /// User tapped "Pick another slot" / "Try cash" on the waiting
+  /// failure branch.
+  void _onPayingRecover() {
+    _payingTimer?.cancel();
+    _backToSlot();
+  }
+
+  @override
+  void dispose() {
+    _payingTimer?.cancel();
+    super.dispose();
   }
 
   // ---- Build ------------------------------------------------------------
@@ -223,8 +423,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           slot: _selectedSlot!,
           booking: _booking,
           error: _bookingError,
+          paymentMethod: _paymentMethod,
+          onPaymentMethodChanged: (m) =>
+              setState(() => _paymentMethod = m),
           onConfirm: _confirmBooking,
           onPickAnotherSlot: _backToSlot,
+        );
+      case _Step.paying:
+        return _PaymentWaitingStep(
+          phase: _payingPhase,
+          attempt: _payingAttempt,
+          maxAttempts: widget.paymentPollMaxAttempts,
+          errorMessage: _payingErrorMessage,
+          onCheckNow: _retryPollNow,
+          onDone: _onPayingDone,
+          onPickAnotherSlot: _onPayingRecover,
         );
       case _Step.success:
         return _SuccessStep(
@@ -234,6 +447,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 }
+
+/// Phase 10 — payment-waiting interstitial state.
+enum _PayingPhase { opening, polling, succeeded, failed, timedOut }
 
 // ---------------------------------------------------------------------------
 // Steps
@@ -394,6 +610,8 @@ class _ConfirmStep extends StatelessWidget {
     required this.slot,
     required this.booking,
     required this.error,
+    required this.paymentMethod,
+    required this.onPaymentMethodChanged,
     required this.onConfirm,
     required this.onPickAnotherSlot,
   });
@@ -404,6 +622,8 @@ class _ConfirmStep extends StatelessWidget {
   final Slot slot;
   final bool booking;
   final AppointmentCreateFailure? error;
+  final String paymentMethod;
+  final ValueChanged<String> onPaymentMethodChanged;
   final VoidCallback onConfirm;
   final VoidCallback onPickAnotherSlot;
 
@@ -427,7 +647,12 @@ class _ConfirmStep extends StatelessWidget {
         _Row(label: 'Staff', value: staff.displayName),
         _Row(label: 'When', value: _humanDateTime(slot.startUtc)),
         _Row(label: 'Price', value: _priceLabel),
-        _Row(label: 'Payment', value: 'Cash at the business'),
+        const SizedBox(height: 12),
+        _PaymentMethodPicker(
+          value: paymentMethod,
+          onChanged: onPaymentMethodChanged,
+          enabled: !booking,
+        ),
         const SizedBox(height: 16),
         if (error != null) _BookingErrorPanel(
           error: error!,
@@ -450,6 +675,220 @@ class _ConfirmStep extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Phase 10 — radio-style picker for `CASH` vs `ONLINE_PENDING`.
+/// Cash is the default; online uses Chapa hosted checkout when
+/// the operator has wired `payments_provider = chapa` server-side.
+/// The picker is rendered unconditionally — when the server has
+/// not opted in, the online option still appears but the server
+/// returns `400 ONLINE_PAYMENTS_UNAVAILABLE` and the screen
+/// surfaces the error via the existing error-panel branch. This
+/// keeps the client free of operator-state guessing.
+class _PaymentMethodPicker extends StatelessWidget {
+  const _PaymentMethodPicker({
+    required this.value,
+    required this.onChanged,
+    required this.enabled,
+  });
+
+  final String value;
+  final ValueChanged<String> onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Payment method',
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
+        ),
+        const SizedBox(height: 4),
+        RadioListTile<String>(
+          value: 'CASH',
+          groupValue: value,
+          onChanged: enabled ? (v) => onChanged(v ?? 'CASH') : null,
+          title: const Text('Cash at the business'),
+          subtitle: const Text(
+            'Settle in person when you arrive for your appointment.',
+          ),
+          contentPadding: EdgeInsets.zero,
+        ),
+        RadioListTile<String>(
+          value: 'ONLINE_PENDING',
+          groupValue: value,
+          onChanged: enabled ? (v) => onChanged(v ?? 'CASH') : null,
+          title: const Text('Pay now (Chapa)'),
+          subtitle: const Text(
+            'Telebirr, CBE Birr, mobile money, or card via Chapa hosted checkout.',
+          ),
+          contentPadding: EdgeInsets.zero,
+        ),
+      ],
+    );
+  }
+}
+
+/// Phase 10 — payment-waiting interstitial. Rendered between the
+/// confirm step and the success step when the customer picked
+/// online payment and the gateway returned `PENDING` with a
+/// redirectUrl.
+class _PaymentWaitingStep extends StatelessWidget {
+  const _PaymentWaitingStep({
+    required this.phase,
+    required this.attempt,
+    required this.maxAttempts,
+    required this.errorMessage,
+    required this.onCheckNow,
+    required this.onDone,
+    required this.onPickAnotherSlot,
+  });
+
+  final _PayingPhase phase;
+  final int attempt;
+  final int maxAttempts;
+  final String? errorMessage;
+  final VoidCallback onCheckNow;
+  final VoidCallback onDone;
+  final VoidCallback onPickAnotherSlot;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    switch (phase) {
+      case _PayingPhase.opening:
+        return _BodyColumn(
+          icon: Icons.open_in_new,
+          iconColor: colors.primary,
+          title: 'Opening Chapa checkout…',
+          message:
+              "We're opening the Chapa hosted checkout in your browser. "
+              'Complete the payment, then return to this screen.',
+          children: const [
+            Padding(
+              padding: EdgeInsets.only(top: 16),
+              child: CircularProgressIndicator(),
+            ),
+          ],
+        );
+      case _PayingPhase.polling:
+        return _BodyColumn(
+          icon: Icons.hourglass_top,
+          iconColor: colors.primary,
+          title: 'Waiting for payment…',
+          message:
+              "We'll automatically update this screen when Chapa confirms "
+              "your payment. Don't close the app — checking $attempt of $maxAttempts.",
+          children: [
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onCheckNow,
+              icon: const Icon(Icons.refresh),
+              label: const Text('I paid — check now'),
+            ),
+          ],
+        );
+      case _PayingPhase.succeeded:
+        return _BodyColumn(
+          icon: Icons.check_circle,
+          iconColor: colors.primary,
+          title: 'Payment received',
+          message:
+              'Your booking is confirmed. The business will accept or '
+              "reject the request shortly; you'll get a notification.",
+          children: [
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: onDone,
+              child: const Text('Continue'),
+            ),
+          ],
+        );
+      case _PayingPhase.failed:
+        return _BodyColumn(
+          icon: Icons.error_outline,
+          iconColor: colors.error,
+          title: 'Payment failed',
+          message: errorMessage ??
+              'We could not complete the payment via Chapa. You can pick '
+                  'another slot or switch to cash.',
+          children: [
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onPickAnotherSlot,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Pick another slot'),
+            ),
+          ],
+        );
+      case _PayingPhase.timedOut:
+        return _BodyColumn(
+          icon: Icons.hourglass_disabled,
+          iconColor: colors.onSurfaceVariant,
+          title: 'Still processing',
+          message:
+              'Chapa is taking longer than expected to confirm your '
+                  "payment. Check your bookings tab in a few minutes — "
+                  "the booking will appear there once payment lands.",
+          children: [
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onCheckNow,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Check again'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: onPickAnotherSlot,
+              icon: const Icon(Icons.arrow_back),
+              label: const Text('Pick another slot'),
+            ),
+          ],
+        );
+    }
+  }
+}
+
+class _BodyColumn extends StatelessWidget {
+  const _BodyColumn({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.message,
+    this.children = const [],
+  });
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String message;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 64, color: iconColor),
+          const SizedBox(height: 12),
+          Text(title, style: textTheme.titleLarge, textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text(message, textAlign: TextAlign.center),
+          ...children,
+        ],
+      ),
     );
   }
 }

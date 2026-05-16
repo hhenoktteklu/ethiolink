@@ -35,9 +35,11 @@ abstract class SlotsRepository {
 
 abstract class AppointmentsRepository {
   /// `POST /v1/appointments` with the documented request body.
-  /// Throws `AppointmentCreateFailure` on every non-2xx — see the
-  /// failure-kind enum below for the dispatch.
-  Future<Appointment> create({
+  /// Phase 10 — returns the wrapped `CreateAppointmentResponse`
+  /// shape (`{ appointment, payment }`) so callers can read
+  /// `payment.redirectUrl` for the online checkout. Throws
+  /// `AppointmentCreateFailure` on every non-2xx.
+  Future<CreateAppointmentResponse> create({
     required String staffId,
     required String serviceId,
     required String startsAtIso,
@@ -110,7 +112,7 @@ class HttpAppointmentsRepository implements AppointmentsRepository {
   final ApiClient _client;
 
   @override
-  Future<Appointment> create({
+  Future<CreateAppointmentResponse> create({
     required String staffId,
     required String serviceId,
     required String startsAtIso,
@@ -125,10 +127,10 @@ class HttpAppointmentsRepository implements AppointmentsRepository {
       if (notes != null && notes.isNotEmpty) 'notes': notes,
     };
     try {
-      return await _client.postJson<Appointment>(
+      return await _client.postJson<CreateAppointmentResponse>(
         '/v1/appointments',
         body: body,
-        parse: Appointment.fromJson,
+        parse: CreateAppointmentResponse.fromJson,
       );
     } on FormatException catch (e) {
       throw AppointmentCreateFailure(

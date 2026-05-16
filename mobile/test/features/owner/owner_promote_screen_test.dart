@@ -94,17 +94,36 @@ class _FakeFeaturingRepo implements FeaturingRepository {
     return active;
   }
 
+  /// Phase 10 — optional override for the payment summary returned
+  /// from `subscribe`. Defaults to a synchronous cash SUCCEEDED.
+  FeaturingPaymentSummary? subscribePayment;
+
   @override
-  Future<FeaturingSubscription> subscribe(
+  Future<SubscribeFeaturingResult> subscribe(
     String businessId,
     String packageCode,
   ) async {
     lastSubscribeCode = packageCode;
     if (gateSubscribe != null) await gateSubscribe!.future;
     if (subscribeError != null) throw subscribeError!;
-    final result = subscribeResult ?? _sub();
-    active = result;
-    return result;
+    final sub = subscribeResult ?? _sub();
+    // For PENDING flows we deliberately do NOT mutate `active`
+    // until the screen polls; for synchronous SUCCEEDED we
+    // promote the subscription so the screen flips to the
+    // featured branch on refresh.
+    final payment = subscribePayment ??
+        const FeaturingPaymentSummary(
+          status: 'SUCCEEDED',
+          provider: 'CASH',
+          providerRef: null,
+          redirectUrl: null,
+          errorCode: null,
+          errorMessage: null,
+        );
+    if (payment.isSucceeded) {
+      active = sub;
+    }
+    return SubscribeFeaturingResult(subscription: sub, payment: payment);
   }
 
   @override
@@ -289,5 +308,137 @@ void main() {
 
     expect(find.text("Can't reach the server"), findsOneWidget);
     expect(find.widgetWithText(FilledButton, 'Try again'), findsOneWidget);
+  });
+
+  // -------------------------------------------------------------------
+  // Phase 10 — online checkout
+  // -------------------------------------------------------------------
+
+  testWidgets(
+    'online PENDING → opens Chapa redirect, polls active, succeeds',
+    (tester) async {
+      // First subscribe call returns PENDING with a redirectUrl;
+      // the screen launches the browser and polls getActive. The
+      // poll returns null until the second attempt flips
+      // `active` to an ACTIVE subscription.
+      final pendingSub = _sub(status: 'PENDING_PAYMENT');
+      final activeSub = _sub(status: 'ACTIVE');
+      final repo = _FakeFeaturingRepo(
+        packages: [_pkg()],
+        active: null,
+        subscribeResult: pendingSub,
+      )
+        ..subscribePayment = const FeaturingPaymentSummary(
+          status: 'PENDING',
+          provider: 'CHAPA',
+          providerRef: 'feat-tx-001',
+          redirectUrl: 'https://checkout.chapa.test/sess-promote',
+          errorCode: null,
+          errorMessage: null,
+        );
+
+      final launches = <String>[];
+      await tester.pumpWidget(
+        AppConfigScope(
+          config: _testConfig,
+          child: MaterialApp(
+            home: OwnerPromoteScreen(
+              businessId: 'biz-1',
+              repositoryOverride: repo,
+              paymentRedirectorOverride: (url) async {
+                launches.add(url);
+                // Promote the in-memory subscription so the next
+                // getActive poll succeeds.
+                repo.active = activeSub;
+                return true;
+              },
+              paymentPollInterval: const Duration(milliseconds: 5),
+              paymentPollMaxAttempts: 5,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester
+          .tap(find.widgetWithText(FilledButton, 'Purchase').first);
+      await tester.pump();
+      // Let the redirect + first poll fire.
+      await tester.pump(const Duration(milliseconds: 30));
+      await tester.pumpAndSettle();
+
+      assert(launches.length == 1, 'expected 1 launch, got ${launches.length}');
+      expect(launches.first, 'https://checkout.chapa.test/sess-promote');
+      expect(find.text('Featured!'), findsOneWidget);
+    },
+  );
+
+  testWidgets('online launcher returns false → failed overlay', (tester) async {
+    final repo = _FakeFeaturingRepo(
+      packages: [_pkg()],
+      active: null,
+      subscribeResult: _sub(status: 'PENDING_PAYMENT'),
+    )
+      ..subscribePayment = const FeaturingPaymentSummary(
+        status: 'PENDING',
+        provider: 'CHAPA',
+        providerRef: 'feat-tx-002',
+        redirectUrl: 'https://checkout.chapa.test/sess-fail',
+        errorCode: null,
+        errorMessage: null,
+      );
+    await tester.pumpWidget(
+      AppConfigScope(
+        config: _testConfig,
+        child: MaterialApp(
+          home: OwnerPromoteScreen(
+            businessId: 'biz-1',
+            repositoryOverride: repo,
+            paymentRedirectorOverride: (_) async => false,
+            paymentPollInterval: const Duration(milliseconds: 5),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Purchase').first);
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.text('Payment failed'), findsOneWidget);
+  });
+
+  test('SubscribeFeaturingResult parses wrapped wire shape', () {
+    final json = {
+      'subscription': {
+        'id': 'sub-1',
+        'businessId': 'biz-1',
+        'packageCode': 'FEATURING_7D',
+        'priceEtb': 500.0,
+        'startsAt': '2026-05-15T00:00:00.000Z',
+        'endsAt': '2026-05-22T00:00:00.000Z',
+        'status': 'PENDING_PAYMENT',
+        'source': 'OWNER_PURCHASE',
+        'cancelledAt': null,
+        'cancelledReason': null,
+        'createdAt': '2026-05-15T00:00:00.000Z',
+        'updatedAt': '2026-05-15T00:00:00.000Z',
+      },
+      'payment': {
+        'status': 'PENDING',
+        'provider': 'CHAPA',
+        'providerRef': 'feat-1-aaaa',
+        'redirectUrl': 'https://checkout.chapa.test/sess-1',
+        'errorCode': null,
+        'errorMessage': null,
+      },
+    };
+    final result = SubscribeFeaturingResult.fromJson(json);
+    expect(result.subscription.id, 'sub-1');
+    expect(result.payment.isPending, isTrue);
+    expect(
+      result.payment.redirectUrl,
+      'https://checkout.chapa.test/sess-1',
+    );
   });
 }
