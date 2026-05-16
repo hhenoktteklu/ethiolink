@@ -13,8 +13,11 @@ import 'package:ethiolink/features/browse/models/business_detail.dart';
 import 'package:ethiolink/features/browse/models/category.dart';
 import 'package:ethiolink/features/owner/create_business_flow.dart';
 import 'package:ethiolink/features/owner/data/business_actions_repository.dart';
+import 'package:ethiolink/features/owner/data/featuring_repository.dart';
 import 'package:ethiolink/features/owner/data/owner_business_repository.dart';
+import 'package:ethiolink/features/owner/models/featuring.dart';
 import 'package:ethiolink/features/owner/models/owner_business_view.dart';
+import 'package:ethiolink/features/owner/owner_promote_screen.dart';
 import 'package:ethiolink/features/owner/owner_tab.dart';
 
 const _testConfig = AppConfig(
@@ -90,11 +93,32 @@ class _FakeCategoriesRepo implements CategoriesRepository {
   Future<List<Category>> list() async => items;
 }
 
+class _StubFeaturingRepo implements FeaturingRepository {
+  @override
+  Future<List<FeaturingPackage>> listPackages(String businessId) async =>
+      const <FeaturingPackage>[];
+  @override
+  Future<FeaturingSubscription> subscribe(
+    String businessId,
+    String packageCode,
+  ) async =>
+      throw UnimplementedError('not used');
+  @override
+  Future<FeaturingSubscription?> getActive(String businessId) async => null;
+  @override
+  Future<List<FeaturingSubscription>> listHistory(
+    String businessId, {
+    int? limit,
+  }) async =>
+      const <FeaturingSubscription>[];
+}
+
 Future<void> _pump(
   WidgetTester tester, {
   required OwnerBusinessRepository repo,
   BusinessActionsRepository? actionsRepo,
   CategoriesRepository? categoriesRepo,
+  FeaturingRepository? featuringRepo,
 }) async {
   await tester.pumpWidget(
     AppConfigScope(
@@ -107,6 +131,7 @@ Future<void> _pump(
           repositoryOverride: repo,
           actionsRepositoryOverride: actionsRepo ?? _StubActionsRepo(),
           categoriesRepositoryOverride: categoriesRepo,
+          featuringRepositoryOverride: featuringRepo,
         ),
       ),
     ),
@@ -134,8 +159,10 @@ void main() {
 
     expect(find.text('Sunset Salon'), findsOneWidget);
     expect(find.text('APPROVED'), findsOneWidget);
-    // Five dashboard cards.
+    // Six dashboard cards (Promote sits between Profile and
+    // Services).
     expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Promote'), findsOneWidget);
     expect(find.text('Services'), findsOneWidget);
     expect(find.text('Staff'), findsOneWidget);
     expect(find.text('Availability'), findsOneWidget);
@@ -143,6 +170,20 @@ void main() {
     // No status banner on APPROVED.
     expect(find.text('Awaiting review'), findsNothing);
     expect(find.text('Draft'), findsNothing);
+  });
+
+  testWidgets('tapping Promote pushes OwnerPromoteScreen', (tester) async {
+    await _pump(
+      tester,
+      repo: _FakeRepo.value(_sampleBusiness(status: 'APPROVED')),
+      featuringRepo: _StubFeaturingRepo(),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Promote'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(OwnerPromoteScreen), findsOneWidget);
   });
 
   testWidgets('renders the PENDING_REVIEW banner', (tester) async {

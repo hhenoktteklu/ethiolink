@@ -173,6 +173,11 @@
         "description": "Owner-dashboard card label for the business profile editor."
     },
 
+    "ownerCardPromote": "Promote",
+    "@ownerCardPromote": {
+        "description": "Owner-dashboard card label for the paid featuring (Promote) screen — sits between Profile and Services."
+    },
+
     "ownerCardServices": "Services",
     "@ownerCardServices": {
         "description": "Owner-dashboard card label for the services CRUD screen."

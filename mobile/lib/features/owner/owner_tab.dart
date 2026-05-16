@@ -29,6 +29,7 @@ import '../browse/data/categories_repository.dart';
 import 'create_business_flow.dart';
 import 'data/availability_repository.dart';
 import 'data/business_actions_repository.dart';
+import 'data/featuring_repository.dart';
 import 'data/owner_bookings_repository.dart';
 import 'data/owner_business_repository.dart';
 import 'data/owner_services_repository.dart';
@@ -37,6 +38,7 @@ import 'models/owner_business_view.dart';
 import 'owner_availability_screen.dart';
 import 'owner_bookings_screen.dart';
 import 'owner_profile_screen.dart';
+import 'owner_promote_screen.dart';
 import 'owner_services_screen.dart';
 import 'owner_staff_screen.dart';
 
@@ -49,6 +51,7 @@ class OwnerTab extends StatefulWidget {
     this.staffRepositoryOverride,
     this.availabilityRepositoryOverride,
     this.bookingsRepositoryOverride,
+    this.featuringRepositoryOverride,
     super.key,
   });
 
@@ -79,6 +82,10 @@ class OwnerTab extends StatefulWidget {
   /// Test seam for the `OwnerBookingsScreen` pushed when the
   /// dashboard's Bookings card is tapped.
   final OwnerBookingsRepository? bookingsRepositoryOverride;
+
+  /// Test seam for the `OwnerPromoteScreen` pushed when the
+  /// dashboard's Promote card is tapped.
+  final FeaturingRepository? featuringRepositoryOverride;
 
   @override
   State<OwnerTab> createState() => _OwnerTabState();
@@ -162,6 +169,8 @@ class _OwnerTabState extends State<OwnerTab> {
               availabilityRepositoryOverride:
                   widget.availabilityRepositoryOverride,
               bookingsRepositoryOverride: widget.bookingsRepositoryOverride,
+              featuringRepositoryOverride:
+                  widget.featuringRepositoryOverride,
               onChanged: _refresh,
             );
           },
@@ -400,6 +409,7 @@ class OwnerDashboard extends StatelessWidget {
     this.staffRepositoryOverride,
     this.availabilityRepositoryOverride,
     this.bookingsRepositoryOverride,
+    this.featuringRepositoryOverride,
     super.key,
   });
   final OwnerBusinessView business;
@@ -425,16 +435,23 @@ class OwnerDashboard extends StatelessWidget {
   /// when the Bookings card is tapped.
   final OwnerBookingsRepository? bookingsRepositoryOverride;
 
+  /// Test seam forwarded to the `OwnerPromoteScreen` we push when
+  /// the Promote card is tapped.
+  final FeaturingRepository? featuringRepositoryOverride;
+
   /// Fired after a successful submit so the OwnerTab can refresh
   /// its loader and pick up the new status.
   final VoidCallback onChanged;
 
-  /// Stable identifiers for the five dashboard entry cards. The
+  /// Stable identifiers for the six dashboard entry cards. The
   /// `_openCard` switch dispatches off these enum values rather
   /// than a label string so the dispatch survives locale changes
   /// — only the rendered label moves through `AppLocalizations`.
+  /// Promote sits between Profile and Services so the upsell is
+  /// the first option after the business identity card.
   static const _cards = <_DashboardCardKind>[
     _DashboardCardKind.profile,
+    _DashboardCardKind.promote,
     _DashboardCardKind.services,
     _DashboardCardKind.staff,
     _DashboardCardKind.availability,
@@ -483,6 +500,12 @@ class OwnerDashboard extends StatelessWidget {
           label: l10n.ownerCardProfile,
           blurb: 'Name, description, contact, location.',
         );
+      case _DashboardCardKind.promote:
+        return _DashboardCardSpec(
+          icon: Icons.campaign,
+          label: l10n.ownerCardPromote,
+          blurb: 'Feature your business at the top of search.',
+        );
       case _DashboardCardKind.services:
         return _DashboardCardSpec(
           icon: Icons.design_services,
@@ -526,6 +549,16 @@ class OwnerDashboard extends StatelessWidget {
         ).then((updated) {
           if (updated != null) onChanged();
         });
+        return;
+      case _DashboardCardKind.promote:
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => OwnerPromoteScreen(
+              businessId: business.id,
+              repositoryOverride: featuringRepositoryOverride,
+            ),
+          ),
+        );
         return;
       case _DashboardCardKind.services:
         Navigator.of(context).push(
@@ -573,7 +606,14 @@ class OwnerDashboard extends StatelessWidget {
   }
 }
 
-enum _DashboardCardKind { profile, services, staff, availability, bookings }
+enum _DashboardCardKind {
+  profile,
+  promote,
+  services,
+  staff,
+  availability,
+  bookings,
+}
 
 class _BusinessHeader extends StatelessWidget {
   const _BusinessHeader({required this.business});
