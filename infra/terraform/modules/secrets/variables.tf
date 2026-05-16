@@ -79,7 +79,13 @@ variable "tags" {
 # -----------------------------------------------------------------------------
 
 variable "secrets_kms_key_arn" {
-  description = "ARN of the customer-managed KMS key encrypting the RDS master secret. `null` (the default) means the secret still uses AWS-managed `aws/secretsmanager` — no extra rotation-Lambda grant needed. A non-null value attaches a scoped `kms:Decrypt` inline policy to the SAR-deployed rotation Lambda's execution role so rotations continue to work after the secret flips to the CMK."
+  description = "ARN of the customer-managed KMS key encrypting the RDS master secret. Consumed verbatim as the policy `Resource` once `enable_rotation_kms_permissions` is `true`. Defaults to the empty string so plan-time evaluation never trips on a not-yet-applied KMS ARN (the gating boolean must be set independently)."
   type        = string
-  default     = null
+  default     = ""
+}
+
+variable "enable_rotation_kms_permissions" {
+  description = "Gate for the scoped `kms:Decrypt` inline policy attached to the SAR-deployed rotation Lambda's role. Must be `true` (with `secrets_kms_key_arn` non-empty at apply time) for the grant to materialize. Kept as an explicit boolean so `count` is plan-time-resolvable even when the ARN flows in from `module.kms.secrets_key_arn`. Defaults to `false` for the AWS-managed `aws/secretsmanager` posture."
+  type        = bool
+  default     = false
 }

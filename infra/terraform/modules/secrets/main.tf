@@ -146,9 +146,10 @@ resource "aws_secretsmanager_secret_rotation" "rds" {
 # -----------------------------------------------------------------------------
 # Phase 9 Track 4 — CMK grant for the SAR-deployed rotation Lambda.
 #
-# When `var.secrets_kms_key_arn` is non-null (= the operator has
-# wired the secrets CMK on the secret), the rotation Lambda needs
-# `kms:Decrypt` on that key to read the current secret value
+# When `var.enable_rotation_kms_permissions` is `true` (= the
+# operator has wired the secrets CMK on the secret and wants the
+# rotation Lambda to keep working), the rotation Lambda needs
+# `kms:Decrypt` on the CMK to read the current secret value
 # before rotating. The SAR template doesn't grant any KMS
 # permission by default, so we attach an inline policy to the
 # Lambda's execution role.
@@ -158,16 +159,24 @@ resource "aws_secretsmanager_secret_rotation" "rds" {
 # which we extract the role name.
 # -----------------------------------------------------------------------------
 
+# `count` MUST be known at plan time. The original gate
+# `var.secrets_kms_key_arn != null` tripped Terraform when the env
+# stack passed `module.kms.secrets_key_arn` (the ARN is computed by
+# the `kms` module and therefore unknown until apply). Gating on
+# the explicit boolean `enable_rotation_kms_permissions` keeps the
+# count statically resolvable; the ARN is still consumed inside the
+# policy document's `Resource` and resolves at apply time.
+
 locals {
   # `arn:aws:iam::123456789012:role/<name>` → `<name>`.
-  rotation_role_name = (var.enabled && var.secrets_kms_key_arn != null) ? element(
+  rotation_role_name = (var.enabled && var.enable_rotation_kms_permissions) ? element(
     split("/", data.aws_lambda_function.rotation[0].role),
     1,
   ) : ""
 }
 
 data "aws_iam_policy_document" "rotation_kms" {
-  count = (var.enabled && var.secrets_kms_key_arn != null) ? 1 : 0
+  count = (var.enabled && var.enable_rotation_kms_permissions) ? 1 : 0
 
   statement {
     sid    = "DecryptRdsMasterSecretCmk"
@@ -186,7 +195,7 @@ data "aws_iam_policy_document" "rotation_kms" {
 }
 
 resource "aws_iam_role_policy" "rotation_kms" {
-  count = (var.enabled && var.secrets_kms_key_arn != null) ? 1 : 0
+  count = (var.enabled && var.enable_rotation_kms_permissions) ? 1 : 0
 
   name   = "${local.rotation_lambda_name}-kms-decrypt"
   role   = local.rotation_role_name

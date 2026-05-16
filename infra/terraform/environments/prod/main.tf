@@ -323,10 +323,14 @@ module "lambda" {
   # env-vars re-encrypt under the customer-managed key; per-domain
   # roles gain scoped `kms:Decrypt` on the secrets CMK and
   # `kms:Decrypt` + `kms:GenerateDataKey*` on the media-bucket
-  # CMK (media role only).
-  env_kms_key_arn      = module.kms.lambda_env_key_arn
-  secrets_kms_key_arn  = module.kms.secrets_key_arn
-  s3_media_kms_key_arn = module.kms.s3_media_key_arn
+  # CMK (media role only). The `enable_*_kms_permissions` booleans
+  # gate the policy attachments at plan time so the module never
+  # derives `count` from a computed (plan-unknown) ARN.
+  env_kms_key_arn                 = module.kms.lambda_env_key_arn
+  secrets_kms_key_arn             = module.kms.secrets_key_arn
+  enable_secrets_kms_permissions  = true
+  s3_media_kms_key_arn            = module.kms.s3_media_key_arn
+  enable_s3_media_kms_permissions = true
 
   # CRITICAL prod difference: the migration runner targets the
   # direct RDS endpoint instead of the proxy. RDS Proxy's
@@ -591,8 +595,11 @@ module "secrets_rotation" {
 
   # Phase 9 Track 4 — grant the SAR-deployed rotation Lambda
   # `kms:Decrypt` on the secrets CMK so rotations continue to
-  # work after the RDS master secret flips to the CMK.
-  secrets_kms_key_arn = module.kms.secrets_key_arn
+  # work after the RDS master secret flips to the CMK. The
+  # `enable_rotation_kms_permissions` boolean keeps `count` plan-
+  # time-resolvable since the ARN itself is unknown at plan.
+  secrets_kms_key_arn             = module.kms.secrets_key_arn
+  enable_rotation_kms_permissions = true
 }
 
 output "secrets_rotation_enabled" {

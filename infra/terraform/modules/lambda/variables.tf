@@ -537,13 +537,25 @@ variable "env_kms_key_arn" {
 }
 
 variable "secrets_kms_key_arn" {
-  description = "ARN of the customer-managed KMS key used by the RDS master secret + future third-party API-key secrets. When set, every per-domain Lambda role gains a scoped `kms:Decrypt` grant on this key so `loadSecretsThenConfig` can read the RDS master secret. `null` keeps the AWS-managed `aws/secretsmanager` posture and adds no grant."
+  description = "ARN of the customer-managed KMS key used by the RDS master secret + future third-party API-key secrets. Consumed verbatim as the policy `Resource` once `enable_secrets_kms_permissions` is `true`. Defaults to the empty string so plan-time evaluation never trips on a not-yet-applied KMS ARN (the gating boolean must be set independently)."
   type        = string
-  default     = null
+  default     = ""
+}
+
+variable "enable_secrets_kms_permissions" {
+  description = "Gate for the scoped `kms:Decrypt` policy on `secrets_kms_key_arn`. Must be `true` (and `secrets_kms_key_arn` non-empty at apply time) for the per-domain Lambda roles to receive the grant. Kept as an explicit boolean so `count` is known at plan time even when the ARN itself is computed from another module output. Defaults to `false` for the AWS-managed `aws/secretsmanager` posture."
+  type        = bool
+  default     = false
 }
 
 variable "s3_media_kms_key_arn" {
-  description = "ARN of the customer-managed KMS key used to encrypt the media buckets. When set, the `media` Lambda role gains scoped `kms:Decrypt` + `kms:GenerateDataKey*` on this key — both actions are required for PutObject / GetObject against SSE-KMS buckets. `null` keeps the SSE-S3 posture and adds no grant."
+  description = "ARN of the customer-managed KMS key used to encrypt the media buckets. Consumed verbatim as the policy `Resource` once `enable_s3_media_kms_permissions` is `true`. Defaults to the empty string so plan-time evaluation never trips on a not-yet-applied KMS ARN (the gating boolean must be set independently)."
   type        = string
-  default     = null
+  default     = ""
+}
+
+variable "enable_s3_media_kms_permissions" {
+  description = "Gate for the scoped `kms:Decrypt` + `kms:GenerateDataKey*` policy on `s3_media_kms_key_arn`. Must be `true` (and `s3_media_kms_key_arn` non-empty at apply time) for the `media` Lambda role to receive the grant. Defaults to `false` for the SSE-S3 posture."
+  type        = bool
+  default     = false
 }

@@ -437,14 +437,91 @@ resource "aws_api_gateway_authorizer" "cognito" {
 
 # -----------------------------------------------------------------------------
 # Resources — one per unique path segment.
+#
+# Resources are stratified by depth (= number of '/'-separated
+# segments) so each tier only references already-declared
+# shallower tiers. A single `for_each` map that resolves
+# `parent_id` through the same resource hits a Terraform graph
+# cycle because all instances of one resource address collapse to
+# a single graph node — splitting per depth breaks that cycle.
+#
+# Depth 1 corresponds to first-level paths ("v1"); the deepest
+# path in `local.resource_paths` is
+# `v1/businesses/{businessId}/staff/{staffId}/availability/override`
+# at depth 7. New paths must fit within the d1..d7 tiers; deeper
+# additions require declaring a new `dN` block AND extending the
+# merged `api_resource_ids_by_path` local below.
 # -----------------------------------------------------------------------------
 
-resource "aws_api_gateway_resource" "this" {
-  for_each = local.resource_paths_map
+resource "aws_api_gateway_resource" "d1" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 1 }
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  parent_id = each.value.parent == "" ? aws_api_gateway_rest_api.this.root_resource_id : aws_api_gateway_resource.this[each.value.parent].id
-  path_part = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+  parent_id   = aws_api_gateway_rest_api.this.root_resource_id
+  path_part   = each.value.path
+}
+
+resource "aws_api_gateway_resource" "d2" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 2 }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.d1[each.value.parent].id
+  path_part   = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+}
+
+resource "aws_api_gateway_resource" "d3" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 3 }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.d2[each.value.parent].id
+  path_part   = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+}
+
+resource "aws_api_gateway_resource" "d4" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 4 }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.d3[each.value.parent].id
+  path_part   = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+}
+
+resource "aws_api_gateway_resource" "d5" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 5 }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.d4[each.value.parent].id
+  path_part   = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+}
+
+resource "aws_api_gateway_resource" "d6" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 6 }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.d5[each.value.parent].id
+  path_part   = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+}
+
+resource "aws_api_gateway_resource" "d7" {
+  for_each = { for r in local.resource_paths : r.path => r if length(split("/", r.path)) == 7 }
+
+  rest_api_id = aws_api_gateway_rest_api.this.id
+  parent_id   = aws_api_gateway_resource.d6[each.value.parent].id
+  path_part   = element(split("/", each.value.path), length(split("/", each.value.path)) - 1)
+}
+
+# Flat `path → resource_id` lookup the route / method / CORS
+# blocks below share. Kept as a derived local so adding a new
+# depth tier is a one-line change here.
+locals {
+  api_resource_ids_by_path = merge(
+    { for k, v in aws_api_gateway_resource.d1 : k => v.id },
+    { for k, v in aws_api_gateway_resource.d2 : k => v.id },
+    { for k, v in aws_api_gateway_resource.d3 : k => v.id },
+    { for k, v in aws_api_gateway_resource.d4 : k => v.id },
+    { for k, v in aws_api_gateway_resource.d5 : k => v.id },
+    { for k, v in aws_api_gateway_resource.d6 : k => v.id },
+    { for k, v in aws_api_gateway_resource.d7 : k => v.id },
+  )
 }
 
 # -----------------------------------------------------------------------------
@@ -455,7 +532,7 @@ resource "aws_api_gateway_method" "this" {
   for_each = local.routes
 
   rest_api_id   = aws_api_gateway_rest_api.this.id
-  resource_id   = aws_api_gateway_resource.this[each.value.path].id
+  resource_id   = local.api_resource_ids_by_path[each.value.path]
   http_method   = each.value.method
   authorization = each.value.auth == "PUBLIC" ? "NONE" : "COGNITO_USER_POOLS"
   authorizer_id = each.value.auth == "PUBLIC" ? null : aws_api_gateway_authorizer.cognito.id
@@ -465,7 +542,7 @@ resource "aws_api_gateway_integration" "this" {
   for_each = local.routes
 
   rest_api_id             = aws_api_gateway_rest_api.this.id
-  resource_id             = aws_api_gateway_resource.this[each.value.path].id
+  resource_id             = local.api_resource_ids_by_path[each.value.path]
   http_method             = aws_api_gateway_method.this[each.key].http_method
   integration_http_method = "POST"
   type                    = "AWS_PROXY"
@@ -495,7 +572,7 @@ resource "aws_api_gateway_method" "options" {
   for_each = local.resource_paths_with_method
 
   rest_api_id   = aws_api_gateway_rest_api.this.id
-  resource_id   = aws_api_gateway_resource.this[each.value].id
+  resource_id   = local.api_resource_ids_by_path[each.value]
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
@@ -504,7 +581,7 @@ resource "aws_api_gateway_integration" "options" {
   for_each = local.resource_paths_with_method
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.value].id
+  resource_id = local.api_resource_ids_by_path[each.value]
   http_method = aws_api_gateway_method.options[each.value].http_method
   type        = "MOCK"
 
@@ -517,7 +594,7 @@ resource "aws_api_gateway_method_response" "options" {
   for_each = local.resource_paths_with_method
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.value].id
+  resource_id = local.api_resource_ids_by_path[each.value]
   http_method = aws_api_gateway_method.options[each.value].http_method
   status_code = "204"
 
@@ -533,7 +610,7 @@ resource "aws_api_gateway_integration_response" "options" {
   for_each = local.resource_paths_with_method
 
   rest_api_id = aws_api_gateway_rest_api.this.id
-  resource_id = aws_api_gateway_resource.this[each.value].id
+  resource_id = local.api_resource_ids_by_path[each.value]
   http_method = aws_api_gateway_method.options[each.value].http_method
   status_code = aws_api_gateway_method_response.options[each.value].status_code
 

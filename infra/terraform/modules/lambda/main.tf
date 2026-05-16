@@ -631,8 +631,16 @@ resource "aws_iam_role_policy" "lambda_media_s3" {
 #                                to the `media` role.
 # -----------------------------------------------------------------------------
 
+# `count` MUST be known at plan time — when the env stack passes a
+# computed module.kms output (the ARN of a not-yet-applied key) and
+# we gate on `arn == null`, Terraform raises "Invalid count
+# argument". Gating on the explicit boolean
+# `enable_secrets_kms_permissions` instead keeps the count statically
+# resolvable; the ARN itself is still consumed verbatim inside the
+# policy document and can resolve at apply time.
+
 data "aws_iam_policy_document" "lambda_kms_secrets" {
-  count = var.secrets_kms_key_arn == null ? 0 : 1
+  count = var.enable_secrets_kms_permissions ? 1 : 0
 
   statement {
     sid    = "DecryptRdsMasterSecretCmk"
@@ -655,7 +663,7 @@ data "aws_iam_policy_document" "lambda_kms_secrets" {
 }
 
 resource "aws_iam_role_policy" "lambda_kms_secrets" {
-  for_each = var.secrets_kms_key_arn == null ? toset([]) : local.lambda_areas
+  for_each = var.enable_secrets_kms_permissions ? local.lambda_areas : toset([])
 
   name   = "${local.base_name}-lambda-kms-secrets-${each.key}"
   role   = aws_iam_role.lambda_exec[each.key].id
@@ -663,7 +671,7 @@ resource "aws_iam_role_policy" "lambda_kms_secrets" {
 }
 
 data "aws_iam_policy_document" "lambda_kms_media" {
-  count = var.s3_media_kms_key_arn == null ? 0 : 1
+  count = var.enable_s3_media_kms_permissions ? 1 : 0
 
   statement {
     sid    = "DecryptMediaBucketCmk"
@@ -689,7 +697,7 @@ data "aws_iam_policy_document" "lambda_kms_media" {
 }
 
 resource "aws_iam_role_policy" "lambda_kms_media" {
-  count = var.s3_media_kms_key_arn == null ? 0 : 1
+  count = var.enable_s3_media_kms_permissions ? 1 : 0
 
   name   = "${local.base_name}-lambda-kms-media"
   role   = aws_iam_role.lambda_exec["media"].id

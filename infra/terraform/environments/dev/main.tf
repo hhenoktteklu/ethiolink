@@ -300,9 +300,18 @@ module "lambda" {
   # for media, `kms:GenerateDataKey*`) grants to the per-domain
   # roles so cold-start secret resolution + media S3 reads /
   # writes keep working after the CMK flip.
-  env_kms_key_arn      = module.kms.lambda_env_key_arn
-  secrets_kms_key_arn  = module.kms.secrets_key_arn
-  s3_media_kms_key_arn = module.kms.s3_media_key_arn
+  #
+  # The `enable_*_kms_permissions` booleans gate the policy
+  # attachments at plan time. The ARNs above are computed from
+  # `module.kms.*` and therefore unknown until apply, so the
+  # module CANNOT derive the toggle from `arn != null` without
+  # raising "Invalid count argument". The env stack carries the
+  # operator-known truth: we always want these grants in dev.
+  env_kms_key_arn                 = module.kms.lambda_env_key_arn
+  secrets_kms_key_arn             = module.kms.secrets_key_arn
+  enable_secrets_kms_permissions  = true
+  s3_media_kms_key_arn            = module.kms.s3_media_key_arn
+  enable_s3_media_kms_permissions = true
 
   # The migration runner targets the direct RDS endpoint. In dev
   # this is the same value as `effective_endpoint` (no proxy), but
@@ -554,9 +563,12 @@ module "secrets_rotation" {
   # Phase 9 Track 4 — when the RDS master secret flips to the
   # customer-managed CMK, the SAR rotation Lambda's execution
   # role needs `kms:Decrypt` on that key to read the current
-  # value during rotation. Passing the key ARN here triggers the
-  # module to attach the inline policy.
-  secrets_kms_key_arn = module.kms.secrets_key_arn
+  # value during rotation. The `enable_rotation_kms_permissions`
+  # boolean gates the inline-policy attachment at plan time; the
+  # ARN itself is computed by `module.kms` and therefore unknown
+  # at plan and so cannot drive `count` on its own.
+  secrets_kms_key_arn             = module.kms.secrets_key_arn
+  enable_rotation_kms_permissions = true
 }
 
 output "secrets_rotation_enabled" {
