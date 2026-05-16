@@ -162,6 +162,23 @@ class ApiClient {
     }
   }
 
+  /// Convenience PUT. Mirrors `postJson`. The availability editor
+  /// uses this for the "replace the whole weekly schedule" call —
+  /// PUT is the right verb when the server semantically replaces
+  /// the addressed resource with the request body.
+  Future<T> putJson<T>(
+    String path, {
+    Object? body,
+    required T Function(dynamic body) parse,
+  }) async {
+    try {
+      final response = await dio.put<dynamic>(path, data: body);
+      return parse(response.data);
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
   /// Convenience PATCH. Mirrors `postJson` — the API returns the
   /// updated resource in the response body, so the caller passes
   /// a `parse` callback. Body is optional (an empty patch is a
