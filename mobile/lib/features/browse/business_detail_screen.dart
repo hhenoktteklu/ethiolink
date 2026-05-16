@@ -22,6 +22,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
+import '../booking/booking_flow_screen.dart';
+import '../booking/data/booking_repositories.dart';
 import 'data/business_detail_repositories.dart';
 import 'models/business_detail.dart';
 import 'models/review.dart';
@@ -33,6 +35,8 @@ class BusinessDetailScreen extends StatefulWidget {
     required this.businessId,
     this.initialName,
     this.repositoriesOverride,
+    this.slotsRepositoryOverride,
+    this.appointmentsRepositoryOverride,
     super.key,
   });
 
@@ -49,6 +53,12 @@ class BusinessDetailScreen extends StatefulWidget {
   /// `AppConfigScope`.
   final BusinessDetailRepositories? repositoriesOverride;
 
+  /// Forwarded to the booking flow when the user taps "Book" on
+  /// a service row. Production leaves these `null`; tests
+  /// inject fakes.
+  final SlotsRepository? slotsRepositoryOverride;
+  final AppointmentsRepository? appointmentsRepositoryOverride;
+
   @override
   State<BusinessDetailScreen> createState() => _BusinessDetailScreenState();
 }
@@ -60,6 +70,13 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
   Future<List<Service>>? _servicesFuture;
   Future<List<Staff>>? _staffFuture;
   Future<List<Review>>? _reviewsFuture;
+
+  /// Cached staff snapshot once `_staffFuture` resolves. The
+  /// Book button on each service row reads this to populate the
+  /// `BookingFlowScreen` constructor. Null until the staff fetch
+  /// completes; the Book button is disabled in that window.
+  List<Staff>? _staff;
+  String? _businessName;
 
   @override
   void didChangeDependencies() {
@@ -78,7 +95,61 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
       _servicesFuture = _repos!.services.listForBusiness(widget.businessId);
       _staffFuture = _repos!.staff.listForBusiness(widget.businessId);
       _reviewsFuture = _repos!.reviews.listForBusiness(widget.businessId);
+      _staff = null;
+      _businessName = widget.initialName;
     });
+
+    // Cache snapshots once each fetch completes — used by the
+    // Book button to construct `BookingFlowScreen` without
+    // re-awaiting the futures.
+    _staffFuture!.then((staff) {
+      if (!mounted) return;
+      setState(() => _staff = staff);
+    }).catchError((_) {
+      // Swallowed — the section error path renders for the user.
+    });
+    _businessFuture!.then((b) {
+      if (!mounted) return;
+      setState(() => _businessName = b.name ?? widget.initialName);
+    }).catchError((_) {});
+  }
+
+  void _onBookTapped(Service service) {
+    final staff = _staff;
+    final businessName = _businessName ?? 'this business';
+    if (staff == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Staff list still loading — try again in a moment.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    if (staff.where((s) => s.isActive).isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No active staff available for this service yet.',
+          ),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BookingFlowScreen(
+          businessId: widget.businessId,
+          businessName: businessName,
+          service: service,
+          staff: staff,
+          slotsRepositoryOverride: widget.slotsRepositoryOverride,
+          appointmentsRepositoryOverride:
+              widget.appointmentsRepositoryOverride,
+        ),
+      ),
+    );
   }
 
   Future<void> _refresh() async {
@@ -122,7 +193,10 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                 if (business.hasAnyContact)
                   _ContactSection(business: business),
                 _SectionDivider(),
-                _ServicesSection(future: _servicesFuture!),
+                _ServicesSection(
+                  future: _servicesFuture!,
+                  onBookTapped: _onBookTapped,
+                ),
                 _SectionDivider(),
                 _StaffSection(future: _staffFuture!),
                 _SectionDivider(),
@@ -338,8 +412,9 @@ class _SectionDivider extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _ServicesSection extends StatelessWidget {
-  const _ServicesSection({required this.future});
+  const _ServicesSection({required this.future, required this.onBookTapped});
   final Future<List<Service>> future;
+  final ValueChanged<Service> onBookTapped;
 
   @override
   Widget build(BuildContext context) {
@@ -367,7 +442,11 @@ class _ServicesSection extends StatelessWidget {
               }
               return Column(
                 children: [
-                  for (final s in data) _ServiceRow(service: s),
+                  for (final s in data)
+                    _ServiceRow(
+                      service: s,
+                      onBookTapped: () => onBookTapped(s),
+                    ),
                 ],
               );
             },
@@ -379,8 +458,9 @@ class _ServicesSection extends StatelessWidget {
 }
 
 class _ServiceRow extends StatelessWidget {
-  const _ServiceRow({required this.service});
+  const _ServiceRow({required this.service, required this.onBookTapped});
   final Service service;
+  final VoidCallback onBookTapped;
 
   String get _priceLabel {
     final p = service.priceEtb;
@@ -419,18 +499,7 @@ class _ServiceRow extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           OutlinedButton(
-            onPressed: () {
-              // Placeholder for the slot-picker — lands in the
-              // next mobile commit.
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Booking ${service.nameEn} — slot picker lands next.',
-                  ),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            },
+            onPressed: service.isActive ? onBookTapped : null,
             child: const Text('Book'),
           ),
         ],

@@ -144,6 +144,23 @@ class ApiClient {
       throw ApiException.fromDio(e);
     }
   }
+
+  /// Convenience POST. Authenticated routes get the bearer header
+  /// via the `AuthTokenInterceptor`; nothing extra to do at the
+  /// call site. Throws `ApiException` on non-2xx — the booking
+  /// flow inspects `apiErrorCode` to branch on `SLOT_UNAVAILABLE`.
+  Future<T> postJson<T>(
+    String path, {
+    Object? body,
+    required T Function(dynamic body) parse,
+  }) async {
+    try {
+      final response = await dio.post<dynamic>(path, data: body);
+      return parse(response.data);
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
 }
 
 /// Dio interceptor that attaches the Cognito id token to every
@@ -218,28 +235,53 @@ class AuthTokenInterceptor extends Interceptor {
 /// Domain-friendly wrapper for transport + HTTP errors. The
 /// underlying `DioException` is preserved on `.cause` for
 /// debugging; the public surface is `statusCode` + `message` +
-/// `isNetworkError`. Repositories may further translate specific
-/// 4xx codes into typed domain errors.
+/// `isNetworkError` + `apiErrorCode`. Repositories may further
+/// translate specific 4xx codes into typed domain errors.
 class ApiException implements Exception {
   ApiException({
     required this.message,
     this.statusCode,
     this.isNetworkError = false,
+    this.apiErrorCode,
     this.cause,
   });
 
   final String message;
   final int? statusCode;
   final bool isNetworkError;
+
+  /// Server-side error code from the `{error:{code, ...}}` body,
+  /// when present. Mirrors the OpenAPI `Error.code` enum
+  /// (`VALIDATION_ERROR`, `SLOT_UNAVAILABLE`, `CONFLICT`,
+  /// `UNAUTHENTICATED`, …). Callers switch on this to render
+  /// domain-specific copy.
+  final String? apiErrorCode;
+
   final Object? cause;
 
   factory ApiException.fromDio(DioException err) {
     final status = err.response?.statusCode;
     if (status != null) {
-      // 4xx / 5xx with a parsed response.
+      // 4xx / 5xx with a parsed response. Try to pull
+      // `body.error.code` + `body.error.message` per the OpenAPI
+      // Error schema. The interceptor / Dio parses JSON automatically.
+      final data = err.response?.data;
+      String? code;
+      String? serverMessage;
+      if (data is Map<String, dynamic>) {
+        final errBody = data['error'];
+        if (errBody is Map<String, dynamic>) {
+          final c = errBody['code'];
+          if (c is String && c.isNotEmpty) code = c;
+          final m = errBody['message'];
+          if (m is String && m.isNotEmpty) serverMessage = m;
+        }
+      }
       return ApiException(
-        message: 'HTTP $status from ${err.requestOptions.path}.',
+        message: serverMessage ??
+            'HTTP $status from ${err.requestOptions.path}.',
         statusCode: status,
+        apiErrorCode: code,
         cause: err,
       );
     }

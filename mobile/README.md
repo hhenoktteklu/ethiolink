@@ -27,13 +27,26 @@ mobile/
         auth_service.dart       AuthService port + FakeAuthService placeholder
     features/
       auth/
-        login_screen.dart       Placeholder login (tap → fake signIn → browse)
+        login_screen.dart       Login (Cognito PKCE; FakeAuthService in tests)
+      booking/
+        booking_flow_screen.dart  Wizard: staff → date → slot → confirm → success
+        models/
+          slot.dart               Slot value from /slots endpoint
+          appointment.dart        Appointment / AppointmentView model
+        data/
+          booking_repositories.dart  Slots + Appointments ports + Http impls
       browse/
-        browse_screen.dart      Placeholder home/browse tab + bottom nav
+        browse_screen.dart        Browse tab — live /v1/categories
+        businesses_screen.dart    Per-category business listing
+        business_detail_screen.dart Detail page + services + staff + reviews
+        models/                   category, business_summary, business_detail,
+                                  service, staff, review
+        data/                     businesses_repository, categories_repository,
+                                  business_detail_repositories
       bookings/
-        bookings_screen.dart    Placeholder bookings tab
+        bookings_screen.dart    Placeholder bookings tab (history fetch lands next)
       profile/
-        profile_screen.dart     Placeholder profile + env display + sign out
+        profile_screen.dart     Profile + env display + sign out
   test/
     widget_test.dart       Boot + placeholder-render smoke test
 ```
@@ -181,7 +194,8 @@ If the browser closes but the app stays on the LoginScreen, the deep link didn't
 - ✅ Three-tab bottom navigation: Browse, Bookings, Profile.
 - ✅ Browse tab — live `GET /v1/categories` fetch via `HttpCategoriesRepository` over Dio. Loading / success / empty / error states with a pull-to-refresh + retry button.
 - ✅ Businesses listing — tap a category card → `BusinessesScreen` powered by `GET /v1/businesses?category=<slug>`. Loading / success / empty / error states; "Load more" button for cursor-paginated next pages (no infinite scroll yet). Per-business list item shows name, city, rating (or "No reviews yet"), and a "Featured" chip when `featuredUntil` is in the future.
-- ✅ Business detail — tap a business row → `BusinessDetailScreen` composing four concurrent fetches: `GET /v1/businesses/{id}` (header, description, contact channels, address, rating), `/services` (bookable services with price + duration + placeholder "Book" buttons), `/staff` (active roster), `/reviews` (recent reviews with star glyphs). Each section renders its own loading / success / empty / error sub-state so a 5xx on reviews doesn't blank the rest of the page.
+- ✅ Business detail — tap a business row → `BusinessDetailScreen` composing four concurrent fetches: `GET /v1/businesses/{id}` (header, description, contact channels, address, rating), `/services` (bookable services with price + duration), `/staff` (active roster), `/reviews` (recent reviews with star glyphs). Each section renders its own loading / success / empty / error sub-state.
+- ✅ Booking flow — tap "Book" on a service row → `BookingFlowScreen` wizard. Staff step (skipped when only one active staff member) → date picker (14 days) → slot grid powered by `GET /v1/businesses/{id}/staff/{sid}/slots` → confirmation recap → `POST /v1/appointments` (CASH only for MVP) → success screen with the appointment id. Error handling switches on the API error code: `SLOT_UNAVAILABLE` → "Pick another slot" with one-tap return to the slot step; `UNAUTHENTICATED` → sign-in-required panel; network / 5xx → generic retry.
 - ✅ Profile tab — session info + env display + working sign-out (clears secure storage + best-effort hosted-UI logout).
 - ✅ `AppConfig` + `AppConfigScope` inherited-widget pattern.
 - ✅ `AuthService` port with two implementations: `CognitoAuthService` (production) + `FakeAuthService` (tests + offline demo). `LoginScreen` accepts an optional override so widget tests stay platform-channel-free.
@@ -219,4 +233,4 @@ flutter analyze
 
 ## Next recommended mobile commit
 
-**"Phase 9: add mobile slot picker"** — replace the placeholder "Book" button on each service row with a real slot-picker flow. New `SlotPickerScreen` powered by `GET /v1/businesses/{id}/staff/{staffId}/slots?from=...&to=...&serviceId=...`. UX: pick a staff member (if more than one in the roster), then a date (default to today), then a slot. Confirm screen summarizes service + staff + slot + price + payment method (CASH-only for MVP) → `POST /v1/appointments`. Lands as the booking funnel's anchor and the first authenticated write the mobile app makes. Estimated effort: 4–5 days including the dev-API smoke pass and a thorough widget-test sweep on the slot-picker reducer.
+**"Phase 9: add mobile appointment history"** — wire the Bookings tab to `GET /v1/me/appointments`. New `Appointment` summary widget + grouping (upcoming / past). Tap on a row → an `AppointmentDetailScreen` that surfaces the business + service + staff + status + the relevant lifecycle actions (`cancel` while ACCEPTED, `review` while COMPLETED). Two new repositories: a list repo + per-row action repo over the existing `ApiClient`. Once this commits, the customer-facing MVP loop closes: browse → book → see in history → review after the business marks COMPLETED. Estimated effort: 3 days including the dev-API smoke pass.
