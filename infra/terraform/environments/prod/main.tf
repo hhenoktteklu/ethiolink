@@ -287,7 +287,12 @@ module "lambda" {
   environment = "prod"
   region      = var.region
 
-  package_zip_path = abspath("${path.root}/../../../backend/dist/lambda.zip")
+  # Same relative-path discipline as the dev stack: `path.root` is
+  # `infra/terraform/environments/prod/`, so four `../` climb to
+  # repo root before descending into `backend/dist/lambda.zip`.
+  # `abspath()` resolves at plan time per-host; we never burn an
+  # operator-local absolute path into Terraform inputs.
+  package_zip_path = abspath("${path.root}/../../../../backend/dist/lambda.zip")
 
   private_subnet_ids       = module.vpc.private_subnet_ids
   lambda_security_group_id = module.vpc.lambda_security_group_id

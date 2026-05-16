@@ -456,9 +456,18 @@ locals {
 # -----------------------------------------------------------------------------
 
 locals {
+  # Per-domain execution roles. EVERY `area` value referenced in
+  # `local.functions` above MUST appear here — `aws_lambda_function`
+  # below resolves the role via
+  # `aws_iam_role.lambda_exec[each.value.area]`, which fails plan
+  # with "Invalid index" if the key is missing.
   lambda_areas = toset([
     "auth",
     "me",
+    # Public category listing has its own tiny role so adding a
+    # category-side capability (e.g. an S3 cache bucket) later
+    # doesn't have to grow the much-larger `businesses` role.
+    "categories",
     "businesses",
     "services",
     "staff",
