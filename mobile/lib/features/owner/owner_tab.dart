@@ -21,6 +21,7 @@
 // the future.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
@@ -128,8 +129,9 @@ class _OwnerTabState extends State<OwnerTab> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('My Business')),
+      appBar: AppBar(title: Text(l10n.navOwner)),
       body: RefreshIndicator(
         onRefresh: () async {
           _refresh();
@@ -251,6 +253,7 @@ class _CreateBusinessCta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 48, 24, 32),
@@ -262,13 +265,13 @@ class _CreateBusinessCta extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         Text(
-          'No business yet',
+          l10n.ownerNoBusinessTitle,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 8),
         Text(
-          'Create a business profile to start accepting bookings.',
+          l10n.ownerNoBusinessBody,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: colors.onSurfaceVariant,
@@ -279,14 +282,14 @@ class _CreateBusinessCta extends StatelessWidget {
           child: FilledButton.icon(
             onPressed: onCreate,
             icon: const Icon(Icons.add_business),
-            label: const Text('Create your business'),
+            label: Text(l10n.ownerCreateBusinessAction),
           ),
         ),
         const SizedBox(height: 8),
         Center(
           child: TextButton(
             onPressed: onRetry,
-            child: const Text('Refresh'),
+            child: Text(l10n.ownerRefreshAction),
           ),
         ),
       ],
@@ -298,6 +301,7 @@ class _ForbiddenBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(24, 48, 24, 32),
@@ -305,7 +309,7 @@ class _ForbiddenBanner extends StatelessWidget {
         Icon(Icons.lock_outline, size: 56, color: colors.error),
         const SizedBox(height: 12),
         Text(
-          'Access denied',
+          l10n.ownerAccessDeniedTitle,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleMedium,
         ),
@@ -367,7 +371,7 @@ class _GenericErrorBanner extends StatelessWidget {
           child: FilledButton.icon(
             onPressed: onRetry,
             icon: const Icon(Icons.refresh),
-            label: const Text('Try again'),
+            label: Text(AppLocalizations.of(context).commonTryAgain),
           ),
         ),
       ],
@@ -425,36 +429,21 @@ class OwnerDashboard extends StatelessWidget {
   /// its loader and pick up the new status.
   final VoidCallback onChanged;
 
-  static const _cards = <_DashboardCardSpec>[
-    _DashboardCardSpec(
-      icon: Icons.business,
-      label: 'Profile',
-      blurb: 'Name, description, contact, location.',
-    ),
-    _DashboardCardSpec(
-      icon: Icons.design_services,
-      label: 'Services',
-      blurb: 'Bookable services + price + duration.',
-    ),
-    _DashboardCardSpec(
-      icon: Icons.badge,
-      label: 'Staff',
-      blurb: 'Active staff roster.',
-    ),
-    _DashboardCardSpec(
-      icon: Icons.schedule,
-      label: 'Availability',
-      blurb: 'Weekly schedule + overrides per staff.',
-    ),
-    _DashboardCardSpec(
-      icon: Icons.inbox,
-      label: 'Bookings',
-      blurb: 'Incoming + upcoming appointments.',
-    ),
+  /// Stable identifiers for the five dashboard entry cards. The
+  /// `_openCard` switch dispatches off these enum values rather
+  /// than a label string so the dispatch survives locale changes
+  /// — only the rendered label moves through `AppLocalizations`.
+  static const _cards = <_DashboardCardKind>[
+    _DashboardCardKind.profile,
+    _DashboardCardKind.services,
+    _DashboardCardKind.staff,
+    _DashboardCardKind.availability,
+    _DashboardCardKind.bookings,
   ];
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -468,10 +457,10 @@ class OwnerDashboard extends StatelessWidget {
             onSubmitted: onChanged,
           ),
         const SizedBox(height: 16),
-        for (final spec in _cards) ...[
+        for (final kind in _cards) ...[
           _DashboardCard(
-            spec: spec,
-            onTap: () => _openCard(context, spec.label),
+            spec: _specFor(kind, l10n),
+            onTap: () => _openCard(context, kind),
           ),
           const SizedBox(height: 8),
         ],
@@ -479,11 +468,53 @@ class OwnerDashboard extends StatelessWidget {
     );
   }
 
+  /// Builds the icon / label / blurb for a card kind. The label
+  /// flows through `AppLocalizations`; blurbs stay English-only
+  /// for this commit and get a native-speaker translation pass
+  /// alongside the Amharic ARB.
+  static _DashboardCardSpec _specFor(
+    _DashboardCardKind kind,
+    AppLocalizations l10n,
+  ) {
+    switch (kind) {
+      case _DashboardCardKind.profile:
+        return _DashboardCardSpec(
+          icon: Icons.business,
+          label: l10n.ownerCardProfile,
+          blurb: 'Name, description, contact, location.',
+        );
+      case _DashboardCardKind.services:
+        return _DashboardCardSpec(
+          icon: Icons.design_services,
+          label: l10n.ownerCardServices,
+          blurb: 'Bookable services + price + duration.',
+        );
+      case _DashboardCardKind.staff:
+        return _DashboardCardSpec(
+          icon: Icons.badge,
+          label: l10n.ownerCardStaff,
+          blurb: 'Active staff roster.',
+        );
+      case _DashboardCardKind.availability:
+        return _DashboardCardSpec(
+          icon: Icons.schedule,
+          label: l10n.ownerCardAvailability,
+          blurb: 'Weekly schedule + overrides per staff.',
+        );
+      case _DashboardCardKind.bookings:
+        return _DashboardCardSpec(
+          icon: Icons.inbox,
+          label: l10n.ownerCardBookings,
+          blurb: 'Incoming + upcoming appointments.',
+        );
+    }
+  }
+
   /// Dispatches the dashboard-card tap. All five cards have real
   /// screens — Track 3.5 closed end-to-end.
-  void _openCard(BuildContext context, String label) {
-    switch (label) {
-      case 'Profile':
+  void _openCard(BuildContext context, _DashboardCardKind kind) {
+    switch (kind) {
+      case _DashboardCardKind.profile:
         Navigator.of(context).push(
           MaterialPageRoute<OwnerBusinessView?>(
             builder: (_) => OwnerProfileScreen(
@@ -496,7 +527,7 @@ class OwnerDashboard extends StatelessWidget {
           if (updated != null) onChanged();
         });
         return;
-      case 'Services':
+      case _DashboardCardKind.services:
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => OwnerServicesScreen(
@@ -506,7 +537,7 @@ class OwnerDashboard extends StatelessWidget {
           ),
         );
         return;
-      case 'Staff':
+      case _DashboardCardKind.staff:
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => OwnerStaffScreen(
@@ -516,7 +547,7 @@ class OwnerDashboard extends StatelessWidget {
           ),
         );
         return;
-      case 'Availability':
+      case _DashboardCardKind.availability:
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => OwnerAvailabilityScreen(
@@ -528,7 +559,7 @@ class OwnerDashboard extends StatelessWidget {
           ),
         );
         return;
-      case 'Bookings':
+      case _DashboardCardKind.bookings:
         Navigator.of(context).push(
           MaterialPageRoute<void>(
             builder: (_) => OwnerBookingsScreen(
@@ -538,18 +569,11 @@ class OwnerDashboard extends StatelessWidget {
           ),
         );
         return;
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '$label — coming soon in the next owner-flow commit.',
-            ),
-            duration: const Duration(seconds: 2),
-          ),
-        );
     }
   }
 }
+
+enum _DashboardCardKind { profile, services, staff, availability, bookings }
 
 class _BusinessHeader extends StatelessWidget {
   const _BusinessHeader({required this.business});

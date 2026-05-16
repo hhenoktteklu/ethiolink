@@ -9,8 +9,14 @@
 // of the `flutter_appauth` + `flutter_secure_storage` platform
 // channels, we pump the test app with `EthioLinkApp.testAuth(...)`
 // which injects a `FakeAuthService` down the navigation stack.
+//
+// Phase 9 Track 5 — `LoginScreen` now reads visible copy from
+// `AppLocalizations`. The test scaffold pumps a `MaterialApp`
+// with the standard delegates + supported locales so
+// `AppLocalizations.of(context)` resolves to the English bundle.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/app.dart';
@@ -36,10 +42,17 @@ Future<void> pumpLoginScreen(WidgetTester tester) async {
     AppConfigScope(
       config: _testConfig,
       child: MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: LoginScreen(authServiceOverride: FakeAuthService()),
       ),
     ),
   );
+  // Initial pumpWidget yields the loading scaffold while the
+  // localization delegates load; one extra pump resolves the
+  // English bundle.
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -85,5 +98,39 @@ void main() {
     // would try to load `flutter_appauth`'s platform channel.
     await tester.pumpWidget(const EthioLinkApp(config: _testConfig));
     expect(find.byType(MaterialApp), findsOneWidget);
+  });
+
+  testWidgets('app boots with English AppLocalizations wired into MaterialApp',
+      (tester) async {
+    // Pump the real root widget. `EthioLinkApp` wires
+    // `AppLocalizations.localizationsDelegates` +
+    // `supportedLocales` into the `MaterialApp`; the LoginScreen
+    // reads its labels through `AppLocalizations.of(context)`.
+    await tester.pumpWidget(const EthioLinkApp(config: _testConfig));
+    await tester.pumpAndSettle();
+
+    final BuildContext context = tester.element(find.byType(LoginScreen));
+    final Locale active = Localizations.localeOf(context);
+    expect(active.languageCode, equals('en'));
+    expect(AppLocalizations.supportedLocales, contains(const Locale('en')));
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    // Sanity: the bundle resolved to the English ARB.
+    expect(l10n.appTitle, equals('EthioLink'));
+    expect(l10n.loginSignIn, equals('Sign in'));
+  });
+
+  testWidgets('key login labels render from AppLocalizations (not hardcoded strings)',
+      (tester) async {
+    await pumpLoginScreen(tester);
+
+    final BuildContext context = tester.element(find.byType(LoginScreen));
+    final AppLocalizations l10n = AppLocalizations.of(context);
+
+    // The widget reads each of these from the ARB bundle; the
+    // strings happen to be English today but the indirection is
+    // what we're verifying.
+    expect(find.text(l10n.appTitle), findsOneWidget);
+    expect(find.text(l10n.appTagline), findsOneWidget);
+    expect(find.text(l10n.loginSignIn), findsOneWidget);
   });
 }

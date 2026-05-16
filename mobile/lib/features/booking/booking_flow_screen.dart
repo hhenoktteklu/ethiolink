@@ -30,6 +30,7 @@
 //     confirm step.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/config/app_config_scope.dart';
@@ -414,10 +415,11 @@ class _ConfirmStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+    final l10n = AppLocalizations.of(context);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Confirm your booking', style: textTheme.titleLarge),
+        Text(l10n.bookingFlowConfirmTitle, style: textTheme.titleLarge),
         const SizedBox(height: 16),
         _Row(label: 'Business', value: businessName),
         _Row(label: 'Service', value: service.nameEn),
@@ -441,7 +443,11 @@ class _ConfirmStep extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.check),
-          label: Text(booking ? 'Booking…' : 'Book this slot'),
+          label: Text(
+            booking
+                ? l10n.bookingFlowBookingInProgress
+                : l10n.bookingFlowConfirmAction,
+          ),
         ),
       ],
     );
@@ -457,6 +463,7 @@ class _SuccessStep extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final l10n = AppLocalizations.of(context);
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -464,7 +471,7 @@ class _SuccessStep extends StatelessWidget {
         children: [
           Icon(Icons.check_circle, size: 80, color: colors.primary),
           const SizedBox(height: 16),
-          Text('Booking requested!', style: textTheme.titleLarge),
+          Text(l10n.bookingFlowSuccessTitle, style: textTheme.titleLarge),
           const SizedBox(height: 8),
           Text(
             "We've sent the request to ${_humanDateTime(appointment.startsAt)}. "
@@ -480,7 +487,10 @@ class _SuccessStep extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 24),
-          FilledButton(onPressed: onDone, child: const Text('Done')),
+          FilledButton(
+            onPressed: onDone,
+            child: Text(l10n.bookingFlowDone),
+          ),
         ],
       ),
     );
@@ -531,6 +541,7 @@ class _BookingErrorPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     String title;
     String message;
     Widget? action;
@@ -542,7 +553,7 @@ class _BookingErrorPanel extends StatelessWidget {
         action = FilledButton.icon(
           onPressed: onPickAnotherSlot,
           icon: const Icon(Icons.refresh),
-          label: const Text('Pick another slot'),
+          label: Text(l10n.bookingFlowPickAnotherSlot),
         );
         break;
       case AppointmentCreateFailureKind.unauthenticated:

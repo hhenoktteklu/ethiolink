@@ -1,0 +1,28 @@
+# EthioLink Mobile — Flutter gen-l10n config.
+#
+# Phase 9 Track 5 i18n scaffold. Flutter's built-in `gen-l10n` tool
+# reads this config + `lib/l10n/app_*.arb` and generates the
+# `AppLocalizations` class at build time. The output is the
+# synthetic `package:flutter_gen/gen_l10n/app_localizations.dart`
+# import — not checked in; regenerated on every `flutter pub get`.
+#
+# `app_en.arb` is the template (source-of-truth English copy).
+# `app_am.arb` (Amharic) lands in a follow-up commit alongside the
+# locale picker. Until that lands `supportedLocales` is `[en]` only.
+
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+
+# Use Flutter's synthetic-package mode so the generated
+# `AppLocalizations` class is reachable as
+# `package:flutter_gen/gen_l10n/app_localizations.dart` from any
+# file in the package. Cleaner than a per-file relative import.
+synthetic-package: true
+
+# We hand-check ARB keys; the generator's `nullable-getter: false`
+# means `AppLocalizations.of(context)` returns non-null when the
+# `localizationsDelegates` are wired (always, for us). Callers
+# don't need `?? ''` fallbacks.
+nullable-getter: false

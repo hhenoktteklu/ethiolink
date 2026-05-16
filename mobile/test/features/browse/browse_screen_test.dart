@@ -9,6 +9,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/auth/auth_service.dart';
@@ -108,6 +109,9 @@ Future<void> _pumpBrowse(
     AppConfigScope(
       config: _testConfig,
       child: MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: BrowseScreen(
           session: session ?? _testSession,
           categoriesRepositoryOverride: repository,

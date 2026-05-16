@@ -14,13 +14,19 @@ mobile/
   env/
     dev.example.json       Template for the dart-define-from-file values
     dev.json               (gitignored) operator-filled env values
+  l10n.yaml                Flutter gen-l10n config (arb-dir + output class)
   lib/
     main.dart              Entry point — loads config, runs the root widget
-    app.dart               Root MaterialApp + theme + initial route
+    app.dart               Root MaterialApp + theme + AppLocalizations + LocaleScope + initial route
+    l10n/
+      app_en.arb            English string bundle (source-of-truth for gen-l10n).
+                            `app_am.arb` lands alongside the locale picker.
     core/
       config/
         app_config.dart         Resolved env config + bootstrap factory
         app_config_scope.dart   InheritedWidget for config access
+      i18n/
+        locale_scope.dart       App-level Locale state (forward-prep for the picker)
       api/
         api_client.dart         HTTP client placeholder (Dio adapter lands later)
       auth/
@@ -238,7 +244,7 @@ Each item below is on the immediate Phase 9 Track 3 backlog. The scaffold leaves
 - ❌ State management (Riverpod). Adopted when the first feature with non-trivial state lands — likely the slot picker or the booking funnel.
 - ❌ Routing library (go_router). Adopted when the screen count crosses ~6.
 - ❌ Per-platform scaffolding (`android/`, `ios/`, ...). Regenerated locally; iOS Info.plist edits for the `ethiolink://` URL scheme land in a follow-up.
-- ❌ Localization beyond English. The `flutter_localizations` package is wired so a future `am.arb` bundle drops in without a pubspec change.
+- ❌ Localization beyond English. **Phase 9 Track 5 update:** the Flutter i18n scaffold has landed. `flutter_localizations` + Flutter's built-in `gen-l10n` are wired through `l10n.yaml` + `lib/l10n/app_en.arb`; `MaterialApp` resolves `AppLocalizations.localizationsDelegates` + `AppLocalizations.supportedLocales`. The visible English copy on login, the bottom-nav, the profile + bookings + owner-dashboard surfaces, and the booking-flow confirm + success steps reads from `AppLocalizations.of(context)`. The Amharic bundle (`app_am.arb`) and the in-app locale picker land in the next mobile commit; the `users.locale` PATCH endpoint that backs the picker shipped in `Phase 9: add localization foundation`.
 - ❌ Push notifications via FCM / APNs. Out of MVP scope per `docs/product/MVP_SCOPE.md`.
 - ❌ Open-date availability overrides, owner-side `no-show` action (backend not yet exposed), push notifications, business analytics, business cover photos / media polish. With the profile editor landed, every dashboard card on the My Business tab opens a real screen — Track 3.5 is closed end-to-end. The remaining deferred items are all post-MVP polish that pair with backend or infrastructure work tracked in `PHASE_9_POST_MVP.md`.
 

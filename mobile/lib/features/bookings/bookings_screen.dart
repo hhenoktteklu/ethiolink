@@ -13,6 +13,7 @@
 // are threaded through so widget tests stay network-free.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/auth/auth_service.dart';
@@ -66,8 +67,9 @@ class _BookingsScreenState extends State<BookingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('My Bookings')),
+      appBar: AppBar(title: Text(l10n.bookingsTitle)),
       body: RefreshIndicator(
         onRefresh: () async {
           _refresh();

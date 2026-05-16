@@ -12,27 +12,67 @@
 // `AppConfigScope.of(context)` inherited widget — keeps the
 // dependency explicit and avoids a Riverpod / GetIt commit prior
 // to the state-management track.
+//
+// Phase 9 Track 5 — `AppLocalizations` (generated from
+// `lib/l10n/app_en.arb` by Flutter's `gen-l10n`) is wired into
+// `MaterialApp` via `localizationsDelegates` + `supportedLocales`.
+// `LocaleScope` publishes the active `Locale` to the rebuilder so
+// the future locale-picker commit can swap languages by mutating
+// the controller without touching `MaterialApp` directly.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import 'core/config/app_config.dart';
 import 'core/config/app_config_scope.dart';
+import 'core/i18n/locale_scope.dart';
 import 'features/auth/login_screen.dart';
 
-class EthioLinkApp extends StatelessWidget {
+class EthioLinkApp extends StatefulWidget {
   const EthioLinkApp({required this.config, super.key});
 
   final AppConfig config;
 
   @override
+  State<EthioLinkApp> createState() => _EthioLinkAppState();
+}
+
+class _EthioLinkAppState extends State<EthioLinkApp> {
+  // Controller is owned by the root state so it survives across
+  // hot reloads + locale-picker mutations. Today the picker
+  // doesn't exist so the locale stays `en` for the app's whole
+  // lifetime.
+  final LocaleController _locale = LocaleController();
+
+  @override
+  void dispose() {
+    _locale.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return AppConfigScope(
-      config: config,
-      child: MaterialApp(
-        title: 'EthioLink',
-        debugShowCheckedModeBanner: false,
-        theme: _buildTheme(),
-        home: const LoginScreen(),
+      config: widget.config,
+      child: LocaleScope(
+        notifier: _locale,
+        child: AnimatedBuilder(
+          // Rebuild MaterialApp whenever the locale controller
+          // fires. Today this only happens on construction; the
+          // picker commit drives it from a Settings screen.
+          animation: _locale,
+          builder: (context, _) {
+            return MaterialApp(
+              title: 'EthioLink',
+              debugShowCheckedModeBanner: false,
+              theme: _buildTheme(),
+              locale: _locale.locale,
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              home: const LoginScreen(),
+            );
+          },
+        ),
       ),
     );
   }

@@ -68,5 +68,13 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  # Phase 9 Track 5 — enable Flutter's `gen-l10n` codegen. The
+  # generator reads `lib/l10n/app_*.arb` (driven by the
+  # sibling `l10n.yaml`) and emits the synthetic
+  # `package:flutter_gen/gen_l10n/app_localizations.dart`
+  # import every `flutter pub get` run. English is the only
+  # locale shipped today; `app_am.arb` lands in the locale-
+  # picker commit.
+  generate: true
   # Asset declarations land here once the design pass adds
   # images. Empty today.

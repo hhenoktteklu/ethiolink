@@ -14,6 +14,7 @@
 // later commit.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/auth/auth_service.dart';
 import '../../core/auth/cognito_auth_service.dart';
@@ -89,6 +90,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final config = AppConfigScope.of(context);
     final colors = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       body: SafeArea(
@@ -111,7 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 24),
                     Text(
-                      'EthioLink',
+                      l10n.appTitle,
                       textAlign: TextAlign.center,
                       style: textTheme.displaySmall?.copyWith(
                         color: colors.primary,
@@ -120,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Book salons, barbers, spas, and beauty pros across Ethiopia.',
+                      l10n.appTagline,
                       textAlign: TextAlign.center,
                       style: textTheme.bodyMedium?.copyWith(
                         color: colors.onSurfaceVariant,
@@ -138,7 +140,9 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                             )
                           : const Icon(Icons.login),
-                      label: Text(_signingIn ? 'Signing in…' : 'Sign in'),
+                      label: Text(
+                        _signingIn ? l10n.loginSigningIn : l10n.loginSignIn,
+                      ),
                     ),
                     if (_error != null) ...[
                       const SizedBox(height: 16),

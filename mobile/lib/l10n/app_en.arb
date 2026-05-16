@@ -1,0 +1,185 @@
+{
+    "@@locale": "en",
+
+    "appTitle": "EthioLink",
+    "@appTitle": {
+        "description": "App brand displayed in the MaterialApp title and on the login splash."
+    },
+
+    "appTagline": "Book salons, barbers, spas, and beauty pros across Ethiopia.",
+    "@appTagline": {
+        "description": "Subtitle under the brand mark on the login screen."
+    },
+
+    "loginSignIn": "Sign in",
+    "@loginSignIn": {
+        "description": "Primary action on the login screen that kicks off the Cognito PKCE flow."
+    },
+
+    "loginSigningIn": "Signing in…",
+    "@loginSigningIn": {
+        "description": "Loading-state copy on the login button while the PKCE round-trip is in flight."
+    },
+
+    "navBrowse": "Browse",
+    "@navBrowse": {
+        "description": "Bottom-nav label for the discover / categories tab."
+    },
+
+    "navBookings": "Bookings",
+    "@navBookings": {
+        "description": "Bottom-nav label for the customer's appointments-list tab."
+    },
+
+    "navOwner": "My Business",
+    "@navOwner": {
+        "description": "Bottom-nav label for the BUSINESS_OWNER-only dashboard tab. Same string is reused as the OwnerTab AppBar title."
+    },
+
+    "navProfile": "Profile",
+    "@navProfile": {
+        "description": "Bottom-nav label for the profile tab. Same string is reused as the ProfileScreen AppBar title."
+    },
+
+    "browseDiscoverTitle": "Discover",
+    "@browseDiscoverTitle": {
+        "description": "AppBar title on the customer's browse / categories tab."
+    },
+
+    "browseWelcomeBack": "Welcome back, {email}.",
+    "@browseWelcomeBack": {
+        "description": "Welcome banner above the category grid; substitutes the signed-in user's email.",
+        "placeholders": {
+            "email": {
+                "type": "String",
+                "example": "henok@example.com"
+            }
+        }
+    },
+
+    "profileTitle": "Profile",
+    "@profileTitle": {
+        "description": "AppBar title on the profile tab."
+    },
+
+    "profileRole": "Role: {role}",
+    "@profileRole": {
+        "description": "Profile-screen line showing the signed-in user's Cognito role.",
+        "placeholders": {
+            "role": {
+                "type": "String",
+                "example": "CUSTOMER"
+            }
+        }
+    },
+
+    "profileNotificationsHeading": "Notifications",
+    "@profileNotificationsHeading": {
+        "description": "Section heading above the Telegram-link row on the profile screen."
+    },
+
+    "profileTelegramTitle": "Telegram",
+    "@profileTelegramTitle": {
+        "description": "Title on the Telegram-link row of the profile screen."
+    },
+
+    "profileTelegramSubtitle": "Link your Telegram account for real-time booking notifications.",
+    "@profileTelegramSubtitle": {
+        "description": "Subtitle on the Telegram-link row of the profile screen."
+    },
+
+    "profileSignOut": "Sign out",
+    "@profileSignOut": {
+        "description": "Sign-out button on the profile screen."
+    },
+
+    "bookingsTitle": "My Bookings",
+    "@bookingsTitle": {
+        "description": "AppBar title on the customer's appointments-list tab."
+    },
+
+    "bookingFlowConfirmTitle": "Confirm your booking",
+    "@bookingFlowConfirmTitle": {
+        "description": "Heading on the final review step of the booking wizard."
+    },
+
+    "bookingFlowConfirmAction": "Book this slot",
+    "@bookingFlowConfirmAction": {
+        "description": "Primary action that posts POST /v1/appointments from the confirm step."
+    },
+
+    "bookingFlowBookingInProgress": "Booking…",
+    "@bookingFlowBookingInProgress": {
+        "description": "Loading-state copy on the confirm button while the request is in flight."
+    },
+
+    "bookingFlowSuccessTitle": "Booking requested!",
+    "@bookingFlowSuccessTitle": {
+        "description": "Heading on the success step shown after the appointment is created."
+    },
+
+    "bookingFlowDone": "Done",
+    "@bookingFlowDone": {
+        "description": "Button on the success step that pops back to the bookings list."
+    },
+
+    "bookingFlowPickAnotherSlot": "Pick another slot",
+    "@bookingFlowPickAnotherSlot": {
+        "description": "Recovery action shown when the chosen slot is no longer available."
+    },
+
+    "ownerNoBusinessTitle": "No business yet",
+    "@ownerNoBusinessTitle": {
+        "description": "Title in the empty state when GET /v1/me/business returns 404."
+    },
+
+    "ownerNoBusinessBody": "Create a business profile to start accepting bookings.",
+    "@ownerNoBusinessBody": {
+        "description": "Body copy of the empty state above the create-business CTA."
+    },
+
+    "ownerCreateBusinessAction": "Create your business",
+    "@ownerCreateBusinessAction": {
+        "description": "CTA that opens the CreateBusinessFlow wizard."
+    },
+
+    "ownerRefreshAction": "Refresh",
+    "@ownerRefreshAction": {
+        "description": "Secondary action on the empty-state branch that re-runs the GET /v1/me/business request."
+    },
+
+    "ownerAccessDeniedTitle": "Access denied",
+    "@ownerAccessDeniedTitle": {
+        "description": "Banner title when the owner tab returns 403 (stale Cognito groups)."
+    },
+
+    "ownerCardProfile": "Profile",
+    "@ownerCardProfile": {
+        "description": "Owner-dashboard card label for the business profile editor."
+    },
+
+    "ownerCardServices": "Services",
+    "@ownerCardServices": {
+        "description": "Owner-dashboard card label for the services CRUD screen."
+    },
+
+    "ownerCardStaff": "Staff",
+    "@ownerCardStaff": {
+        "description": "Owner-dashboard card label for the staff CRUD screen."
+    },
+
+    "ownerCardAvailability": "Availability",
+    "@ownerCardAvailability": {
+        "description": "Owner-dashboard card label for the availability editor."
+    },
+
+    "ownerCardBookings": "Bookings",
+    "@ownerCardBookings": {
+        "description": "Owner-dashboard card label for the bookings inbox."
+    },
+
+    "commonTryAgain": "Try again",
+    "@commonTryAgain": {
+        "description": "Retry button shown on error states across the app."
+    }
+}

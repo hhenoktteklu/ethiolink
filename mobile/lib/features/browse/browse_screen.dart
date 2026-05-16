@@ -28,6 +28,7 @@
 // preserved unchanged for the sign-out flow.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/auth/auth_service.dart';
@@ -100,6 +101,7 @@ class _BrowseScreenState extends State<BrowseScreen> {
     // owner access. ADMIN users default to the customer tabs
     // (admin operations live in the admin SPA today).
     final showOwnerTab = widget.session.role == 'BUSINESS_OWNER';
+    final l10n = AppLocalizations.of(context);
 
     final tabs = <Widget>[
       _BrowseTab(
@@ -124,26 +126,26 @@ class _BrowseScreenState extends State<BrowseScreen> {
         selectedIndex: _selectedIndex,
         onDestinationSelected: (i) => setState(() => _selectedIndex = i),
         destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search),
-            label: 'Browse',
+          NavigationDestination(
+            icon: const Icon(Icons.search_outlined),
+            selectedIcon: const Icon(Icons.search),
+            label: l10n.navBrowse,
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.event_outlined),
-            selectedIcon: Icon(Icons.event),
-            label: 'Bookings',
+          NavigationDestination(
+            icon: const Icon(Icons.event_outlined),
+            selectedIcon: const Icon(Icons.event),
+            label: l10n.navBookings,
           ),
           if (showOwnerTab)
-            const NavigationDestination(
-              icon: Icon(Icons.storefront_outlined),
-              selectedIcon: Icon(Icons.storefront),
-              label: 'My Business',
+            NavigationDestination(
+              icon: const Icon(Icons.storefront_outlined),
+              selectedIcon: const Icon(Icons.storefront),
+              label: l10n.navOwner,
             ),
-          const NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
+          NavigationDestination(
+            icon: const Icon(Icons.person_outline),
+            selectedIcon: const Icon(Icons.person),
+            label: l10n.navProfile,
           ),
         ],
       ),
@@ -183,6 +185,7 @@ class _BrowseTabState extends State<_BrowseTab> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return RefreshIndicator(
       onRefresh: () async {
         _refresh();
@@ -191,15 +194,15 @@ class _BrowseTabState extends State<_BrowseTab> {
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
-          const SliverAppBar(
-            title: Text('Discover'),
+          SliverAppBar(
+            title: Text(l10n.browseDiscoverTitle),
             floating: true,
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             sliver: SliverToBoxAdapter(
               child: Text(
-                'Welcome back, ${widget.session.email}.',
+                l10n.browseWelcomeBack(widget.session.email),
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
             ),

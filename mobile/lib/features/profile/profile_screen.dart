@@ -7,6 +7,7 @@
 // login screen.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../../core/auth/auth_service.dart';
 import '../../core/auth/cognito_auth_service.dart';
@@ -41,10 +42,11 @@ class ProfileScreen extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final config = AppConfigScope.of(context);
+    final l10n = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Profile'),
+        title: Text(l10n.profileTitle),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -69,7 +71,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Role: ${session.role}',
+              l10n.profileRole(session.role),
               textAlign: TextAlign.center,
               style: textTheme.bodyMedium?.copyWith(
                 color: colors.onSurfaceVariant,
@@ -80,15 +82,12 @@ class ProfileScreen extends StatelessWidget {
             _ConfigRow(label: 'API base', value: config.apiBaseUrl),
             _ConfigRow(label: 'Cognito domain', value: config.cognitoDomain),
             const SizedBox(height: 24),
-            _SectionHeader(text: 'Notifications'),
+            _SectionHeader(text: l10n.profileNotificationsHeading),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: Icon(Icons.telegram, color: colors.primary),
-              title: const Text('Telegram'),
-              subtitle: const Text(
-                'Link your Telegram account for real-time booking '
-                'notifications.',
-              ),
+              title: Text(l10n.profileTelegramTitle),
+              subtitle: Text(l10n.profileTelegramSubtitle),
               trailing: const Icon(Icons.chevron_right),
               onTap: () {
                 Navigator.of(context).push(
@@ -123,7 +122,7 @@ class ProfileScreen extends StatelessWidget {
                 );
               },
               icon: const Icon(Icons.logout),
-              label: const Text('Sign out'),
+              label: Text(l10n.profileSignOut),
             ),
           ],
         ),

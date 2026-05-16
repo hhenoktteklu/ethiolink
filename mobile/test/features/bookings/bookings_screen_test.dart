@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/auth/auth_service.dart';
@@ -115,6 +116,9 @@ Future<void> _pumpBookings(
     AppConfigScope(
       config: _testConfig,
       child: MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: BookingsScreen(
           session: _testSession,
           historyRepositoryOverride: repo,
@@ -134,6 +138,9 @@ Future<void> _pumpDetail(
     AppConfigScope(
       config: _testConfig,
       child: MaterialApp(
+        locale: const Locale('en'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         home: AppointmentDetailScreen(
           appointment: appointment,
           appointmentsRepositoryOverride: repo,
