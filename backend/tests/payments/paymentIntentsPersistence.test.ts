@@ -34,7 +34,7 @@ import {
     FeaturingService,
     type FeaturingServiceDeps,
 } from '../../shared/domains/featuring/featuringService.js';
-import { InMemoryFeaturingRepository } from '../../shared/domains/featuring/featuringRepository.js';
+import { InMemoryFeaturingRepository } from '../_fakes/InMemoryFeaturingRepository.js';
 import { InMemoryPaymentIntentsRepository } from '../../shared/domains/payments/paymentIntentsRepository.js';
 import { InMemoryBusinessRepository } from '../_fakes/InMemoryBusinessRepository.js';
 import type { Logger } from '../../shared/logging/logger.js';
@@ -234,14 +234,13 @@ describe('FeaturingService.subscribe — payment_intents persistence', () => {
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,
         });
-        // Cancel the first to clear the partial unique on
-        // featuring_subscriptions(business_id) so we can subscribe
-        // again under the same tx_ref.
-        await env.service.cancel({
-            businessId: BUSINESS_ID,
-            adminUserId: OWNER_ID,
-            reason: 'reset',
-        });
+        // The first subscribe leaves a PENDING_PAYMENT row, which
+        // does NOT block the partial-unique guard (the index is
+        // WHERE status = 'ACTIVE'). So a second subscribe with the
+        // same gateway (and therefore the same tx_ref) is allowed,
+        // and the repo's `insertOrFindByProviderRef` should
+        // collapse the second payment-intent insert into the
+        // existing row.
 
         // Second subscribe attempt with the same gateway (same
         // tx_ref). The repo's insertOrFindByProviderRef collapses

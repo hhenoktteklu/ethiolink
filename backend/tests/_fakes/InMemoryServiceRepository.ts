@@ -30,6 +30,22 @@ const PATCH_KEYS: ReadonlyArray<keyof UpdateServiceFields> = [
 export class InMemoryServiceRepository implements ServiceRepository {
     private readonly rowsById = new Map<string, Service>();
 
+    /**
+     * Monotonic clock for `createdAt`. `new Date()` on its own collides
+     * at sub-millisecond resolution when two inserts happen back-to-back
+     * in the same event-loop turn, which collapses the `created_at ASC,
+     * id ASC` order into pure UUID-lex order. Pg's `now()` has μs
+     * precision so the production listing is naturally strict-monotonic;
+     * the fake mirrors that by bumping by 1ms per insert.
+     */
+    private nextTimestampMs = Date.now();
+
+    private nextTimestamp(): Date {
+        const candidate = Math.max(this.nextTimestampMs + 1, Date.now());
+        this.nextTimestampMs = candidate;
+        return new Date(candidate);
+    }
+
     /** Test seed: bypass `insert` to fix the id / timestamps / isActive. */
     seed(service: Service): void {
         this.rowsById.set(service.id, Object.freeze({ ...service }));
@@ -40,7 +56,7 @@ export class InMemoryServiceRepository implements ServiceRepository {
     }
 
     async insert(input: InsertServiceInput): Promise<Service> {
-        const now = new Date();
+        const now = this.nextTimestamp();
         const row: Service = Object.freeze({
             id: randomUUID(),
             businessId: input.businessId,

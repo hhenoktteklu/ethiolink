@@ -349,9 +349,26 @@ describe('BusinessService.listPublic — filters', () => {
     });
 
     it('applies partial-name query', async () => {
+        // Phase 9 Track 6 widened `query` to match against
+        // name + description.en + description.am. Override the
+        // descriptions so only the name field differs between
+        // the two fixtures — otherwise the default `makeBusiness`
+        // description ("A test salon.") matches both rows.
         const { service, repo } = buildService();
-        repo.seed(makeBusiness({ id: 'a', name: 'Sunrise Salon' }));
-        repo.seed(makeBusiness({ id: 'b', name: 'Moonset Spa' }));
+        repo.seed(
+            makeBusiness({
+                id: 'a',
+                name: 'Sunrise Salon',
+                description: { en: 'Sunrise haircut and beauty.' },
+            }),
+        );
+        repo.seed(
+            makeBusiness({
+                id: 'b',
+                name: 'Moonset Spa',
+                description: { en: 'Moonset relaxation spa.' },
+            }),
+        );
 
         const page = await service.listPublic({ query: 'salon' });
 

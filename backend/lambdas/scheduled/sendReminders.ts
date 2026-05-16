@@ -160,22 +160,53 @@ export interface ReminderBatchDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Cold-start init
+// Cold-start init (lazy)
 // ---------------------------------------------------------------------------
+//
+// The init must be lazy (not top-level `await`) because the test
+// suite imports `runReminderBatch` from this module. Top-level
+// `await` requires ESM evaluation, but tsx's CJS transform path —
+// which the test runner uses — rejects top-level await. Caching the
+// resolved deps preserves Lambda cold-start behaviour: the first
+// invocation pays the secrets-resolution cost, subsequent
+// invocations reuse the cached structure for the remainder of the
+// container's lifetime. Pattern matches
+// `lambdas/integrations/chapaWebhook.ts`.
 
-const config = await loadSecretsThenConfig();
-const baseLogger = createLogger({ level: config.logLevel });
-const pool = getPool(config);
-const appointmentsRepo = new PgAppointmentsRepository(pool);
-const businessRepo = new PgBusinessRepository(pool);
-const serviceRepo = new PgServiceRepository(pool);
-const userRepo = new PgUserRepository(pool);
-const notificationLogRepo = new PgNotificationLogRepository(pool);
-const notificationService = createNotificationService({
-    pool,
-    config,
-    logger: baseLogger,
-});
+interface ProductionDeps {
+    readonly config: Awaited<ReturnType<typeof loadSecretsThenConfig>>;
+    readonly baseLogger: ReturnType<typeof createLogger>;
+    readonly appointmentsRepo: PgAppointmentsRepository;
+    readonly businessRepo: PgBusinessRepository;
+    readonly serviceRepo: PgServiceRepository;
+    readonly userRepo: PgUserRepository;
+    readonly notificationLogRepo: PgNotificationLogRepository;
+    readonly notificationService: ReturnType<typeof createNotificationService>;
+}
+
+let cachedDeps: ProductionDeps | null = null;
+
+async function getProductionDeps(): Promise<ProductionDeps> {
+    if (cachedDeps) return cachedDeps;
+    const config = await loadSecretsThenConfig();
+    const baseLogger = createLogger({ level: config.logLevel });
+    const pool = getPool(config);
+    cachedDeps = {
+        config,
+        baseLogger,
+        appointmentsRepo: new PgAppointmentsRepository(pool),
+        businessRepo: new PgBusinessRepository(pool),
+        serviceRepo: new PgServiceRepository(pool),
+        userRepo: new PgUserRepository(pool),
+        notificationLogRepo: new PgNotificationLogRepository(pool),
+        notificationService: createNotificationService({
+            pool,
+            config,
+            logger: baseLogger,
+        }),
+    };
+    return cachedDeps;
+}
 
 // ---------------------------------------------------------------------------
 // Lambda entry
@@ -184,21 +215,22 @@ const notificationService = createNotificationService({
 export const handler = async (
     event: ScheduledEvent,
 ): Promise<ReminderBatchSummary> => {
-    const logger = baseLogger.child({
+    const deps = await getProductionDeps();
+    const logger = deps.baseLogger.child({
         handler: 'scheduled.sendReminders',
         ruleArn: event.resources?.[0],
     });
 
     return runReminderBatch({
-        appointmentsRepo,
-        businessRepo,
-        serviceRepo,
-        userRepo,
-        notificationService,
-        notificationLogRepo,
+        appointmentsRepo: deps.appointmentsRepo,
+        businessRepo: deps.businessRepo,
+        serviceRepo: deps.serviceRepo,
+        userRepo: deps.userRepo,
+        notificationService: deps.notificationService,
+        notificationLogRepo: deps.notificationLogRepo,
         logger,
-        smsRoutingEnabled: shouldWireSmsGateway(config),
-        telegramRoutingEnabled: shouldWireTelegramGateway(config),
+        smsRoutingEnabled: shouldWireSmsGateway(deps.config),
+        telegramRoutingEnabled: shouldWireTelegramGateway(deps.config),
     });
 };
 

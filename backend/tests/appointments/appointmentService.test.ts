@@ -743,7 +743,16 @@ describe('AppointmentService — booking lifecycle notifications', () => {
         await env.service.cancel(
             seeded.id,
             caller(CUSTOMER_ID, 'CUSTOMER'),
-            { reason: 'Need to move to next week' },
+            {
+                reason: 'Need to move to next week',
+                // Pin `now` to the day before the appointment so the
+                // CUSTOMER cancel is comfortably outside the 240-min
+                // cutoff. Without this seam, the service falls back to
+                // `new Date()` and trips on real-clock drift now that
+                // the fixture's `startsAt` (2026-05-15T06:00Z) is in
+                // the past relative to wall-clock test runs.
+                now: new Date('2026-05-14T00:00:00.000Z'),
+            },
         );
 
         const logs = env.notificationLogRepo.all();
