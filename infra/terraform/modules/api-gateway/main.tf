@@ -120,6 +120,12 @@ locals {
     { path = "v1/me", parent = "v1" },
     { path = "v1/me/business", parent = "v1/me" },
     { path = "v1/me/appointments", parent = "v1/me" },
+    { path = "v1/me/link-telegram", parent = "v1/me" },
+    { path = "v1/me/link-telegram/start", parent = "v1/me/link-telegram" },
+    { path = "v1/me/telegram-status", parent = "v1/me" },
+    { path = "v1/integrations", parent = "v1" },
+    { path = "v1/integrations/telegram", parent = "v1/integrations" },
+    { path = "v1/integrations/telegram/webhook", parent = "v1/integrations/telegram" },
     { path = "v1/categories", parent = "v1" },
     { path = "v1/businesses", parent = "v1" },
     { path = "v1/businesses/{businessId}", parent = "v1/businesses" },
@@ -218,6 +224,23 @@ locals {
     }
     "GET_v1_me_appointments" = {
       path = "v1/me/appointments", method = "GET", function = "appointments-list-mine", auth = "COGNITO"
+    }
+    "POST_v1_me_link_telegram_start" = {
+      path = "v1/me/link-telegram/start", method = "POST", function = "me-link-telegram-start", auth = "COGNITO"
+    }
+    "GET_v1_me_telegram_status" = {
+      path = "v1/me/telegram-status", method = "GET", function = "me-link-telegram-status", auth = "COGNITO"
+    }
+    "DELETE_v1_me_link_telegram" = {
+      path = "v1/me/link-telegram", method = "DELETE", function = "me-link-telegram-unlink", auth = "COGNITO"
+    }
+    "POST_v1_integrations_telegram_webhook" = {
+      # Public route — Telegram POSTs from its own infrastructure
+      # with no client-side auth. The Lambda checks
+      # `X-Telegram-Bot-Api-Secret-Token` against the configured
+      # webhook secret and rejects mismatches with 401. Authorization
+      # is therefore handled application-side, not at API Gateway.
+      path = "v1/integrations/telegram/webhook", method = "POST", function = "integrations-telegram-webhook", auth = "PUBLIC"
     }
     "POST_v1_businesses" = {
       path = "v1/businesses", method = "POST", function = "businesses-create", auth = "COGNITO"

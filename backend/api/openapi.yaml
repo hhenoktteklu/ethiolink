@@ -2026,6 +2026,146 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
+  /me/link-telegram/start:
+    post:
+      tags: [auth]
+      operationId: startTelegramLink
+      summary: Issue a Telegram linking code for the calling user.
+      description: |
+        Authenticated. Generates a single-use linking code and returns the
+        `https://t.me/<bot>?start=<code>` deep link the mobile app should
+        open. The bot's `/start <code>` message redeems the code via the
+        webhook below, writing `users.telegram_chat_id`. Each call
+        invalidates any prior in-flight code for the same user.
+
+        Returns 503 when the operator has not configured a Telegram
+        provider for the environment (`config.telegramProvider` is null).
+      responses:
+        '200':
+          description: A fresh linking deep link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramLinkStartResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Telegram integration is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /me/telegram-status:
+    get:
+      tags: [auth]
+      operationId: getTelegramStatus
+      summary: Read the caller's Telegram linking status.
+      description: |
+        Authenticated. Returns whether the caller has a populated
+        `users.telegram_chat_id`. `linkedAt` is the user row's
+        `updatedAt` when linked, mirroring the most recent write.
+      responses:
+        '200':
+          description: The caller's Telegram linking status.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramStatusResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /me/link-telegram:
+    delete:
+      tags: [auth]
+      operationId: unlinkTelegram
+      summary: Clear the caller's Telegram chat id.
+      description: |
+        Authenticated. Idempotent — calling it on an already-unlinked
+        user returns 200 with `{ linked: false }` exactly as the
+        first call.
+
+        Returns 503 when the operator has not configured a Telegram
+        provider for the environment.
+      responses:
+        '200':
+          description: The caller is no longer linked.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramUnlinkResponse'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Telegram integration is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /integrations/telegram/webhook:
+    post:
+      tags: [catalog]
+      operationId: telegramWebhook
+      summary: Inbound Telegram Bot API webhook.
+      description: |
+        Public route. Telegram POSTs every Update to this endpoint
+        from its own infrastructure. Authentication is via the
+        `X-Telegram-Bot-Api-Secret-Token` header — set to the
+        operator-supplied `telegramProvider.webhookSecret` when
+        `setWebhook` was called. Mismatch returns 401.
+
+        The handler only acts on `/start <code>` messages — it
+        redeems the code via the linking service, binds the chat id
+        to the user, and replies with a confirmation. Every other
+        update is silently acknowledged with 200 so Telegram does
+        not retry. Non-2xx is reserved for "Telegram should retry"
+        (server error) or "Telegram has the wrong secret" (401).
+      security: []
+      parameters:
+        - name: X-Telegram-Bot-Api-Secret-Token
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Operator-supplied webhook secret. Compared in constant time to `telegramProvider.webhookSecret`.
+      requestBody:
+        required: true
+        description: A Telegram Update payload. The handler accepts any shape — only `message.text` and `message.chat.id` are read.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelegramUpdate'
+      responses:
+        '200':
+          description: Update acknowledged (regardless of whether it triggered a link).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelegramWebhookAck'
+        '401':
+          description: Webhook secret mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Telegram integration is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     cognito:
@@ -2811,6 +2951,65 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AppointmentView'
+    TelegramLinkStartResponse:
+      type: object
+      required: [deepLink, expiresAt]
+      properties:
+        deepLink:
+          type: string
+          format: uri
+          description: '`https://t.me/<botUsername>?start=<code>` — open in Telegram to redeem.'
+        expiresAt:
+          type: string
+          format: date-time
+          description: ISO-8601 UTC instant after which the code stops being valid.
+    TelegramStatusResponse:
+      type: object
+      required: [linked]
+      properties:
+        linked:
+          type: boolean
+        linkedAt:
+          type: [string, 'null']
+          format: date-time
+          description: '`updated_at` of the user row when `linked` is true; `null` otherwise.'
+    TelegramUnlinkResponse:
+      type: object
+      required: [linked]
+      properties:
+        linked:
+          type: boolean
+          enum: [false]
+          description: Always `false` — the unlink endpoint is idempotent.
+    TelegramUpdate:
+      type: object
+      description: |
+        Slice of the Telegram Bot API `Update` shape the handler
+        actually reads. Telegram sends a richer payload — every other
+        field is tolerated and ignored.
+      properties:
+        update_id:
+          type: integer
+        message:
+          type: object
+          properties:
+            text:
+              type: string
+            chat:
+              type: object
+              properties:
+                id:
+                  oneOf:
+                    - type: integer
+                    - type: string
+    TelegramWebhookAck:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+          description: Always `true`. Telegram only inspects the HTTP status.
     NotificationStatus:
       type: string
       description: |

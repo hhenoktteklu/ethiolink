@@ -228,6 +228,74 @@ variable "sms_provider_timeout_ms" {
   default     = 10000
 }
 
+# -----------------------------------------------------------------------------
+# Phase 9 Track 2 — Telegram provider config.
+#
+# Like the SMS block, all five variables default to empty so the
+# existing env stacks remain valid without any change. Operators
+# wire the bot by setting:
+#
+#   * `telegram_bot_username`              — bot username (without
+#                                            the leading `@`), used
+#                                            by the linking deep
+#                                            link.
+#   * `telegram_bot_token_secret_arn`      — Secrets Manager ARN
+#                                            holding the bot token
+#                                            from BotFather. The
+#                                            `integrations` Lambda
+#                                            IAM role gains a
+#                                            scoped read on this
+#                                            ARN.
+#   * `telegram_webhook_secret_arn`        — Secrets Manager ARN
+#                                            holding the
+#                                            `setWebhook` secret.
+#                                            Used by the webhook
+#                                            Lambda to validate
+#                                            the
+#                                            `X-Telegram-Bot-Api-Secret-Token`
+#                                            header.
+#
+# Until both ARNs are set, `config.telegramProvider` resolves to
+# `null` and the four Telegram handlers return 503 on every call.
+# This makes the rollout strictly opt-in.
+# -----------------------------------------------------------------------------
+
+variable "telegram_bot_username" {
+  description = "Telegram bot username without the leading `@` (e.g. `EthioLinkBot`). Empty when Telegram is not wired."
+  type        = string
+  default     = ""
+}
+
+variable "telegram_bot_token_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the Telegram bot token (from BotFather). SecretString may be a plain string OR a JSON object with a `botToken` field. Empty when Telegram is not wired. When set, only the `integrations` Lambda IAM role gets `secretsmanager:GetSecretValue` scoped to this ARN."
+  type        = string
+  default     = ""
+}
+
+variable "telegram_webhook_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the webhook secret. SecretString may be plain OR `{ webhookSecret: '…' }`. Empty when Telegram is not wired. When set, only the `integrations` Lambda IAM role gets read scoped to this ARN."
+  type        = string
+  default     = ""
+}
+
+variable "telegram_provider_name" {
+  description = "Provider identifier written to `notification_logs.provider` once the gateway is wired. Free-form; defaults to `TELEGRAM_BOT`."
+  type        = string
+  default     = ""
+}
+
+variable "telegram_link_code_ttl_seconds" {
+  description = "TTL for issued Telegram linking codes, in seconds. Default 600 (10 minutes)."
+  type        = number
+  default     = 600
+}
+
+variable "telegram_timeout_ms" {
+  description = "HTTP request timeout for the Telegram Bot API, in milliseconds. Default 10000 (10s)."
+  type        = number
+  default     = 10000
+}
+
 variable "payments_provider_cash" {
   description = "Cash-path provider name. Always `cash` in MVP."
   type        = string

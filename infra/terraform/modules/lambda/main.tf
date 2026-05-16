@@ -93,6 +93,22 @@ locals {
       area    = "me"
       handler = "lambdas/me/patch.handler"
     }
+    "me-link-telegram-start" = {
+      area    = "me"
+      handler = "lambdas/me/linkTelegramStart.handler"
+    }
+    "me-link-telegram-status" = {
+      area    = "me"
+      handler = "lambdas/me/linkTelegramStatus.handler"
+    }
+    "me-link-telegram-unlink" = {
+      area    = "me"
+      handler = "lambdas/me/linkTelegramUnlink.handler"
+    }
+    "integrations-telegram-webhook" = {
+      area    = "integrations"
+      handler = "lambdas/integrations/telegramWebhook.handler"
+    }
     "categories-list" = {
       area    = "categories"
       handler = "lambdas/categories/list.handler"
@@ -314,6 +330,12 @@ locals {
     SMS_PROVIDER_API_KEY_SECRET_ARN = var.sms_provider_api_key_secret_arn
     SMS_PROVIDER_NAME              = var.sms_provider_name
     SMS_PROVIDER_TIMEOUT_MS        = tostring(var.sms_provider_timeout_ms)
+    TELEGRAM_BOT_USERNAME           = var.telegram_bot_username
+    TELEGRAM_BOT_TOKEN_SECRET_ARN   = var.telegram_bot_token_secret_arn
+    TELEGRAM_WEBHOOK_SECRET_ARN     = var.telegram_webhook_secret_arn
+    TELEGRAM_PROVIDER_NAME          = var.telegram_provider_name
+    TELEGRAM_LINK_CODE_TTL_SECONDS  = tostring(var.telegram_link_code_ttl_seconds)
+    TELEGRAM_TIMEOUT_MS             = tostring(var.telegram_timeout_ms)
     PAYMENTS_PROVIDER_CASH         = var.payments_provider_cash
     PAYMENTS_PROVIDER_ONLINE       = var.payments_provider_online
     BOOKING_CANCEL_CUTOFF_MINUTES  = tostring(var.booking_cancel_cutoff_minutes)
@@ -355,6 +377,7 @@ locals {
 locals {
   lambda_areas = toset([
     "auth",
+    "me",
     "businesses",
     "services",
     "staff",
@@ -365,6 +388,7 @@ locals {
     "admin",
     "scheduled",
     "maintenance",
+    "integrations",
   ])
 }
 
@@ -549,6 +573,97 @@ resource "aws_iam_role_policy" "lambda_sms_provider_secret" {
   name   = "${local.base_name}-lambda-sms-provider-secret-${each.key}"
   role   = aws_iam_role.lambda_exec[each.key].id
   policy = data.aws_iam_policy_document.lambda_sms_provider_secret[0].json
+}
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 2 — Telegram secret reads.
+#
+# The Telegram bot uses two secrets in Secrets Manager:
+#
+#   * `TELEGRAM_BOT_TOKEN_SECRET_ARN` — Bot API token from
+#     BotFather. Used by the webhook Lambda to send confirmation
+#     replies via `sendMessage`. Will also be used by every
+#     notification dispatcher once the factory wires the Telegram
+#     gateway in a later commit.
+#
+#   * `TELEGRAM_WEBHOOK_SECRET_ARN` — shared secret used to
+#     authenticate Telegram → API GW callbacks via the
+#     `X-Telegram-Bot-Api-Secret-Token` header. Only the webhook
+#     Lambda needs to read this.
+#
+# Today only the `integrations` Lambda area constructs the
+# `TelegramLinkService` + the bot-reply transport. The `me` area
+# (the three link/start/status/unlink Lambdas) reads the linking
+# config (bot username + code TTL) from the plain env block; it
+# does NOT need either secret. When a future commit wires the
+# Telegram notification gateway into the factory, the
+# `appointments` + `scheduled` areas will gain the bot-token read
+# too (same pattern as the SMS provider).
+#
+# Both policies are gated on the corresponding ARN being non-
+# empty so env stacks that haven't wired Telegram get no extra IAM
+# surface.
+# -----------------------------------------------------------------------------
+
+locals {
+  telegram_bot_token_consumer_areas = (
+    var.telegram_bot_token_secret_arn != ""
+    ? toset(["integrations"])
+    : toset([])
+  )
+  telegram_webhook_secret_consumer_areas = (
+    var.telegram_webhook_secret_arn != ""
+    ? toset(["integrations"])
+    : toset([])
+  )
+}
+
+data "aws_iam_policy_document" "lambda_telegram_bot_token" {
+  count = var.telegram_bot_token_secret_arn != "" ? 1 : 0
+
+  statement {
+    sid    = "ReadTelegramBotToken"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+
+    resources = [var.telegram_bot_token_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_telegram_bot_token" {
+  for_each = local.telegram_bot_token_consumer_areas
+
+  name   = "${local.base_name}-lambda-telegram-bot-token-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_telegram_bot_token[0].json
+}
+
+data "aws_iam_policy_document" "lambda_telegram_webhook_secret" {
+  count = var.telegram_webhook_secret_arn != "" ? 1 : 0
+
+  statement {
+    sid    = "ReadTelegramWebhookSecret"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+
+    resources = [var.telegram_webhook_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_telegram_webhook_secret" {
+  for_each = local.telegram_webhook_secret_consumer_areas
+
+  name   = "${local.base_name}-lambda-telegram-webhook-secret-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_telegram_webhook_secret[0].json
 }
 
 # -----------------------------------------------------------------------------
