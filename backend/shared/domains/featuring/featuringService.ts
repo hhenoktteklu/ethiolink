@@ -154,6 +154,25 @@ export class PaymentFailedError extends Error {
     }
 }
 
+/**
+ * Phase 10 commit 3 — webhook tried to activate a subscription
+ * that isn't in `PENDING_PAYMENT`. EXPIRED / CANCELLED / REFUNDED
+ * rows can't be reanimated by a late webhook; the handler
+ * swallows this as a logical no-op.
+ */
+export class InvalidActivationStateError extends Error {
+    public readonly subscriptionId: string;
+    public readonly status: string;
+    constructor(subscriptionId: string, status: string) {
+        super(
+            `Cannot activate featuring subscription ${subscriptionId}: status is ${status}, not PENDING_PAYMENT.`,
+        );
+        this.name = 'InvalidActivationStateError';
+        this.subscriptionId = subscriptionId;
+        this.status = status;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
@@ -329,6 +348,48 @@ export class FeaturingService {
         limit: number = HISTORY_DEFAULT_LIMIT,
     ): Promise<readonly FeaturingSubscription[]> {
         return this.featuringRepo.listForBusiness(businessId, limit);
+    }
+
+    /**
+     * Phase 10 commit 3 — webhook activation hook.
+     *
+     * Called by the Chapa webhook handler after `verify(tx_ref)`
+     * returns SUCCEEDED for a featuring subscription. Looks up the
+     * subscription, transitions PENDING_PAYMENT → ACTIVE, and
+     * projects `featured_until` onto the business. Idempotent:
+     *
+     *   * ACTIVE → no-op, returns the current row (replayed webhook).
+     *   * PENDING_PAYMENT → activate.
+     *   * EXPIRED / CANCELLED / REFUNDED → throws
+     *     `InvalidActivationStateError`. The webhook handler
+     *     catches this and 200s without surfacing the error to
+     *     Chapa (a CANCELLED row that's also been refunded
+     *     out-of-band is a legitimate operator action; the
+     *     webhook is the loser).
+     *   * Unknown subscription id → throws
+     *     `NoActiveSubscriptionError` (re-used; the handler
+     *     swallows it as a logical no-op).
+     */
+    async activateFromPayment(
+        subscriptionId: string,
+    ): Promise<FeaturingSubscription> {
+        const existing = await this.featuringRepo.findById(subscriptionId);
+        if (!existing) {
+            throw new NoActiveSubscriptionError(subscriptionId);
+        }
+        if (existing.status === 'ACTIVE') {
+            // Idempotent — webhook replay against an already-active
+            // subscription. The featured_until projection is also
+            // idempotent so we deliberately skip the recompute.
+            return existing;
+        }
+        if (existing.status !== 'PENDING_PAYMENT') {
+            throw new InvalidActivationStateError(
+                subscriptionId,
+                existing.status,
+            );
+        }
+        return this.activate(subscriptionId, existing.businessId);
     }
 
     async expireSweep(): Promise<ExpireSweepResult> {

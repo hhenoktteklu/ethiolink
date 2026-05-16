@@ -394,6 +394,69 @@ describe('FeaturingService.subscribe — rejection paths', () => {
     });
 });
 
+describe('FeaturingService.activateFromPayment — Phase 10 webhook hook', () => {
+    it('transitions PENDING_PAYMENT → ACTIVE and projects featured_until', async () => {
+        const env = buildEnv({
+            gateway: new FakeGateway({ kind: 'pending' }),
+        });
+        const { subscription: sub } = await env.service.subscribe({
+            businessId: BUSINESS_ID,
+            packageCode: 'FEATURING_7D',
+            callerUserId: OWNER_ID,
+        });
+        assert.strictEqual(sub.status, 'PENDING_PAYMENT');
+
+        const activated = await env.service.activateFromPayment(sub.id);
+        assert.strictEqual(activated.status, 'ACTIVE');
+
+        const business = await env.businessRepo.findById(BUSINESS_ID);
+        assert.deepStrictEqual(business?.featuredUntil, activated.endsAt);
+    });
+
+    it('is idempotent — already-ACTIVE call returns the row unchanged', async () => {
+        const env = buildEnv();
+        const { subscription: sub } = await env.service.subscribe({
+            businessId: BUSINESS_ID,
+            packageCode: 'FEATURING_7D',
+            callerUserId: OWNER_ID,
+        });
+        assert.strictEqual(sub.status, 'ACTIVE');
+
+        const second = await env.service.activateFromPayment(sub.id);
+        assert.strictEqual(second.status, 'ACTIVE');
+        assert.strictEqual(second.id, sub.id);
+    });
+
+    it('throws NoActiveSubscriptionError on unknown id (sweep already GCed)', async () => {
+        const env = buildEnv();
+        await assert.rejects(
+            () => env.service.activateFromPayment('does-not-exist'),
+            (err: unknown) =>
+                err instanceof Error && err.name === 'NoActiveSubscriptionError',
+        );
+    });
+
+    it('throws InvalidActivationStateError on EXPIRED row', async () => {
+        const env = buildEnv({
+            gateway: new FakeGateway({ kind: 'pending' }),
+        });
+        const { subscription: sub } = await env.service.subscribe({
+            businessId: BUSINESS_ID,
+            packageCode: 'FEATURING_7D',
+            callerUserId: OWNER_ID,
+        });
+        // Force the row into a non-PENDING terminal state.
+        await env.featuringRepo.setStatus(sub.id, { status: 'EXPIRED' });
+
+        await assert.rejects(
+            () => env.service.activateFromPayment(sub.id),
+            (err: unknown) =>
+                err instanceof Error &&
+                err.name === 'InvalidActivationStateError',
+        );
+    });
+});
+
 describe('FeaturingService.subscribe with CashGateway', () => {
     it('end-to-end activates under CashGateway (dev flow)', async () => {
         const env = buildEnv({

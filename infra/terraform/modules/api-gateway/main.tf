@@ -126,6 +126,9 @@ locals {
     { path = "v1/integrations", parent = "v1" },
     { path = "v1/integrations/telegram", parent = "v1/integrations" },
     { path = "v1/integrations/telegram/webhook", parent = "v1/integrations/telegram" },
+    # Phase 10 commit 3 — Chapa webhook landing path.
+    { path = "v1/integrations/chapa", parent = "v1/integrations" },
+    { path = "v1/integrations/chapa/webhook", parent = "v1/integrations/chapa" },
     { path = "v1/categories", parent = "v1" },
     { path = "v1/businesses", parent = "v1" },
     { path = "v1/businesses/{businessId}", parent = "v1/businesses" },
@@ -252,6 +255,15 @@ locals {
       # webhook secret and rejects mismatches with 401. Authorization
       # is therefore handled application-side, not at API Gateway.
       path = "v1/integrations/telegram/webhook", method = "POST", function = "integrations-telegram-webhook", auth = "PUBLIC"
+    }
+    "POST_v1_integrations_chapa_webhook" = {
+      # Phase 10 commit 3 — public route Chapa POSTs to after a
+      # customer completes hosted checkout. Authentication is via
+      # the `Chapa-Signature` HMAC-SHA256 header validated by the
+      # Lambda against `config.chapaProvider.webhookSecret`;
+      # mismatches return 401. Same posture as the Telegram
+      # webhook above — application-side auth, not API GW-side.
+      path = "v1/integrations/chapa/webhook", method = "POST", function = "integrations-chapa-webhook", auth = "PUBLIC"
     }
     "POST_v1_businesses" = {
       path = "v1/businesses", method = "POST", function = "businesses-create", auth = "COGNITO"

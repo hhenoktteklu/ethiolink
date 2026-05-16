@@ -2528,6 +2528,91 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /integrations/chapa/webhook:
+    post:
+      tags: [catalog]
+      operationId: chapaWebhook
+      summary: Inbound Chapa payment webhook.
+      description: |
+        Phase 10 commit 3. Public route. Chapa POSTs every payment
+        event (success / failure / pending settlement) to this
+        endpoint from its own infrastructure. Authentication is via
+        the `Chapa-Signature` header — Chapa signs each payload
+        with HMAC-SHA256 using the merchant's webhook signing
+        secret. The handler verifies the signature with a
+        constant-time compare against
+        `chapaProvider.webhookSecret`; mismatch returns 401.
+
+        Trust posture: the webhook body is NOT trusted as the
+        source of truth for the transaction outcome. The handler
+        re-fetches the canonical state from Chapa's
+        `/v1/transaction/verify/:tx_ref` endpoint via
+        `paymentGateway.verify`, then dispatches:
+
+          * SUCCEEDED + featuring subscription →
+            `featuringService.activateFromPayment(subscriptionId)`
+            (idempotent — replayed webhook against an already-ACTIVE
+            subscription is a no-op).
+          * SUCCEEDED + appointment →
+            `appointmentService.markPaymentSucceeded(appointmentId)`
+            (logs-only today; future commit flips
+            `appointment.payment_status`).
+          * FAILED → `payment_intents.status = FAILED`; the
+            subscription / appointment stays PENDING for the
+            sweep / TTL to GC.
+          * PENDING (Chapa's own state hasn't settled) → 200; wait
+            for the next webhook.
+
+        Unknown `tx_ref` (no matching `payment_intents` row) →
+        200 with a warning log so Chapa stops retrying.
+      security: []
+      parameters:
+        - name: Chapa-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: |
+            HMAC-SHA256 hex digest of the raw request body, signed
+            with `chapaProvider.webhookSecret`. May optionally be
+            prefixed with `sha256=`. Compared in constant time.
+      requestBody:
+        required: true
+        description: |
+          Chapa's standard webhook payload. The handler only reads
+          `tx_ref` (top-level or `data.tx_ref`); every other field
+          is forwarded verbatim into `payment_intents.raw_response`
+          via the `verify` call.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapaWebhookPayload'
+      responses:
+        '200':
+          description: |
+            Webhook acknowledged. The `handled` field distinguishes
+            "we updated domain state" (`true`) from "we received
+            and authenticated the webhook but had no row to act on"
+            (`false` — e.g. unknown `tx_ref`, malformed body, verify
+            returned PENDING).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChapaWebhookAck'
+        '401':
+          description: Webhook signature mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '503':
+          description: Chapa integration is not configured for this environment.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 components:
   securitySchemes:
     cognito:
@@ -3019,6 +3104,64 @@ components:
           $ref: '#/components/schemas/FeaturingSubscription'
         payment:
           $ref: '#/components/schemas/PaymentSummary'
+    ChapaWebhookPayload:
+      type: object
+      description: |
+        Phase 10 commit 3 — inbound Chapa webhook payload. The
+        handler only reads `tx_ref`; every other field is
+        forwarded verbatim via the verify-response into
+        `payment_intents.raw_response`. The shape is intentionally
+        permissive (`additionalProperties: true`) because Chapa
+        evolves the webhook envelope under their own SDK versioning.
+      additionalProperties: true
+      properties:
+        tx_ref:
+          type: string
+          description: |
+            Application-issued transaction reference. May appear at
+            the top level OR nested under `data.tx_ref`; the
+            handler tolerates both.
+        data:
+          type: object
+          additionalProperties: true
+          description: |
+            Chapa's nested transaction descriptor. `data.tx_ref`
+            is the canonical location for the reference.
+    ChapaWebhookAck:
+      type: object
+      required: [ok, handled]
+      properties:
+        ok:
+          type: boolean
+          description: Always `true` — the webhook was accepted.
+        handled:
+          type: boolean
+          description: |
+            `true` when the handler updated `payment_intents` and
+            (for featuring rows) called
+            `featuringService.activateFromPayment`. `false` when
+            the handler authenticated the webhook but had no row
+            to act on (unknown `tx_ref`, malformed body, verify
+            returned PENDING).
+        reason:
+          type: [string, 'null']
+          enum:
+            - malformed_body
+            - missing_tx_ref
+            - unknown_tx_ref
+            - verify_pending
+            - verify_rejected
+            - null
+          description: |
+            Diagnostic-only. When `handled = false`, identifies
+            which branch the handler took. Always `null` when
+            `handled = true`. Mostly useful for the operator's
+            CloudWatch logs.
+        txRef:
+          type: [string, 'null']
+        status:
+          type: [string, 'null']
+          description: Final `payment_intents.status` after the webhook handled it.
     SubscribeFeaturingRequest:
       type: object
       description: |

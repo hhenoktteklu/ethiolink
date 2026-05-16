@@ -41,14 +41,18 @@ Recommended first provider: **Chapa** (https://chapa.co). Aggregator: under one 
 
 **Behaviour at end of commit 2:** Production unchanged. The wire shape is widened additively — clients ignoring the new `payment` block still see the appointment / subscription. Mobile clients are not updated; they continue to call `POST /v1/appointments` with `paymentMethod = CASH` only. Once `payments_provider = chapa` is flipped in an env, online bookings will return `payment.redirectUrl` but the mobile UI doesn't open it yet — that's commit 4.
 
-### Commit 3 — Chapa webhook handler (next)
+### Commit 3 — Chapa webhook handler (landed: this commit)
 
-- [ ] `backend/lambdas/integrations/chapaWebhook.ts` — `POST /v1/integrations/chapa/webhook`. Validates HMAC signature against the webhook secret with constant-time compare. Looks up `payment_intents` by `provider_ref`, re-fetches canonical status via `paymentGateway.verify(tx_ref)`, branches on SUCCEEDED / FAILED / PENDING.
-- [ ] On SUCCEEDED + APPOINTMENT path → `appointmentService.markPaymentSucceeded(appointmentId, paymentIntentId)`. On SUCCEEDED + FEATURING path → expose `featuringService.activate(subscriptionId)` publicly and call it.
-- [ ] On FAILED path → update `payment_intents.status = 'FAILED'`; leave the appointment / subscription PENDING for the sweep to GC.
-- [ ] Idempotency: replayed webhook against an already-SUCCEEDED row is a no-op.
-- [ ] OpenAPI route, Terraform Lambda + API GW route (public, WAF-fronted, no Cognito authorizer — secret-header is the auth).
-- [ ] Tests: signature mismatch / unknown tx_ref / SUCCEEDED-appointment / SUCCEEDED-featuring / FAILED / replayed-success branches.
+- [x] `backend/lambdas/integrations/chapaWebhook.ts` — `POST /v1/integrations/chapa/webhook`. Validates HMAC-SHA256 signature against the webhook secret with `crypto.timingSafeEqual`. Tolerates the `sha256=` prefix some Chapa SDKs include. Looks up `payment_intents` by `provider_ref`, re-fetches canonical status via `paymentGateway.verify(tx_ref)` (defense-in-depth — webhook body is only trusted for the tx_ref), branches on SUCCEEDED / FAILED / PENDING.
+- [x] New `backend/shared/domains/payments/paymentIntentsRepository.ts` — Postgres + in-memory implementations. `findByProviderRef`, `insertOrFindByProviderRef` (upsert via `ON CONFLICT (provider_ref) DO NOTHING`), `markSucceeded` + `markFailed` with CAS updates that refuse to downgrade SUCCEEDED rows.
+- [x] On SUCCEEDED + APPOINTMENT path → `appointmentService.markPaymentSucceeded(appointmentId)` (logs-only today; future commit flips `appointment.payment_status` + fires the booking-requested notification gated on payment success).
+- [x] On SUCCEEDED + FEATURING path → new `featuringService.activateFromPayment(subscriptionId)`. Idempotent — already-ACTIVE rows return unchanged; EXPIRED / CANCELLED / REFUNDED rows throw `InvalidActivationStateError` which the handler swallows. Recomputes `featured_until` on activation.
+- [x] On FAILED path → `payment_intents.status = 'FAILED'`. For appointments calls `appointmentService.markPaymentFailed`. Featuring subscriptions stay PENDING_PAYMENT for the existing 10-minute sweep to GC.
+- [x] On PENDING (Chapa's own state hasn't settled) → 200 + `handled: false`. Chapa retries.
+- [x] Idempotency: replayed webhook against an already-SUCCEEDED row is a no-op (CAS update refuses to flip; activate is also idempotent). Test pins both directions including the "late FAILED retry against SUCCEEDED row" downgrade-refusal case.
+- [x] OpenAPI route documented: `POST /v1/integrations/chapa/webhook`, public security, `Chapa-Signature` header, `ChapaWebhookPayload` request body, `ChapaWebhookAck` response with `handled` + `reason` + `txRef` + `status` fields.
+- [x] Terraform: new `integrations-chapa-webhook` Lambda function in the lambda module + new `v1/integrations/chapa/webhook` path + `POST_v1_integrations_chapa_webhook` route in the API Gateway module (public, application-side auth). The Chapa-secret IAM grants from commit 1 already include the `integrations` role — no new IAM resources needed.
+- [x] Tests: 18 cases across `paymentIntentsRepository.test.ts` (idempotent CAS contract) + `chapaWebhookHandler.test.ts` (signature mismatch, missing signature, `sha256=` prefix accepted, 503 when not configured, malformed body, missing tx_ref, nested tx_ref, unknown tx_ref, SUCCEEDED-featuring, SUCCEEDED-appointment, FAILED-appointment, FAILED-featuring-stays-PENDING, NoActive / InvalidActivationState swallowed, verify PENDING, ChapaUnavailable → 500, ChapaInvalidRequest → 200, replay-SUCCEEDED idempotent, FAILED-against-SUCCEEDED downgrade-refused).
 
 ### Commit 4 — mobile online checkout
 

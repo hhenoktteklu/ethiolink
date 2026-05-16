@@ -725,6 +725,70 @@ export class AppointmentService {
         return method === 'CASH' ? this.deps.cashGateway : this.deps.onlineGateway;
     }
 
+    /**
+     * Phase 10 commit 3 — webhook payment-success hook.
+     *
+     * Called by the Chapa webhook handler after `verify(tx_ref)`
+     * returns SUCCEEDED for an appointment payment. The webhook
+     * has already idempotently flipped the `payment_intents` row
+     * to SUCCEEDED; this hook is the in-service-domain extension
+     * point. Today it just confirms the appointment exists and
+     * logs the success — appointments don't carry a per-row
+     * `payment_status` column yet (a follow-up commit adds it
+     * alongside the mobile checkout flow). Future work owns:
+     *
+     *   * Flipping a future `appointment.payment_status` column
+     *     to SUCCEEDED.
+     *   * Firing the booking-requested notification to the owner
+     *     (currently fired immediately on `create` regardless of
+     *     payment method; the scoping doc flags moving it here
+     *     for online bookings).
+     *
+     * Idempotent: re-invocation against an already-handled
+     * appointment is a no-op. Unknown id returns silently because
+     * the webhook handler shouldn't 500 on a stale row.
+     */
+    async markPaymentSucceeded(appointmentId: string): Promise<void> {
+        const appointment = await this.deps.appointmentsRepo.findById(
+            appointmentId,
+        );
+        if (!appointment) {
+            this.deps.logger.warn(
+                'appointments.markPaymentSucceeded.unknown_id',
+                { appointmentId },
+            );
+            return;
+        }
+        this.deps.logger.info('appointments.markPaymentSucceeded', {
+            appointmentId,
+            status: appointment.status,
+        });
+    }
+
+    /**
+     * Phase 10 commit 3 — webhook payment-failure hook. Symmetric
+     * to {@link markPaymentSucceeded}. Today it just logs; the
+     * row stays REQUESTED and the future auto-cancel sweep (see
+     * scoping doc) is responsible for clearing the slot if the
+     * customer doesn't retry within the TTL.
+     */
+    async markPaymentFailed(appointmentId: string): Promise<void> {
+        const appointment = await this.deps.appointmentsRepo.findById(
+            appointmentId,
+        );
+        if (!appointment) {
+            this.deps.logger.warn(
+                'appointments.markPaymentFailed.unknown_id',
+                { appointmentId },
+            );
+            return;
+        }
+        this.deps.logger.info('appointments.markPaymentFailed', {
+            appointmentId,
+            status: appointment.status,
+        });
+    }
+
     // ----- Notification fan-out --------------------------------------------
 
     /**

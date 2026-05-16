@@ -109,6 +109,13 @@ locals {
       area    = "integrations"
       handler = "lambdas/integrations/telegramWebhook.handler"
     }
+    # Phase 10 commit 3 — Chapa payment-success / payment-failure
+    # webhook receiver. Gated by HMAC signature; calls the
+    # featuring + appointment services to flip domain state.
+    "integrations-chapa-webhook" = {
+      area    = "integrations"
+      handler = "lambdas/integrations/chapaWebhook.handler"
+    }
     "categories-list" = {
       area    = "categories"
       handler = "lambdas/categories/list.handler"
