@@ -53,6 +53,15 @@ export interface Business {
     readonly ratingCount: number;
     readonly createdAt: Date;
     readonly updatedAt: Date;
+    /**
+     * Phase 9 Track 6 — full-text rank for the matching row. Only
+     * populated when `listPublic` was called with `sort: 'relevance'`
+     * and a non-empty `query`. All other code paths leave this as
+     * `null` (the field is non-optional in the type so consumers
+     * don't have to discriminate `undefined` vs `null`). The wire
+     * shape `BusinessPublicView.searchRank` mirrors this.
+     */
+    readonly searchRank: number | null;
 }
 
 /** Fields written by `INSERT`. Owner / category required; everything else optional. */
@@ -92,12 +101,59 @@ export interface UpdateBusinessFields {
     readonly whatsappPhone?: string | null;
 }
 
+/**
+ * Phase 9 Track 6 — sort modes for the public listing.
+ *
+ *   * `featured`  — default, preserves the existing
+ *                   `featured_until DESC NULLS LAST, rating_avg DESC,
+ *                   created_at DESC, id DESC` order. Cursor pagination
+ *                   supported.
+ *   * `relevance` — only meaningful when `query` is set. Orders by
+ *                   `(featured_until DESC NULLS LAST, ts_rank DESC,
+ *                   rating_avg DESC, created_at DESC, id DESC)`.
+ *                   First-version: no cursor pagination — the
+ *                   repository returns up to `limit` rows and the
+ *                   service emits `nextCursor: null`. Rank-aware
+ *                   cursor lands in a follow-up when query traffic
+ *                   warrants it.
+ *   * `rating`    — `rating_avg DESC, rating_count DESC, created_at
+ *                   DESC, id DESC`. No cursor pagination yet.
+ *   * `newest`    — `created_at DESC, id DESC`. No cursor pagination
+ *                   yet.
+ *
+ * Only `featured` supports the cursor in this commit; the other
+ * three are first-page-only. This trade-off keeps the diff small
+ * and matches mobile UX — the customer rarely paginates past page
+ * one on a non-featured sort.
+ */
+export type BusinessSortMode = 'featured' | 'relevance' | 'rating' | 'newest';
+
 /** Filters accepted by `listPublic`. All optional. */
 export interface PublicBusinessFilters {
     readonly categoryId?: string;
     readonly city?: string;
+    /**
+     * Free-text query. When set, matches against `name` + `description.en`
+     * + `description.am` via the `search_tsv` GIN index using
+     * `websearch_to_tsquery('simple', unaccent($))`. The repository falls
+     * back to `lower(name) ILIKE '%' || q || '%'` (trigram-indexed) when
+     * the tsvector path returns zero rows — handles short prefixes the
+     * tsvector won't index.
+     */
     readonly query?: string;
     readonly ratingMin?: number;
+    /**
+     * Phase 9 Track 6 — when true, filters to rows where
+     * `featured_until > now()`. Surfaces the "show only featured"
+     * affordance on the mobile UI; transparency over paid placement.
+     */
+    readonly featuredOnly?: boolean;
+    /**
+     * Phase 9 Track 6 — sort mode. Defaults to `'featured'` in the
+     * service layer (the existing behavior). Only `'featured'` supports
+     * cursor pagination in this commit.
+     */
+    readonly sort?: BusinessSortMode;
 }
 
 /**
@@ -334,17 +390,26 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
         cursor: ParsedCursor | null,
         limit: number,
     ): Promise<readonly Business[]> {
+        const sort: BusinessSortMode = filters.sort ?? 'featured';
+        const trimmedQuery =
+            typeof filters.query === 'string' && filters.query.trim() !== ''
+                ? filters.query.trim()
+                : null;
+        const useRelevance = sort === 'relevance' && trimmedQuery !== null;
+
         const params: unknown[] = [
             filters.categoryId ?? null,
             filters.city ?? null,
-            filters.query ?? null,
+            trimmedQuery,
             filters.ratingMin ?? null,
+            filters.featuredOnly === true,
         ];
 
-        // Cursor params are emitted only when a cursor is present, to keep
-        // the SQL simple when listing the first page.
+        // Cursor pagination is supported only for the `featured` sort
+        // in this commit. Non-featured sorts are first-page-only; the
+        // service layer emits `nextCursor: null` accordingly.
         let cursorPredicate = '';
-        if (cursor) {
+        if (cursor && sort === 'featured') {
             params.push(cursor.sortKey.featuredUntil ?? '-infinity');
             params.push(cursor.sortKey.ratingAvg);
             params.push(cursor.sortKey.createdAt);
@@ -355,32 +420,105 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
                 rating_avg,
                 created_at,
                 id
-              ) < ($5::timestamptz, $6::numeric, $7::timestamptz, $8::uuid)
+              ) < ($6::timestamptz, $7::numeric, $8::timestamptz, $9::uuid)
             `;
         }
 
         params.push(limit);
         const limitParam = `$${params.length}`;
 
-        const rows = await this.many<BusinessRow>(
+        // The full-text predicate uses the `search_tsv` generated
+        // column (migration 0017). When the tsvector path returns
+        // zero rows for a short prefix, the trigram-indexed `name`
+        // ILIKE predicate complements it — `OR` between the two so
+        // either path can match.
+        const queryPredicate = trimmedQuery
+            ? `AND (
+                  search_tsv @@ websearch_to_tsquery(
+                      'simple',
+                      ethiolink_unaccent_immutable($3)
+                  )
+                  OR lower(name) ILIKE '%' || lower($3) || '%'
+              )`
+            : '';
+
+        const featuredOnlyPredicate = `
+              AND ($5::boolean = false
+                   OR (featured_until IS NOT NULL AND featured_until > now()))
+        `;
+
+        // Pick the ORDER BY clause based on `sort`. The `featured`
+        // mode is the existing behaviour; the three new modes are
+        // each documented inline. Note that `rank` is computed only
+        // when relevance is the chosen sort + a query is present —
+        // it appears in the SELECT projection so the result row
+        // carries it back to `mapRow`.
+        const rankExpr = useRelevance
+            ? `ts_rank(
+                   search_tsv,
+                   websearch_to_tsquery('simple', ethiolink_unaccent_immutable($3))
+               )`
+            : 'NULL::real';
+
+        let orderBy: string;
+        switch (sort) {
+            case 'relevance':
+                // Featured wins the first tier (paid placement
+                // protected); within each tier `ts_rank` orders by
+                // match quality. Falls back to the featured order
+                // when `query` is empty (treated as `'featured'`).
+                orderBy = useRelevance
+                    ? `COALESCE(featured_until, '-infinity'::timestamptz) DESC,
+                       ts_rank(
+                           search_tsv,
+                           websearch_to_tsquery('simple', ethiolink_unaccent_immutable($3))
+                       ) DESC,
+                       rating_avg DESC,
+                       created_at DESC,
+                       id DESC`
+                    : `COALESCE(featured_until, '-infinity'::timestamptz) DESC,
+                       rating_avg DESC,
+                       created_at DESC,
+                       id DESC`;
+                break;
+            case 'rating':
+                orderBy = `rating_avg DESC, rating_count DESC, created_at DESC, id DESC`;
+                break;
+            case 'newest':
+                orderBy = `created_at DESC, id DESC`;
+                break;
+            case 'featured':
+            default:
+                orderBy = `COALESCE(featured_until, '-infinity'::timestamptz) DESC,
+                           rating_avg DESC,
+                           created_at DESC,
+                           id DESC`;
+                break;
+        }
+
+        const rows = await this.many<BusinessRow & { search_rank: number | null }>(
             `
-            SELECT ${BUSINESS_COLUMNS}
+            SELECT ${BUSINESS_COLUMNS}, ${rankExpr} AS search_rank
               FROM business_profiles
              WHERE status = 'APPROVED'
                AND ($1::uuid     IS NULL OR category_id = $1)
                AND ($2::text     IS NULL OR LOWER(city) = LOWER($2))
-               AND ($3::text     IS NULL OR name ILIKE '%' || $3 || '%')
                AND ($4::numeric  IS NULL OR rating_avg >= $4)
+               ${queryPredicate}
+               ${featuredOnlyPredicate}
                ${cursorPredicate}
-             ORDER BY COALESCE(featured_until, '-infinity'::timestamptz) DESC,
-                      rating_avg DESC,
-                      created_at DESC,
-                      id DESC
+             ORDER BY ${orderBy}
              LIMIT ${limitParam};
             `,
             params,
         );
-        return rows.map(mapRow);
+        return rows.map((row) =>
+            Object.freeze<Business>({
+                ...mapRow(row),
+                searchRank:
+                    typeof row.search_rank === 'number' ? row.search_rank : null,
+            }),
+        );
     }
 
     async listForAdmin(
@@ -422,5 +560,9 @@ function mapRow(row: BusinessRow): Business {
         ratingCount: row.rating_count,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        // Phase 9 Track 6 — `listPublic` overrides this when the
+        // `sort=relevance` SELECT projects `ts_rank`. Every other
+        // call path resolves to `null`.
+        searchRank: null,
     });
 }

@@ -132,7 +132,15 @@ export class BusinessService {
             default: DEFAULT_LIST_LIMIT,
             max: MAX_LIST_LIMIT,
         });
-        const cursor = encodedCursor
+        // Phase 9 Track 6 — only the `featured` sort supports cursor
+        // pagination in this commit. For relevance / rating / newest
+        // sorts we ignore any incoming cursor (rather than reject
+        // it — clients that paginated under the default sort and
+        // switched modes shouldn't get a 400) and emit a null
+        // nextCursor.
+        const sort = filters.sort ?? 'featured';
+        const cursorSupported = sort === 'featured';
+        const cursor = cursorSupported && encodedCursor
             ? decodeCursor<ParsedCursor>(encodedCursor, isParsedCursor)
             : null;
 
@@ -141,7 +149,10 @@ export class BusinessService {
         const items = rows.slice(0, limit);
         const hasMore = rows.length > limit;
         const last = items[items.length - 1];
-        const nextCursor = hasMore && last ? encodeBusinessCursor(last) : null;
+        const nextCursor =
+            cursorSupported && hasMore && last
+                ? encodeBusinessCursor(last)
+                : null;
 
         return Object.freeze<BusinessListPage>({
             items: Object.freeze([...items]),

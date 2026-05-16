@@ -92,7 +92,7 @@ Marketplace categories. Beauty-related entries only in MVP.
 | created_at      | timestamptz |                                                                                        |
 | updated_at      | timestamptz |                                                                                        |
 
-Indexes: `(status)`, `(category_id, status)`, `(city, status)`, GIN on `description` if we add full-text search later.
+Indexes: `(status)`, `(category_id, status)`, `(city, status)`. Phase 9 Track 6 (migration 0017) adds a generated `search_tsv tsvector` column populated from `setweight(to_tsvector('simple', unaccent(name)), 'A') || setweight(to_tsvector('simple', unaccent(description->>'en')), 'B') || setweight(to_tsvector('simple', unaccent(description->>'am')), 'B')` with a GIN index `business_profiles_search_tsv_gin` for `GET /v1/businesses?q=...`, plus a trigram-indexed `gin_trgm_ops` index on `lower(name)` (`business_profiles_name_trgm`) used as a fallback for short-prefix matches the tsvector path won't catch. Both `pg_trgm` and `unaccent` extensions enabled by the same migration; an `ethiolink_unaccent_immutable` SQL wrapper makes `unaccent` usable inside a generated column expression. The wider-shape full-text search is documented in `API_SPEC.md` under `GET /v1/businesses`.
 
 ### `services`
 

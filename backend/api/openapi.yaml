@@ -78,12 +78,31 @@ paths:
           description: Case-insensitive exact match on city name.
           schema:
             type: string
+        - name: q
+          in: query
+          required: false
+          description: |
+            Free-text search (Phase 9 Track 6). Matches against
+            business `name` + `description.en` + `description.am`
+            via a GIN-indexed Postgres tsvector with `unaccent`
+            normalisation, complemented by a trigram-indexed
+            `lower(name) ILIKE` fallback for short prefixes. Empty /
+            whitespace-only values are treated as "no filter". Max
+            200 characters.
+          schema:
+            type: string
+            maxLength: 200
         - name: query
           in: query
           required: false
-          description: Partial match on business name (case-insensitive).
+          description: |
+            Legacy alias for `q`, kept for backwards compatibility
+            with clients that shipped before Phase 9 Track 6. New
+            clients should use `q`. When both are sent, `q` wins.
           schema:
             type: string
+            maxLength: 200
+            deprecated: true
         - name: ratingMin
           in: query
           required: false
@@ -91,10 +110,40 @@ paths:
             type: number
             minimum: 0
             maximum: 5
+        - name: featuredOnly
+          in: query
+          required: false
+          description: |
+            Phase 9 Track 6. When `true`, filters to rows whose
+            `featured_until > now()`. Surfaces the "show only
+            featured" affordance on customer surfaces.
+          schema:
+            type: boolean
+        - name: sort
+          in: query
+          required: false
+          description: |
+            Phase 9 Track 6. Sort mode. Default `featured` preserves
+            the existing `featured_until DESC NULLS LAST,
+            rating_avg DESC, created_at DESC, id DESC` order and is
+            the only mode that supports cursor pagination today.
+            `relevance` orders by full-text rank (only meaningful
+            when `q` is present); `rating` orders by
+            `rating_avg DESC, rating_count DESC`; `newest` orders
+            by `created_at DESC`. Non-featured sorts emit
+            `nextCursor: null` — clients fetch the first `limit`
+            results and re-search if they need more.
+          schema:
+            type: string
+            enum: [featured, relevance, rating, newest]
+            default: featured
         - name: cursor
           in: query
           required: false
-          description: Opaque pagination cursor from a previous response.
+          description: |
+            Opaque pagination cursor from a previous response.
+            Only honoured when `sort=featured` (the default); other
+            sort modes ignore the cursor.
           schema:
             type: string
         - name: limit
@@ -2382,6 +2431,16 @@ components:
         updatedAt:
           type: string
           format: date-time
+        searchRank:
+          type: [number, 'null']
+          description: |
+            Phase 9 Track 6. Full-text rank for the matching row;
+            non-null only when the listing was issued with
+            `sort=relevance` and a non-empty `q`. `null` for every
+            other call path (other sorts, single-row reads,
+            owner-side endpoints). Higher = better match. Clients
+            may use this to render a debug match-strength badge
+            but it is not required for normal display.
     BusinessOwnerView:
       allOf:
         - $ref: '#/components/schemas/BusinessPublicView'

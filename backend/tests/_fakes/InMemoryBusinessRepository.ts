@@ -79,6 +79,8 @@ export class InMemoryBusinessRepository implements BusinessRepository {
             ratingCount: 0,
             createdAt: now,
             updatedAt: now,
+            // Phase 9 Track 6 — non-listing call paths leave this null.
+            searchRank: null,
         });
         this.rowsById.set(business.id, business);
         return business;
@@ -156,6 +158,13 @@ export class InMemoryBusinessRepository implements BusinessRepository {
         cursor: ParsedCursor | null,
         limit: number,
     ): Promise<readonly Business[]> {
+        const sort = filters.sort ?? 'featured';
+        const trimmedQuery =
+            typeof filters.query === 'string' && filters.query.trim() !== ''
+                ? filters.query.trim()
+                : null;
+        const useRelevance = sort === 'relevance' && trimmedQuery !== null;
+
         let rows = Array.from(this.rowsById.values()).filter(
             (b) => b.status === 'APPROVED',
         );
@@ -169,17 +178,79 @@ export class InMemoryBusinessRepository implements BusinessRepository {
                 (b) => b.city !== null && b.city.toLowerCase() === wanted,
             );
         }
-        if (filters.query !== undefined) {
-            const q = filters.query.toLowerCase();
-            rows = rows.filter(
-                (b) => b.name !== null && b.name.toLowerCase().includes(q),
-            );
+        if (trimmedQuery !== null) {
+            // Mirrors the SQL: tsvector matches against name +
+            // description.en + description.am OR trgm-style ILIKE on
+            // lower(name). The in-memory shape can't replicate Postgres
+            // weights exactly, so this matches case-insensitively
+            // against any of the three fields.
+            const q = trimmedQuery.toLowerCase();
+            rows = rows.filter((b) => matchesQuery(b, q));
         }
         if (filters.ratingMin !== undefined) {
             const min = filters.ratingMin;
             rows = rows.filter((b) => b.ratingAvg >= min);
         }
+        if (filters.featuredOnly === true) {
+            const now = Date.now();
+            rows = rows.filter(
+                (b) => b.featuredUntil !== null && b.featuredUntil.getTime() > now,
+            );
+        }
 
+        if (useRelevance) {
+            // Attach a synthetic rank — longer match → higher rank.
+            // Mirrors the SQL contract: `searchRank` is non-null when
+            // the row was produced by a relevance query. The actual
+            // value doesn't have to match Postgres's `ts_rank`; tests
+            // only check non-null + ordering monotonicity.
+            const ranked = rows
+                .map((row) => ({
+                    row: Object.freeze<Business>({
+                        ...row,
+                        searchRank: rankFor(row, trimmedQuery!.toLowerCase()),
+                    }),
+                    rank: rankFor(row, trimmedQuery!.toLowerCase()),
+                }))
+                .sort((a, b) => {
+                    const aFu = featuredMs(a.row.featuredUntil);
+                    const bFu = featuredMs(b.row.featuredUntil);
+                    if (aFu !== bFu) return bFu - aFu;
+                    if (a.rank !== b.rank) return b.rank - a.rank;
+                    if (a.row.ratingAvg !== b.row.ratingAvg) {
+                        return b.row.ratingAvg - a.row.ratingAvg;
+                    }
+                    const aCa = a.row.createdAt.getTime();
+                    const bCa = b.row.createdAt.getTime();
+                    if (aCa !== bCa) return bCa - aCa;
+                    return b.row.id.localeCompare(a.row.id);
+                })
+                .map((entry) => entry.row);
+            // Relevance sort: first-page-only (no cursor support).
+            return ranked.slice(0, limit);
+        }
+
+        if (sort === 'rating') {
+            rows.sort(
+                (a, b) =>
+                    b.ratingAvg - a.ratingAvg ||
+                    b.ratingCount - a.ratingCount ||
+                    b.createdAt.getTime() - a.createdAt.getTime() ||
+                    b.id.localeCompare(a.id),
+            );
+            return rows.slice(0, limit);
+        }
+
+        if (sort === 'newest') {
+            rows.sort(
+                (a, b) =>
+                    b.createdAt.getTime() - a.createdAt.getTime() ||
+                    b.id.localeCompare(a.id),
+            );
+            return rows.slice(0, limit);
+        }
+
+        // Default: featured sort + (optionally) cursor.
         rows.sort(compareDesc);
 
         if (cursor) {
@@ -223,6 +294,44 @@ function compareDesc(a: Business, b: Business): number {
     const bCa = b.createdAt.getTime();
     if (aCa !== bCa) return bCa - aCa;
     return b.id.localeCompare(a.id);
+}
+
+/**
+ * Phase 9 Track 6 — match a row against a lowercased query. Hits
+ * if any of `name`, `description.en`, `description.am` contains
+ * the query string (case-insensitive). Mirrors the SQL's
+ * tsvector + trgm fallback at the semantic level — Postgres
+ * indexes do the heavy lifting in prod; this fake just exercises
+ * the filter wiring.
+ */
+function matchesQuery(business: Business, q: string): boolean {
+    if (business.name && business.name.toLowerCase().includes(q)) return true;
+    const description = business.description;
+    if (description) {
+        const en = description.en;
+        if (typeof en === 'string' && en.toLowerCase().includes(q)) return true;
+        const am = description.am;
+        if (typeof am === 'string' && am.toLowerCase().includes(q)) return true;
+    }
+    return false;
+}
+
+/**
+ * Synthetic rank function. Higher score = better match. Name
+ * matches weighted higher than description matches, mirroring
+ * the `setweight('A')` vs `setweight('B')` of the SQL tsvector.
+ */
+function rankFor(business: Business, q: string): number {
+    let score = 0;
+    if (business.name && business.name.toLowerCase().includes(q)) score += 10;
+    const description = business.description;
+    if (description) {
+        const en = description.en;
+        if (typeof en === 'string' && en.toLowerCase().includes(q)) score += 3;
+        const am = description.am;
+        if (typeof am === 'string' && am.toLowerCase().includes(q)) score += 3;
+    }
+    return score;
 }
 
 function rowComesAfterCursor(row: Business, cursor: ParsedCursor): boolean {

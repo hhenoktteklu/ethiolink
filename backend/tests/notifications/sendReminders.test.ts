@@ -173,6 +173,7 @@ function buildEnv(options: BuildEnvOptions = {}): Env {
         ratingCount: 0,
         createdAt: new Date('2026-05-13T00:00:00.000Z'),
         updatedAt: new Date('2026-05-13T00:00:00.000Z'),
+        searchRank: null,
     });
 
     serviceRepo.seed({

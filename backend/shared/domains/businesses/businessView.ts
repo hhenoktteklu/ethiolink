@@ -40,6 +40,14 @@ export interface BusinessPublicView {
     readonly ratingCount: number;
     readonly createdAt: string;
     readonly updatedAt: string;
+    /**
+     * Phase 9 Track 6 — full-text rank for the matching row. Non-null
+     * when the listing was issued with `sort=relevance` and a non-empty
+     * `q`; `null` for every other call path. Clients can use this to
+     * render a debug "match strength" badge but it's not required for
+     * normal display.
+     */
+    readonly searchRank: number | null;
 }
 
 export interface BusinessOwnerView extends BusinessPublicView {
@@ -67,6 +75,7 @@ export function toBusinessPublicView(business: Business): BusinessPublicView {
         ratingCount: business.ratingCount,
         createdAt: business.createdAt.toISOString(),
         updatedAt: business.updatedAt.toISOString(),
+        searchRank: business.searchRank,
     });
 }
 

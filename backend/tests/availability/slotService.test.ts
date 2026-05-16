@@ -81,6 +81,7 @@ function makeBusiness(
         ratingCount: 0,
         createdAt: now,
         updatedAt: now,
+        searchRank: null,
         ...overrides,
     });
 }

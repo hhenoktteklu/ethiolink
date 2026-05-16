@@ -77,6 +77,7 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
         ratingCount: 0,
         createdAt: now,
         updatedAt: now,
+        searchRank: null,
         ...overrides,
     });
 }
@@ -381,6 +382,299 @@ describe('BusinessService.listPublic — filters', () => {
         const page = await service.listPublic({ city: 'X', ratingMin: 4 });
 
         assert.deepStrictEqual(page.items.map((b) => b.id), ['match']);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 9 Track 6 — full-text search + featuredOnly + sort modes
+// ---------------------------------------------------------------------------
+
+describe('BusinessService.listPublic — full-text search (Phase 9 Track 6)', () => {
+    it('matches on business name (case-insensitive)', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'a', name: 'Habesha Beauty Lounge' }));
+        repo.seed(makeBusiness({ id: 'b', name: 'Sunrise Salon' }));
+
+        const page = await service.listPublic({ query: 'habesha' });
+
+        assert.deepStrictEqual(page.items.map((b) => b.id), ['a']);
+    });
+
+    it('matches on description.en when name does not hit', async () => {
+        const { service, repo } = buildService();
+        repo.seed(
+            makeBusiness({
+                id: 'a',
+                name: 'Generic Place',
+                description: { en: 'Specialists in wedding makeup.' },
+            }),
+        );
+        repo.seed(
+            makeBusiness({
+                id: 'b',
+                name: 'Some Other Spot',
+                description: { en: 'Standard barbershop.' },
+            }),
+        );
+
+        const page = await service.listPublic({ query: 'wedding' });
+
+        assert.deepStrictEqual(page.items.map((b) => b.id), ['a']);
+    });
+
+    it('matches on description.am', async () => {
+        const { service, repo } = buildService();
+        repo.seed(
+            makeBusiness({
+                id: 'a',
+                name: 'Habesha Salon',
+                description: { en: 'English-only description.', am: 'የሰርግ ሜካፕ' },
+            }),
+        );
+        repo.seed(
+            makeBusiness({
+                id: 'b',
+                name: 'Other Salon',
+                description: { en: 'Standard salon.' },
+            }),
+        );
+
+        // Search by the Amharic substring should hit only the row that
+        // carries it under description.am.
+        const page = await service.listPublic({ query: 'ሜካፕ' });
+
+        assert.deepStrictEqual(page.items.map((b) => b.id), ['a']);
+    });
+
+    it('is case-insensitive', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'a', name: 'Habesha Beauty Lounge' }));
+
+        const upper = await service.listPublic({ query: 'HABESHA' });
+        const mixed = await service.listPublic({ query: 'HaBeShA' });
+
+        assert.strictEqual(upper.items.length, 1);
+        assert.strictEqual(mixed.items.length, 1);
+    });
+
+    it('whitespace-only query is treated as no filter', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'a', name: 'A' }));
+        repo.seed(makeBusiness({ id: 'b', name: 'B' }));
+
+        const page = await service.listPublic({ query: '   ' });
+
+        assert.strictEqual(page.items.length, 2);
+    });
+
+    it('relevance sort returns searchRank on matched rows', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'name-hit', name: 'Wedding Studio' }));
+        repo.seed(
+            makeBusiness({
+                id: 'desc-hit',
+                name: 'Studio One',
+                description: { en: 'Wedding makeup specialist.' },
+            }),
+        );
+
+        const page = await service.listPublic({
+            query: 'wedding',
+            sort: 'relevance',
+        });
+
+        // Both rows match; both carry a non-null searchRank.
+        assert.strictEqual(page.items.length, 2);
+        for (const item of page.items) {
+            assert.notStrictEqual(
+                item.searchRank,
+                null,
+                'searchRank must be non-null under sort=relevance',
+            );
+        }
+        // Relevance sort never emits a cursor in this commit.
+        assert.strictEqual(page.nextCursor, null);
+    });
+
+    it('relevance sort ranks name matches above description matches', async () => {
+        const { service, repo } = buildService();
+        repo.seed(
+            makeBusiness({
+                id: 'desc-only',
+                name: 'Studio One',
+                description: { en: 'Wedding makeup specialist.' },
+            }),
+        );
+        repo.seed(makeBusiness({ id: 'name-hit', name: 'Wedding Studio' }));
+
+        const page = await service.listPublic({
+            query: 'wedding',
+            sort: 'relevance',
+        });
+
+        // Name match outranks description match (mirrors the SQL's
+        // `setweight('A')` vs `setweight('B')`).
+        assert.deepStrictEqual(
+            page.items.map((b) => b.id),
+            ['name-hit', 'desc-only'],
+        );
+    });
+
+    it('non-relevance sorts leave searchRank null even when query matches', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'a', name: 'Habesha Beauty Lounge' }));
+
+        const page = await service.listPublic({ query: 'habesha' });
+
+        assert.strictEqual(page.items.length, 1);
+        assert.strictEqual(page.items[0]!.searchRank, null);
+    });
+});
+
+describe('BusinessService.listPublic — featuredOnly (Phase 9 Track 6)', () => {
+    it('filters to only currently-featured businesses when true', async () => {
+        const { service, repo } = buildService();
+        const future = new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const past = new Date(Date.now() - 24 * 60 * 60 * 1000);
+        repo.seed(makeBusiness({ id: 'featured', featuredUntil: future }));
+        repo.seed(makeBusiness({ id: 'expired', featuredUntil: past }));
+        repo.seed(makeBusiness({ id: 'never', featuredUntil: null }));
+
+        const page = await service.listPublic({ featuredOnly: true });
+
+        assert.deepStrictEqual(page.items.map((b) => b.id), ['featured']);
+    });
+
+    it('is a no-op when false', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'a', featuredUntil: null }));
+        repo.seed(makeBusiness({ id: 'b', featuredUntil: null }));
+
+        const page = await service.listPublic({ featuredOnly: false });
+
+        assert.strictEqual(page.items.length, 2);
+    });
+});
+
+describe('BusinessService.listPublic — sort modes (Phase 9 Track 6)', () => {
+    it('sort=rating orders by ratingAvg DESC, ratingCount DESC', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'low', ratingAvg: 3.0, ratingCount: 100 }));
+        repo.seed(makeBusiness({ id: 'mid', ratingAvg: 4.5, ratingCount: 5 }));
+        repo.seed(makeBusiness({ id: 'top', ratingAvg: 4.5, ratingCount: 50 }));
+
+        const page = await service.listPublic({ sort: 'rating' });
+
+        // Same avg → higher count wins.
+        assert.deepStrictEqual(
+            page.items.map((b) => b.id),
+            ['top', 'mid', 'low'],
+        );
+    });
+
+    it('sort=newest orders by createdAt DESC', async () => {
+        const { service, repo } = buildService();
+        const t1 = new Date('2026-01-01T00:00:00.000Z');
+        const t2 = new Date('2026-02-01T00:00:00.000Z');
+        const t3 = new Date('2026-03-01T00:00:00.000Z');
+        repo.seed(makeBusiness({ id: 'old', createdAt: t1 }));
+        repo.seed(makeBusiness({ id: 'mid', createdAt: t2 }));
+        repo.seed(makeBusiness({ id: 'new', createdAt: t3 }));
+
+        const page = await service.listPublic({ sort: 'newest' });
+
+        assert.deepStrictEqual(
+            page.items.map((b) => b.id),
+            ['new', 'mid', 'old'],
+        );
+    });
+
+    it('non-featured sorts emit nextCursor=null even with hasMore', async () => {
+        const { service, repo } = buildService();
+        for (let i = 0; i < 25; i += 1) {
+            repo.seed(
+                makeBusiness({
+                    id: `b-${i.toString().padStart(2, '0')}`,
+                    ratingAvg: 5 - (i % 5),
+                }),
+            );
+        }
+
+        const page = await service.listPublic({ sort: 'newest' }, undefined, 10);
+
+        assert.strictEqual(page.items.length, 10);
+        // Cursor pagination is intentionally not supported for newest /
+        // rating / relevance in this commit.
+        assert.strictEqual(page.nextCursor, null);
+    });
+});
+
+describe('BusinessService.listPublic — combined filters (Phase 9 Track 6)', () => {
+    it('combines category + city + query', async () => {
+        const { service, repo } = buildService();
+        const otherCategory = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+        repo.seed(
+            makeBusiness({
+                id: 'match',
+                categoryId: CATEGORY_ID,
+                city: 'Addis Ababa',
+                name: 'Habesha Beauty Lounge',
+            }),
+        );
+        repo.seed(
+            makeBusiness({
+                id: 'wrong-category',
+                categoryId: otherCategory,
+                city: 'Addis Ababa',
+                name: 'Habesha Barbershop',
+            }),
+        );
+        repo.seed(
+            makeBusiness({
+                id: 'wrong-city',
+                categoryId: CATEGORY_ID,
+                city: 'Hawassa',
+                name: 'Habesha Spa',
+            }),
+        );
+        repo.seed(
+            makeBusiness({
+                id: 'no-query-hit',
+                categoryId: CATEGORY_ID,
+                city: 'Addis Ababa',
+                name: 'Unrelated Place',
+            }),
+        );
+
+        const page = await service.listPublic({
+            categoryId: CATEGORY_ID,
+            city: 'addis ababa',
+            query: 'habesha',
+        });
+
+        assert.deepStrictEqual(page.items.map((b) => b.id), ['match']);
+    });
+
+    it('existing category-only listing keeps default sort + cursor', async () => {
+        const { service, repo } = buildService();
+        repo.seed(makeBusiness({ id: 'a', categoryId: CATEGORY_ID, ratingAvg: 3 }));
+        repo.seed(makeBusiness({ id: 'b', categoryId: CATEGORY_ID, ratingAvg: 5 }));
+        repo.seed(makeBusiness({ id: 'c', categoryId: CATEGORY_ID, ratingAvg: 4 }));
+
+        const page = await service.listPublic(
+            { categoryId: CATEGORY_ID },
+            undefined,
+            2,
+        );
+
+        // Default sort is featured-first → rating; the legacy 3-row
+        // listing still produces a working cursor.
+        assert.strictEqual(page.items.length, 2);
+        assert.deepStrictEqual(
+            page.items.map((b) => b.id),
+            ['b', 'c'],
+        );
+        assert.notStrictEqual(page.nextCursor, null);
     });
 });
 

@@ -112,6 +112,7 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
         ratingCount: 0,
         createdAt: now,
         updatedAt: now,
+        searchRank: null,
         ...overrides,
     });
 }
