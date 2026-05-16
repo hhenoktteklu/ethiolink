@@ -535,3 +535,170 @@ describe('loadSecretsThenConfig — both RDS and SMS resolution together', () =>
         assert.deepStrictEqual([...resolver.calls].sort(), [rdsArn, SMS_ARN].sort());
     });
 });
+
+describe('loadSecretsThenConfig — Telegram secret resolution', () => {
+    const TG_TOKEN_ARN =
+        'arn:aws:secretsmanager:eu-west-1:123:secret:ethiolink/dev/telegram/bot-token';
+    const TG_WEBHOOK_ARN =
+        'arn:aws:secretsmanager:eu-west-1:123:secret:ethiolink/dev/telegram/webhook-secret';
+
+    const ENV_WITH_TG_ARNS: NodeJS.ProcessEnv = Object.freeze({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'info',
+        APP_REGION: 'eu-west-1',
+        PG_HOST: 'localhost',
+        PG_DATABASE: 'ethiolink',
+        PG_USER: 'ethiolink',
+        PG_PASSWORD: 'local-pw',
+        COGNITO_USER_POOL_ID: 'pool',
+        COGNITO_APP_CLIENT_ID_MOBILE: 'mob',
+        COGNITO_APP_CLIENT_ID_ADMIN: 'adm',
+        COGNITO_REGION: 'eu-west-1',
+        TELEGRAM_BOT_USERNAME: 'EthioLinkBot',
+        TELEGRAM_BOT_TOKEN_SECRET_ARN: TG_TOKEN_ARN,
+        TELEGRAM_WEBHOOK_SECRET_ARN: TG_WEBHOOK_ARN,
+    });
+
+    it('resolves plain-string secrets and builds the telegramProvider config', async () => {
+        const resolver = new MultiResolver({
+            [TG_TOKEN_ARN]: '987654:resolved-bot-token',
+            [TG_WEBHOOK_ARN]: 'resolved-webhook-secret',
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: ENV_WITH_TG_ARNS,
+            secretsResolver: resolver,
+            telegramSecretCache: new Map<string, string>(),
+        });
+
+        assert.ok(config.telegramProvider);
+        assert.strictEqual(
+            config.telegramProvider!.botToken,
+            '987654:resolved-bot-token',
+        );
+        assert.strictEqual(
+            config.telegramProvider!.webhookSecret,
+            'resolved-webhook-secret',
+        );
+        assert.strictEqual(
+            config.telegramProvider!.botTokenSecretArn,
+            TG_TOKEN_ARN,
+        );
+        assert.deepStrictEqual(
+            [...resolver.calls].sort(),
+            [TG_TOKEN_ARN, TG_WEBHOOK_ARN].sort(),
+        );
+    });
+
+    it('resolves JSON-shaped secrets via the per-field selector', async () => {
+        const resolver = new MultiResolver({
+            [TG_TOKEN_ARN]: JSON.stringify({
+                botToken: 'json-token',
+                webhookSecret: 'should-be-ignored-here',
+            }),
+            [TG_WEBHOOK_ARN]: JSON.stringify({
+                botToken: 'should-be-ignored-here',
+                webhookSecret: 'json-webhook',
+            }),
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: ENV_WITH_TG_ARNS,
+            secretsResolver: resolver,
+            telegramSecretCache: new Map<string, string>(),
+        });
+
+        assert.strictEqual(config.telegramProvider!.botToken, 'json-token');
+        assert.strictEqual(
+            config.telegramProvider!.webhookSecret,
+            'json-webhook',
+        );
+    });
+
+    it('caches per-ARN — a second call does not re-resolve', async () => {
+        const resolver = new MultiResolver({
+            [TG_TOKEN_ARN]: 'tok',
+            [TG_WEBHOOK_ARN]: 'whs',
+        });
+        const cache = new Map<string, string>();
+
+        await loadSecretsThenConfig({
+            env: ENV_WITH_TG_ARNS,
+            secretsResolver: resolver,
+            telegramSecretCache: cache,
+        });
+        await loadSecretsThenConfig({
+            env: ENV_WITH_TG_ARNS,
+            secretsResolver: resolver,
+            telegramSecretCache: cache,
+        });
+
+        // Each ARN resolved exactly once across the two calls.
+        assert.strictEqual(resolver.calls.length, 2);
+    });
+
+    it('explicit env-var wins over the ARN (local-dev escape hatch)', async () => {
+        const resolver = new MultiResolver({
+            // Resolver would refuse if called — `MultiResolver`
+            // throws on missing keys, so a call against an unmapped
+            // ARN would fail the test. Therefore: no ARN, no call.
+        });
+
+        const env: NodeJS.ProcessEnv = {
+            ...ENV_WITH_TG_ARNS,
+            TELEGRAM_BOT_TOKEN: 'plain-env-token',
+            TELEGRAM_WEBHOOK_SECRET: 'plain-env-webhook',
+        };
+
+        const config = await loadSecretsThenConfig({
+            env,
+            secretsResolver: resolver,
+            telegramSecretCache: new Map<string, string>(),
+        });
+
+        assert.strictEqual(
+            config.telegramProvider!.botToken,
+            'plain-env-token',
+        );
+        assert.strictEqual(
+            config.telegramProvider!.webhookSecret,
+            'plain-env-webhook',
+        );
+        // Resolver never invoked.
+        assert.strictEqual(resolver.calls.length, 0);
+    });
+
+    it('throws SecretResolutionError on an empty SecretString', async () => {
+        const resolver = new MultiResolver({
+            [TG_TOKEN_ARN]: '',
+            [TG_WEBHOOK_ARN]: 'whs',
+        });
+
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: ENV_WITH_TG_ARNS,
+                    secretsResolver: resolver,
+                    telegramSecretCache: new Map<string, string>(),
+                }),
+            SecretResolutionError,
+        );
+    });
+
+    it('throws SecretResolutionError on JSON missing the requested field', async () => {
+        const resolver = new MultiResolver({
+            [TG_TOKEN_ARN]: JSON.stringify({ other: 'value' }),
+            [TG_WEBHOOK_ARN]: 'whs',
+        });
+
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: ENV_WITH_TG_ARNS,
+                    secretsResolver: resolver,
+                    telegramSecretCache: new Map<string, string>(),
+                }),
+            SecretResolutionError,
+        );
+    });
+});

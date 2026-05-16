@@ -168,10 +168,16 @@ The first track is sequenced; the rest are recommended workstreams to schedule a
 ### Track 2 — Telegram bot
 
 - [ ] BotFather bot provisioned; token in Secrets Manager.
-- [ ] Migration 0014 adds `users.telegram_chat_id text NULL`.
-- [ ] `POST /v1/me/link-telegram` handler accepts a one-time linking token and writes `users.telegram_chat_id`.
-- [ ] `TelegramBotGateway` implements `NotificationGateway` against the Telegram Bot API's `sendMessage`.
-- [ ] Dispatcher routes through the gateway when the recipient has a linked chat id; falls back to SMS when not.
+- [x] Migration 0014 adds `users.telegram_chat_id text NULL` + partial index. *(Phase 9 commit "add Telegram linking foundation". `UserRepository.setTelegramChatId` is the dedicated mutation path; `notificationService.buildRecipient` now reads the column so the future Telegram gateway sees the linked chat id automatically.)*
+- [x] Migration 0015 adds `users_telegram_link_codes` table + `PgTelegramLinkCodeRepository` + `InMemoryTelegramLinkCodeRepository`. *(Phase 9 commit "add Telegram linking foundation". Short-lived per-user codes; service layer enforces single-use + per-user invalidation on re-issue.)*
+- [x] `TelegramLinkService` (start / redeem / unlink) with typed errors. *(Phase 9 commit "add Telegram linking foundation". 12-test suite covering deep-link generation, TTL, single-use, expiry, empty-chatid rejection, unlink-when-not-linked.)*
+- [x] `GenericTelegramGateway` implements `NotificationGateway` against the Telegram Bot API `sendMessage`. *(Phase 9 commit "add Telegram linking foundation". Eight-case test suite over `FakeTelegramHttpTransport`: 2xx, 400 chat-not-found, 403 bot-blocked, 429 rate-limited, 5xx unavailable, network timeout, missing chat id, factory null-config guard. Provider tag `'TELEGRAM_BOT'`. Existing `TelegramNotificationGateway` stub remains as the default "not configured" gateway.)*
+- [x] `loadConfig` resolves `TELEGRAM_*` env vars into `AppConfig.telegramProvider`; `loadSecretsThenConfig` resolves `TELEGRAM_BOT_TOKEN_SECRET_ARN` + `TELEGRAM_WEBHOOK_SECRET_ARN` from Secrets Manager (both plain-string and JSON shapes). *(Phase 9 commit "add Telegram linking foundation".)*
+- [ ] `POST /v1/me/link-telegram/start` + `GET /v1/me/telegram-status` + `DELETE /v1/me/link-telegram` Lambda handlers + OpenAPI routes.
+- [ ] `POST /v1/integrations/telegram/webhook` Lambda + secret-header guard.
+- [ ] `notificationServiceFactory` wires `TELEGRAM` when `config.telegramProvider` is non-null and `notificationsProvider` is `'production'`.
+- [ ] Channel selection in `AppointmentService.pickNotificationChannel` + `pickReminderChannel` prefers Telegram when the recipient has a linked chat id; falls back to SMS / MOCK.
+- [ ] Mobile `LinkTelegramScreen` (Profile-tab entry point on both customer + owner surfaces).
 - [ ] Operator runbook at `docs/operations/runbooks/telegram-bot.md`.
 
 ### Track 3 — Flutter mobile scaffold

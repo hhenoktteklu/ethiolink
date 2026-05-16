@@ -111,6 +111,14 @@ export interface LoadSecretsThenConfigOptions {
      * isolate state from the RDS cache.
      */
     readonly smsApiKeyCache?: Map<string, string>;
+
+    /**
+     * Cache of resolved Telegram secrets keyed by secret ARN.
+     * Holds either the bot token or the webhook secret, depending
+     * on which ARN was resolved. Lives at module scope so warm
+     * Lambda invocations skip the network call after cold start.
+     */
+    readonly telegramSecretCache?: Map<string, string>;
 }
 
 /**
@@ -147,6 +155,13 @@ const defaultCache = new Map<string, ResolvedRdsSecret>();
  */
 const defaultSmsApiKeyCache = new Map<string, string>();
 
+/**
+ * Cache for resolved Telegram secrets (bot token + webhook
+ * secret). One map serves both ARNs because the cache key is the
+ * full ARN — collisions are impossible across kinds.
+ */
+const defaultTelegramSecretCache = new Map<string, string>();
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -170,6 +185,8 @@ export async function loadSecretsThenConfig(
     const resolver = options.secretsResolver ?? defaultSecretsManagerResolver();
     const rdsCache = options.cache ?? defaultCache;
     const smsCache = options.smsApiKeyCache ?? defaultSmsApiKeyCache;
+    const telegramCache =
+        options.telegramSecretCache ?? defaultTelegramSecretCache;
 
     // Start with the input env. Both resolution paths below may
     // layer values onto this map; `loadConfig` consumes the
@@ -227,6 +244,35 @@ export async function loadSecretsThenConfig(
         derived = { ...derived, SMS_PROVIDER_API_KEY: key };
     }
 
+    // ---- Telegram bot-token secret ---------------------------------------
+    //
+    // Same pattern as SMS. Resolution triggers when the ARN is set
+    // AND the corresponding plain env var is NOT set. The bot token
+    // and the webhook secret live in separate ARNs so they can be
+    // rotated independently — the bot token via BotFather, the
+    // webhook secret via a `setWebhook` round-trip.
+    const telegramTokenArn = env.TELEGRAM_BOT_TOKEN_SECRET_ARN?.trim();
+    if (telegramTokenArn && !isPresent(env.TELEGRAM_BOT_TOKEN)) {
+        let token = telegramCache.get(telegramTokenArn);
+        if (!token) {
+            const raw = await resolver.resolve(telegramTokenArn);
+            token = parseTelegramSecret(raw, 'botToken');
+            telegramCache.set(telegramTokenArn, token);
+        }
+        derived = { ...derived, TELEGRAM_BOT_TOKEN: token };
+    }
+
+    const telegramWebhookArn = env.TELEGRAM_WEBHOOK_SECRET_ARN?.trim();
+    if (telegramWebhookArn && !isPresent(env.TELEGRAM_WEBHOOK_SECRET)) {
+        let secret = telegramCache.get(telegramWebhookArn);
+        if (!secret) {
+            const raw = await resolver.resolve(telegramWebhookArn);
+            secret = parseTelegramSecret(raw, 'webhookSecret');
+            telegramCache.set(telegramWebhookArn, secret);
+        }
+        derived = { ...derived, TELEGRAM_WEBHOOK_SECRET: secret };
+    }
+
     return loadConfig(derived);
 }
 
@@ -238,6 +284,7 @@ export async function loadSecretsThenConfig(
 export function clearSecretsCache(): void {
     defaultCache.clear();
     defaultSmsApiKeyCache.clear();
+    defaultTelegramSecretCache.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -381,6 +428,71 @@ function parseSmsApiKey(raw: string): string {
             );
         }
         return obj.apiKey;
+    }
+
+    return trimmed;
+}
+
+/**
+ * Parse a Telegram secret payload. Accepts two shapes, mirroring
+ * the SMS pattern:
+ *
+ *   * Plain string — the SecretString IS the value. Used when the
+ *     operator wants a flat token (the default).
+ *
+ *   * JSON `{ "botToken": "...", "webhookSecret": "..." }` — used
+ *     when the operator wants both Telegram secrets bundled in a
+ *     single Secrets Manager resource. The `field` argument picks
+ *     which key to extract. Other keys are ignored — and a single
+ *     JSON secret can be referenced by both ARN env vars
+ *     (pointing the same ARN at both `TELEGRAM_BOT_TOKEN_SECRET_ARN`
+ *     and `TELEGRAM_WEBHOOK_SECRET_ARN`) so one secret resource
+ *     can serve both fields.
+ *
+ * Anything else throws `SecretResolutionError` so a misconfigured
+ * secret fails the cold start loudly rather than silently shipping
+ * with an empty value.
+ */
+function parseTelegramSecret(
+    raw: string,
+    field: 'botToken' | 'webhookSecret',
+): string {
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+        throw new SecretResolutionError(
+            `Telegram ${field} secret is empty. Set it to either the plain ` +
+                'value or a JSON object with `botToken` and/or `webhookSecret` fields.',
+        );
+    }
+
+    if (trimmed.startsWith('{')) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch (err) {
+            throw new SecretResolutionError(
+                `Telegram ${field} secret looks like JSON but failed to parse: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            );
+        }
+        if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            Array.isArray(parsed)
+        ) {
+            throw new SecretResolutionError(
+                `Telegram ${field} secret JSON must be a non-array object.`,
+            );
+        }
+        const obj = parsed as Record<string, unknown>;
+        const v = obj[field];
+        if (typeof v !== 'string' || v === '') {
+            throw new SecretResolutionError(
+                `Telegram secret JSON is missing the \`${field}\` string field.`,
+            );
+        }
+        return v;
     }
 
     return trimmed;

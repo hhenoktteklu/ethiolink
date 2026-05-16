@@ -136,6 +136,51 @@ export interface SmsProviderConfig {
     readonly timeoutMs: number;
 }
 
+/**
+ * Phase 9 Track 2 — Telegram provider configuration. Populated
+ * when `TELEGRAM_BOT_USERNAME` is present AND both
+ * `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are resolved
+ * (directly via env or via Secrets Manager through
+ * `loadSecretsThenConfig`); `null` otherwise. The future
+ * notification-service factory checks this slot before
+ * constructing the real gateway.
+ *
+ * Production credential resolution mirrors the SMS pattern:
+ *   * `TELEGRAM_BOT_TOKEN` env var holds the plain token in dev /
+ *     docker-compose.
+ *   * `TELEGRAM_BOT_TOKEN_SECRET_ARN` points at a Secrets Manager
+ *     secret for prod; `loadSecretsThenConfig` resolves the ARN
+ *     and writes the value into `TELEGRAM_BOT_TOKEN` before
+ *     delegating here.
+ *   * Same pattern for `TELEGRAM_WEBHOOK_SECRET` /
+ *     `TELEGRAM_WEBHOOK_SECRET_ARN`.
+ *
+ * `botUsername` is non-sensitive and lives in the plain env stack
+ * (it's the public `@<username>` everyone can see when they tap
+ * the deep link). The two secret ARN fields are passthrough
+ * metadata — the gateway does not consume them; they're recorded
+ * so an operator can verify at a glance whether a Lambda is on the
+ * production secret wiring vs. the dev plain-env wiring.
+ */
+export interface TelegramProviderConfig {
+    /** Bot username without leading `@`. Used by the link-code service for the deep link. */
+    readonly botUsername: string;
+    /** Bot token from BotFather. Plain in dev; resolved from Secrets Manager in prod. */
+    readonly botToken: string;
+    /** ARN of the Secrets Manager secret holding the bot token, when set. Empty string in dev. */
+    readonly botTokenSecretArn: string;
+    /** Webhook secret token passed via `X-Telegram-Bot-Api-Secret-Token` on inbound webhook calls. */
+    readonly webhookSecret: string;
+    /** ARN of the Secrets Manager secret holding the webhook secret, when set. */
+    readonly webhookSecretArn: string;
+    /** Provider identifier written to `notification_logs.provider`. Defaults to `'TELEGRAM_BOT'`. */
+    readonly providerName: string;
+    /** TTL for issued linking codes, in seconds. Defaults to 600 (10 minutes). */
+    readonly linkCodeTtlSeconds: number;
+    /** HTTP request timeout in milliseconds. Default 10000 (10 s). */
+    readonly timeoutMs: number;
+}
+
 export interface AppConfig {
     readonly nodeEnv: NodeEnv;
     readonly logLevel: LogLevel;
@@ -146,6 +191,8 @@ export interface AppConfig {
     readonly booking: BookingConfig;
     /** SMS provider config when wired; `null` when the operator hasn't opted in. */
     readonly smsProvider: SmsProviderConfig | null;
+    /** Telegram provider config when wired; `null` when the operator hasn't opted in. */
+    readonly telegramProvider: TelegramProviderConfig | null;
     /**
      * Provider-selector flag. The notification-service factory
      * reads this alongside `smsProvider` to decide whether to wire
@@ -271,6 +318,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
                 env.DEFAULT_TIMEZONE?.trim() || 'Africa/Addis_Ababa',
         }),
         smsProvider: buildSmsProviderConfig(env),
+        telegramProvider: buildTelegramProviderConfig(env),
         notificationsProvider: parseEnum<NotificationsProvider>(
             'NOTIFICATIONS_PROVIDER',
             env.NOTIFICATIONS_PROVIDER,
@@ -313,6 +361,52 @@ function buildSmsProviderConfig(
         timeoutMs: parsePositiveInteger(
             'SMS_PROVIDER_TIMEOUT_MS',
             env.SMS_PROVIDER_TIMEOUT_MS,
+            10000,
+        ),
+    });
+}
+
+/**
+ * Build the optional Telegram provider config. Returns `null`
+ * when any of the three required values (`TELEGRAM_BOT_USERNAME`,
+ * `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`) is missing —
+ * the future factory checks the slot before constructing a real
+ * gateway and falls back to `MockNotificationGateway` /
+ * `GenericSmsGateway` otherwise.
+ *
+ * Secrets Manager resolution (`TELEGRAM_BOT_TOKEN_SECRET_ARN` +
+ * `TELEGRAM_WEBHOOK_SECRET_ARN`) lives in `loadSecretsThenConfig`;
+ * this function only reads the already-resolved env vars.
+ */
+function buildTelegramProviderConfig(
+    env: NodeJS.ProcessEnv,
+): TelegramProviderConfig | null {
+    const botUsername = env.TELEGRAM_BOT_USERNAME?.trim() ?? '';
+    const botToken = env.TELEGRAM_BOT_TOKEN?.trim() ?? '';
+    const webhookSecret = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+
+    if (!botUsername || !botToken || !webhookSecret) {
+        return null;
+    }
+
+    return Object.freeze<TelegramProviderConfig>({
+        botUsername,
+        botToken,
+        botTokenSecretArn:
+            env.TELEGRAM_BOT_TOKEN_SECRET_ARN?.trim() ?? '',
+        webhookSecret,
+        webhookSecretArn:
+            env.TELEGRAM_WEBHOOK_SECRET_ARN?.trim() ?? '',
+        providerName:
+            env.TELEGRAM_PROVIDER_NAME?.trim() || 'TELEGRAM_BOT',
+        linkCodeTtlSeconds: parsePositiveInteger(
+            'TELEGRAM_LINK_CODE_TTL_SECONDS',
+            env.TELEGRAM_LINK_CODE_TTL_SECONDS,
+            600,
+        ),
+        timeoutMs: parsePositiveInteger(
+            'TELEGRAM_TIMEOUT_MS',
+            env.TELEGRAM_TIMEOUT_MS,
             10000,
         ),
     });

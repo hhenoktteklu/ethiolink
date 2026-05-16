@@ -29,6 +29,16 @@ export interface User {
     readonly role: UserRole;
     readonly status: UserStatus;
     readonly displayName: string | null;
+    /**
+     * Phase 9 Track 2: Telegram chat id, populated when the user
+     * has linked their account via the bot. `null` for everyone
+     * else (Telegram linking is opt-in). Treated as an opaque
+     * token; `text` rather than `bigint` because some chat ids
+     * exceed JS's safe-integer range. The notification
+     * dispatcher reads this and forwards it as
+     * `recipient.telegramChatId`.
+     */
+    readonly telegramChatId: string | null;
     readonly createdAt: Date;
     readonly updatedAt: Date;
 }
@@ -88,6 +98,15 @@ export interface UserRepository {
         filters: AdminUserFilters,
         limit: number,
     ): Promise<readonly User[]>;
+    /**
+     * Phase 9 Track 2: set the user's `telegram_chat_id`. Passing
+     * `null` clears it (used by the `unlink` flow + when the bot
+     * tells us the chat is blocked / deleted). The mutation is on
+     * its own path so the `update` patch surface stays minimal —
+     * no need to widen `UpdateUserFields` for this single optional
+     * column.
+     */
+    setTelegramChatId(id: string, chatId: string | null): Promise<User>;
 }
 
 // ---------------------------------------------------------------------------
@@ -102,12 +121,14 @@ interface UserRow {
     role: UserRole;
     status: UserStatus;
     display_name: string | null;
+    telegram_chat_id: string | null;
     created_at: Date;
     updated_at: Date;
 }
 
 const USER_COLUMNS =
-    'id, cognito_sub, email, phone, role, status, display_name, created_at, updated_at';
+    'id, cognito_sub, email, phone, role, status, display_name, ' +
+    'telegram_chat_id, created_at, updated_at';
 
 export class PgUserRepository extends BaseRepository implements UserRepository {
     async upsertFromAuth(input: UpsertUserFromAuthInput): Promise<User> {
@@ -184,6 +205,25 @@ export class PgUserRepository extends BaseRepository implements UserRepository {
         return mapRow(row);
     }
 
+    async setTelegramChatId(
+        id: string,
+        chatId: string | null,
+    ): Promise<User> {
+        const row = await this.oneOrNone<UserRow>(
+            `
+            UPDATE users
+               SET telegram_chat_id = $2
+             WHERE id = $1
+            RETURNING ${USER_COLUMNS};
+            `,
+            [id, chatId],
+        );
+        if (!row) {
+            throw new RepositoryError(`User ${id} not found.`);
+        }
+        return mapRow(row);
+    }
+
     async listForAdmin(
         filters: AdminUserFilters,
         limit: number,
@@ -212,6 +252,7 @@ function mapRow(row: UserRow): User {
         role: row.role,
         status: row.status,
         displayName: row.display_name,
+        telegramChatId: row.telegram_chat_id,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     });

@@ -394,18 +394,21 @@ function buildRecipient(user: {
     id: string;
     email: string | null;
     phone: string | null;
+    telegramChatId: string | null;
 }): NotificationRecipient {
     return {
         userId: user.id,
         phoneE164: user.phone ?? undefined,
         emailAddress: user.email ?? undefined,
-        // Telegram chat id is not yet a column on `users` — when
-        // the real Telegram gateway ships, it'll live on a
-        // `customer_profiles.telegram_chat_id` column and this
-        // helper will read it. For MVP, omitted so the mock
-        // gateway accepts whatever it gets and the Telegram stub
-        // throws its "not configured" error.
-        telegramChatId: undefined,
+        // Phase 9 Track 2: `users.telegram_chat_id` (migration 0014)
+        // is read here so the (future) Telegram gateway sees the
+        // linked chat id when the user has opted in. Un-linked
+        // users get `undefined` and the Telegram gateway throws
+        // `TELEGRAM_RECIPIENT_MISSING` — the dispatcher persists
+        // `FAILED` and the dispatcher's channel selector (future
+        // commit) avoids routing `TELEGRAM` to un-linked users in
+        // the first place.
+        telegramChatId: user.telegramChatId ?? undefined,
     };
 }
 

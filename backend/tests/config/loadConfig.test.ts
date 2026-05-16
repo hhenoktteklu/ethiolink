@@ -171,3 +171,62 @@ describe('loadConfig — PG_SSL parsing', () => {
         });
     }
 });
+
+describe('loadConfig — telegramProvider', () => {
+    it('returns null when no Telegram env vars are set', () => {
+        const config = loadConfig({ ...VALID_ENV });
+        assert.strictEqual(config.telegramProvider, null);
+    });
+
+    it('returns null when only some Telegram vars are set', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            TELEGRAM_BOT_USERNAME: 'EthioLinkBot',
+            // Missing TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET
+        });
+        assert.strictEqual(config.telegramProvider, null);
+    });
+
+    it('builds the config when all three required vars are present', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            TELEGRAM_BOT_USERNAME: 'EthioLinkBot',
+            TELEGRAM_BOT_TOKEN: '123:abc',
+            TELEGRAM_WEBHOOK_SECRET: 'whsec',
+        });
+        assert.deepStrictEqual(config.telegramProvider, {
+            botUsername: 'EthioLinkBot',
+            botToken: '123:abc',
+            botTokenSecretArn: '',
+            webhookSecret: 'whsec',
+            webhookSecretArn: '',
+            providerName: 'TELEGRAM_BOT',
+            linkCodeTtlSeconds: 600,
+            timeoutMs: 10000,
+        });
+    });
+
+    it('passes through optional fields when supplied', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            TELEGRAM_BOT_USERNAME: 'EthioLinkBot',
+            TELEGRAM_BOT_TOKEN: '123:abc',
+            TELEGRAM_BOT_TOKEN_SECRET_ARN: 'arn:bot',
+            TELEGRAM_WEBHOOK_SECRET: 'whsec',
+            TELEGRAM_WEBHOOK_SECRET_ARN: 'arn:wh',
+            TELEGRAM_PROVIDER_NAME: 'TELEGRAM_BOT_PROD',
+            TELEGRAM_LINK_CODE_TTL_SECONDS: '300',
+            TELEGRAM_TIMEOUT_MS: '7500',
+        });
+        assert.deepStrictEqual(config.telegramProvider, {
+            botUsername: 'EthioLinkBot',
+            botToken: '123:abc',
+            botTokenSecretArn: 'arn:bot',
+            webhookSecret: 'whsec',
+            webhookSecretArn: 'arn:wh',
+            providerName: 'TELEGRAM_BOT_PROD',
+            linkCodeTtlSeconds: 300,
+            timeoutMs: 7500,
+        });
+    });
+});

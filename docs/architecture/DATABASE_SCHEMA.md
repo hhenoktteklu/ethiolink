@@ -18,17 +18,31 @@ PostgreSQL 15 on Amazon RDS. All schema changes go through versioned SQL migrati
 
 Mirror of Cognito identities. One row per authenticated principal across all roles.
 
-| column         | type           | notes                                                       |
-| -------------- | -------------- | ----------------------------------------------------------- |
-| id             | uuid PK        |                                                             |
-| cognito_sub    | text UNIQUE    | Cognito user `sub`                                          |
-| email          | citext         | nullable if user signed up with phone                       |
-| phone          | text           | E.164                                                       |
-| role           | text NOT NULL  | CHECK in ('CUSTOMER','BUSINESS_OWNER','ADMIN')              |
-| status         | text NOT NULL  | CHECK in ('ACTIVE','SUSPENDED','DELETED'), default 'ACTIVE' |
-| display_name   | text           |                                                             |
-| created_at     | timestamptz    |                                                             |
-| updated_at     | timestamptz    |                                                             |
+| column            | type           | notes                                                       |
+| ----------------- | -------------- | ----------------------------------------------------------- |
+| id                | uuid PK        |                                                             |
+| cognito_sub       | text UNIQUE    | Cognito user `sub`                                          |
+| email             | citext         | nullable if user signed up with phone                       |
+| phone             | text           | E.164                                                       |
+| role              | text NOT NULL  | CHECK in ('CUSTOMER','BUSINESS_OWNER','ADMIN')              |
+| status            | text NOT NULL  | CHECK in ('ACTIVE','SUSPENDED','DELETED'), default 'ACTIVE' |
+| display_name      | text           |                                                             |
+| telegram_chat_id  | text           | nullable; set via the Telegram linking flow (Phase 9 Track 2, migration 0014). Partial index on `id WHERE telegram_chat_id IS NOT NULL` |
+| created_at        | timestamptz    |                                                             |
+| updated_at        | timestamptz    |                                                             |
+
+### `users_telegram_link_codes`
+
+Short-lived single-use codes for the Telegram bot linking flow (Phase 9 Track 2, migration 0015). Created by `POST /v1/me/link-telegram/start`, deleted by the bot webhook on `/start <code>` redemption or by a daily sweep job after expiry.
+
+| column      | type        | notes                                                |
+| ----------- | ----------- | ---------------------------------------------------- |
+| code        | text PK     | opaque random base32 token (32 chars by default)     |
+| user_id     | uuid FK     | -> users.id ON DELETE CASCADE                        |
+| expires_at  | timestamptz | NOT NULL; default TTL 10 minutes (env-configurable)  |
+| created_at  | timestamptz |                                                      |
+
+Indexes: `(user_id)` for the per-user invalidate path; `(expires_at)` for the sweep predicate.
 
 ### `customer_profiles`
 
