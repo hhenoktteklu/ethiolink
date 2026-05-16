@@ -59,8 +59,24 @@ export type PaymentProvider =
  */
 export type PaymentAuthorizationStatus = 'SUCCEEDED' | 'PENDING' | 'FAILED';
 
-/** Input accepted by {@link PaymentGateway.authorize}. */
-export interface PaymentAuthorizationInput {
+/**
+ * Discriminated union accepted by {@link PaymentGateway.authorize}.
+ * Phase 9 Track 6 — the original shape only carried `appointmentId`;
+ * paid featuring (booked through `featuringService`) adds the
+ * second variant so the same gateway port handles both purposes.
+ *
+ * The `purpose` tag is what each gateway switches on (today: nothing
+ * — every implementation ignores both branches and returns a
+ * deterministic result). Real upstream providers will use it to pick
+ * the right product code / SKU / metadata block when calling out.
+ */
+export type PaymentAuthorizationInput =
+    | AppointmentAuthorizationInput
+    | FeaturingAuthorizationInput;
+
+/** Authorization for a customer appointment (the original shape). */
+export interface AppointmentAuthorizationInput {
+    readonly purpose: 'APPOINTMENT';
     /** UUID of the appointment the payment is for. Opaque to the gateway. */
     readonly appointmentId: string;
     /** Amount to charge in ETB. Must match the appointment's snapshotted price. */
@@ -70,6 +86,25 @@ export interface PaymentAuthorizationInput {
      * provider so a network retry does not double-charge. Cash and
      * MockOnline ignore it; real online providers use it.
      */
+    readonly idempotencyKey?: string;
+}
+
+/**
+ * Authorization for a paid featuring subscription (Phase 9 Track 6).
+ * Carries the subscription id (the freshly-inserted
+ * `featuring_subscriptions` row) so a future Telebirr gateway can
+ * persist the upstream `providerRef` against the subscription
+ * record's `payment_intents` row.
+ */
+export interface FeaturingAuthorizationInput {
+    readonly purpose: 'FEATURING';
+    /** UUID of the `featuring_subscriptions` row. */
+    readonly featuringSubscriptionId: string;
+    /** UUID of the business that owns the subscription. */
+    readonly businessId: string;
+    /** Server-priced amount in ETB. Owners never send this. */
+    readonly amountEtb: number;
+    /** Idempotency key — same semantics as the appointment variant. */
     readonly idempotencyKey?: string;
 }
 
@@ -150,7 +185,9 @@ export interface PaymentGateway {
     readonly provider: PaymentProvider;
 
     /**
-     * Attempt to authorize a charge for an appointment.
+     * Attempt to authorize a charge. The input's `purpose` tag
+     * picks between an appointment payment (the booking funnel)
+     * and a featuring subscription (Phase 9 Track 6).
      *
      * - Returns `PaymentAuthorization` for normal outcomes (success,
      *   pending external action, declined).

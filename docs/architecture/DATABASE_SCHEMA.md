@@ -204,19 +204,44 @@ Audit log for admin operations.
 
 ### `payment_intents`
 
-Placeholder table for the future online-payment flow. Cash bookings do not write here.
+Placeholder table for the future online-payment flow. Cash bookings do not write here. Phase 9 Track 6 (migration 0018) widens this table so a row can attach to either an appointment OR a paid featuring subscription — see the `target` XOR CHECK below.
 
-| column          | type        | notes                                                                                |
-| --------------- | ----------- | ------------------------------------------------------------------------------------ |
-| id              | uuid PK     |                                                                                      |
-| appointment_id  | uuid FK     | -> appointments.id ON DELETE CASCADE                                                 |
-| provider        | text        | CHECK in ('MOCK','TELEBIRR','CHAPA','CBE_BIRR'), default 'MOCK'                       |
-| amount_etb      | numeric(12,2)|                                                                                     |
-| status          | text        | CHECK in ('PENDING','SUCCEEDED','FAILED','CANCELLED'), default 'PENDING'             |
-| provider_ref    | text        | external reference                                                                   |
-| raw_response    | jsonb       |                                                                                      |
-| created_at      | timestamptz |                                                                                      |
-| updated_at      | timestamptz |                                                                                      |
+| column                       | type          | notes                                                                                |
+| ---------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| id                           | uuid PK       |                                                                                      |
+| appointment_id               | uuid FK       | -> appointments.id ON DELETE CASCADE; **nullable** (Phase 9 Track 6 — was NOT NULL pre-0018) |
+| featuring_subscription_id    | uuid FK       | -> featuring_subscriptions.id ON DELETE CASCADE; nullable. **Phase 9 Track 6 (migration 0018)**. |
+| provider                     | text          | CHECK in ('MOCK','TELEBIRR','CHAPA','CBE_BIRR'), default 'MOCK'                       |
+| amount_etb                   | numeric(12,2) |                                                                                      |
+| status                       | text          | CHECK in ('PENDING','SUCCEEDED','FAILED','CANCELLED'), default 'PENDING'             |
+| provider_ref                 | text          | external reference                                                                   |
+| raw_response                 | jsonb         |                                                                                      |
+| created_at                   | timestamptz   |                                                                                      |
+| updated_at                   | timestamptz   |                                                                                      |
+
+Constraint (Phase 9 Track 6): `payment_intents_target_xor` — `(appointment_id IS NULL) <> (featuring_subscription_id IS NULL)` — exactly one of the two FKs must be set per row. Indexes: `(appointment_id, created_at DESC)` (existing) for booking-side reads; `(featuring_subscription_id, created_at DESC)` (new in 0018) for featuring-side reads.
+
+### `featuring_subscriptions`
+
+**Phase 9 Track 6 (migration 0018)**. Tracks each paid or comped featuring slot for a business. The customer-side discovery surface still reads `business_profiles.featured_until` as the single derived signal; the daily sweep Lambda projects `MAX(ends_at) WHERE status='ACTIVE'` into that column.
+
+| column                | type          | notes                                                                                       |
+| --------------------- | ------------- | ------------------------------------------------------------------------------------------- |
+| id                    | uuid PK       |                                                                                             |
+| business_id           | uuid FK       | -> business_profiles.id ON DELETE CASCADE                                                   |
+| package_code          | text          | CHECK in ('FEATURING_7D','FEATURING_30D')                                                   |
+| price_etb             | numeric(12,2) | CHECK >= 0. 0 for `ADMIN_COMP` rows.                                                         |
+| starts_at             | timestamptz   |                                                                                             |
+| ends_at               | timestamptz   | CHECK > starts_at                                                                            |
+| status                | text          | CHECK in ('PENDING_PAYMENT','ACTIVE','EXPIRED','CANCELLED','REFUNDED'), default 'PENDING_PAYMENT' |
+| source                | text          | CHECK in ('OWNER_PURCHASE','ADMIN_COMP'), default 'OWNER_PURCHASE'                            |
+| cancelled_at          | timestamptz   | nullable; set on transition to CANCELLED                                                    |
+| cancelled_reason      | text          | nullable; admin-supplied free-text                                                          |
+| created_by_user_id    | uuid FK       | -> users.id ON DELETE RESTRICT. The owner (for `OWNER_PURCHASE`) or the admin (for `ADMIN_COMP`). |
+| created_at            | timestamptz   |                                                                                             |
+| updated_at            | timestamptz   |                                                                                             |
+
+Indexes: partial unique `(business_id) WHERE status='ACTIVE'` (one active subscription per business); `(status, ends_at)` for the sweep Lambda; `(business_id, created_at DESC)` for owner / admin history reads. Standard `set_updated_at` trigger.
 
 ### `notification_logs`
 

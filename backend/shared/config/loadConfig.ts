@@ -192,6 +192,30 @@ export interface TelegramProviderConfig {
     readonly timeoutMs: number;
 }
 
+/**
+ * Phase 9 Track 6 — paid featuring config. Two pre-priced packages
+ * and a global enable flag. Defaults match the operator estimate
+ * documented in `docs/tasks/PHASE_9_POST_MVP.md`; the flag defaults
+ * to `false` so the rollout is opt-in per env. When `enabled =
+ * false`, every owner-facing featuring endpoint returns 503; the
+ * sweep Lambda keeps running so existing ACTIVE subscriptions
+ * still expire on schedule.
+ */
+export interface FeaturingConfig {
+    /** Server-side price for the 7-day featuring package, in ETB. */
+    readonly featuring7dPriceEtb: number;
+    /** Server-side price for the 30-day featuring package, in ETB. */
+    readonly featuring30dPriceEtb: number;
+    /**
+     * Master enable flag. `false` (the default) returns 503 from
+     * every owner-facing featuring endpoint. The sweep Lambda
+     * ignores this flag and continues to project ACTIVE rows into
+     * `business_profiles.featured_until` regardless — so flipping
+     * the flag off mid-window doesn't trap existing subscribers.
+     */
+    readonly enabled: boolean;
+}
+
 export interface AppConfig {
     readonly nodeEnv: NodeEnv;
     readonly logLevel: LogLevel;
@@ -200,6 +224,8 @@ export interface AppConfig {
     readonly cognito: CognitoConfig;
     readonly s3: S3Config;
     readonly booking: BookingConfig;
+    /** Phase 9 Track 6 — paid featuring config. */
+    readonly featuring: FeaturingConfig;
     /** SMS provider config when wired; `null` when the operator hasn't opted in. */
     readonly smsProvider: SmsProviderConfig | null;
     /** Telegram provider config when wired; `null` when the operator hasn't opted in. */
@@ -328,6 +354,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
             ),
             defaultTimezone:
                 env.DEFAULT_TIMEZONE?.trim() || 'Africa/Addis_Ababa',
+        }),
+        featuring: Object.freeze<FeaturingConfig>({
+            featuring7dPriceEtb: parseNonNegativeInteger(
+                'FEATURING_7D_PRICE_ETB',
+                env.FEATURING_7D_PRICE_ETB,
+                500,
+            ),
+            featuring30dPriceEtb: parseNonNegativeInteger(
+                'FEATURING_30D_PRICE_ETB',
+                env.FEATURING_30D_PRICE_ETB,
+                1500,
+            ),
+            enabled: parseBool('FEATURING_ENABLED', env.FEATURING_ENABLED, false),
         }),
         smsProvider: buildSmsProviderConfig(env),
         telegramProvider: buildTelegramProviderConfig(env),

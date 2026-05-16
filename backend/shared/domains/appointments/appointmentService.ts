@@ -418,6 +418,7 @@ export class AppointmentService {
         // Postponed until a real provider lands.
         const correlationId = randomUUID();
         const payment = await this.routePayment(input.paymentMethod).authorize({
+            purpose: 'APPOINTMENT',
             appointmentId: correlationId,
             amountEtb: service.priceEtb,
             idempotencyKey: correlationId,

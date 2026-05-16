@@ -22,9 +22,18 @@ import {
 } from '../../shared/adapters/payments/PaymentGateway.js';
 
 const SAMPLE_INPUT = Object.freeze({
+    purpose: 'APPOINTMENT' as const,
     appointmentId: '00000000-0000-0000-0000-000000000001',
     amountEtb: 300,
     idempotencyKey: 'idem-1',
+});
+
+const SAMPLE_FEATURING_INPUT = Object.freeze({
+    purpose: 'FEATURING' as const,
+    featuringSubscriptionId: '00000000-0000-0000-0000-000000000002',
+    businessId: '00000000-0000-0000-0000-000000000003',
+    amountEtb: 500,
+    idempotencyKey: 'idem-feat-1',
 });
 
 describe('CashGateway', () => {
@@ -79,6 +88,28 @@ describe('MockOnlineGateway', () => {
                 assert.ok(err.message.length > 0);
                 return true;
             },
+        );
+    });
+});
+
+describe('PaymentGateway — Phase 9 Track 6 featuring purpose', () => {
+    it('CashGateway accepts featuring input and returns SUCCEEDED', async () => {
+        const gw = new CashGateway();
+        const result = await gw.authorize({ ...SAMPLE_FEATURING_INPUT });
+        // Cash is the default fallback for any featuring purchase in
+        // an env where the online gateway isn't wired. Returns the
+        // same shape as the appointment path; the featuring service
+        // persists the `payment_intents` row keyed by
+        // `featuringSubscriptionId`.
+        assert.strictEqual(result.status, 'SUCCEEDED');
+        assert.strictEqual(result.provider, 'CASH');
+    });
+
+    it('MockOnlineGateway still rejects featuring purpose', async () => {
+        const gw = new MockOnlineGateway();
+        await assert.rejects(
+            () => gw.authorize({ ...SAMPLE_FEATURING_INPUT }),
+            (err: unknown) => err instanceof OnlinePaymentsUnavailableError,
         );
     });
 });
