@@ -37,9 +37,8 @@ import {
     TokenInvalidError,
 } from '../../shared/adapters/auth/AuthProvider.js';
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
-import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
-import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
 import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
+import { createPaymentGateways } from '../../shared/factories/paymentGatewayFactory.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
 import {
@@ -52,7 +51,7 @@ import {
     SlotServiceStaffMismatchError,
     SlotStaffNotFoundError,
 } from '../../shared/domains/appointments/appointmentService.js';
-import { toAppointmentView } from '../../shared/domains/appointments/appointmentView.js';
+import { toCreateAppointmentResponse } from '../../shared/domains/appointments/appointmentView.js';
 import {
     createNotificationService,
     shouldWireSmsGateway,
@@ -99,6 +98,11 @@ const notificationService = createNotificationService({
     config,
     logger: baseLogger,
 });
+// Phase 10 — central factory picks `CashGateway` + (`MockOnlineGateway`
+// when `payments_provider=mock`) / `ChapaGateway` when configured.
+// Existing dev / prod stacks default to `mock`, preserving the
+// Phase 9 behaviour where `ONLINE_PENDING` returns 400.
+const paymentGateways = createPaymentGateways(config);
 const appointmentService = new AppointmentService({
     appointmentsRepo: new PgAppointmentsRepository(pool),
     businessRepo: new PgBusinessRepository(pool),
@@ -115,8 +119,8 @@ const appointmentService = new AppointmentService({
             timezone: config.booking.defaultTimezone,
         },
     ),
-    cashGateway: new CashGateway(),
-    onlineGateway: new MockOnlineGateway(),
+    cashGateway: paymentGateways.cash,
+    onlineGateway: paymentGateways.online,
     notificationService,
     logger: baseLogger,
     options: {
@@ -176,7 +180,13 @@ export const handler = async (
                 paymentMethod: body.paymentMethod,
                 notes: body.notes,
             });
-            return ok(toAppointmentView(result.appointment));
+            // Phase 10 — surface the gateway authorization alongside
+            // the appointment. The mobile client reads
+            // `payment.redirectUrl` and opens the hosted checkout
+            // when `payment.status === 'PENDING'`.
+            return ok(
+                toCreateAppointmentResponse(result.appointment, result.payment),
+            );
         } catch (err) {
             if (err instanceof SlotStaffNotFoundError) {
                 return notFound('Staff member not found.');

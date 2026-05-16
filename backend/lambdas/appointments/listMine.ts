@@ -24,9 +24,8 @@ import {
     TokenInvalidError,
 } from '../../shared/adapters/auth/AuthProvider.js';
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
-import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
-import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGateway.js';
 import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
+import { createPaymentGateways } from '../../shared/factories/paymentGatewayFactory.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgAppointmentsRepository } from '../../shared/domains/appointments/appointmentsRepository.js';
 import { AppointmentService } from '../../shared/domains/appointments/appointmentService.js';
@@ -69,6 +68,9 @@ const notificationService = createNotificationService({
     config,
     logger: baseLogger,
 });
+// Phase 10 — factory builds CashGateway + (MockOnlineGateway by
+// default; ChapaGateway when payments_provider=chapa is wired).
+const paymentGateways = createPaymentGateways(config);
 const appointmentService = new AppointmentService({
     appointmentsRepo: new PgAppointmentsRepository(pool),
     businessRepo: new PgBusinessRepository(pool),
@@ -85,8 +87,8 @@ const appointmentService = new AppointmentService({
             timezone: config.booking.defaultTimezone,
         },
     ),
-    cashGateway: new CashGateway(),
-    onlineGateway: new MockOnlineGateway(),
+    cashGateway: paymentGateways.cash,
+    onlineGateway: paymentGateways.online,
     notificationService,
     logger: baseLogger,
     options: {

@@ -16,6 +16,12 @@
 // re-derive the wire shape.
 
 import type {
+    PaymentAuthorization,
+    PaymentAuthorizationStatus,
+    PaymentProvider,
+} from '../../adapters/payments/PaymentGateway.js';
+
+import type {
     FeaturingPackage,
 } from './featuringService.js';
 import type {
@@ -74,5 +80,61 @@ export function toFeaturingSubscriptionView(
         cancelledReason: sub.cancelledReason,
         createdAt: sub.createdAt.toISOString(),
         updatedAt: sub.updatedAt.toISOString(),
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 10 — subscribe-response wrapper
+// ---------------------------------------------------------------------------
+//
+// `POST /v1/businesses/{businessId}/featuring/subscribe` returns
+// the subscription plus an inline `payment` block. CashGateway
+// returns `SUCCEEDED` + `redirectUrl: null` synchronously; Chapa
+// returns `PENDING` + the hosted-checkout URL. The mobile client
+// reads `payment.redirectUrl` and opens it via `url_launcher`.
+//
+// `getActive` / `listHistory` continue to return the plain
+// `FeaturingSubscription` shape — payment context is only
+// meaningful at the moment of subscribe.
+
+/**
+ * Public payment-summary block. Mirrors the appointment-side
+ * `PaymentSummary` — same fields, same elisions, defined here for
+ * the featuring view layer's local consumption.
+ */
+export interface SubscribePaymentSummary {
+    readonly status: PaymentAuthorizationStatus;
+    readonly provider: PaymentProvider;
+    readonly providerRef: string | null;
+    readonly redirectUrl: string | null;
+    readonly errorCode: string | null;
+    readonly errorMessage: string | null;
+}
+
+/**
+ * Wire shape returned by the subscribe handler. The subscription
+ * sits in the `subscription` field rather than at the top level
+ * to keep the response distinguishable from the
+ * `FeaturingSubscription` shape returned by getActive / listHistory.
+ */
+export interface SubscribeFeaturingResponse {
+    readonly subscription: FeaturingSubscriptionView;
+    readonly payment: SubscribePaymentSummary;
+}
+
+export function toSubscribeFeaturingResponse(
+    sub: FeaturingSubscription,
+    payment: PaymentAuthorization,
+): SubscribeFeaturingResponse {
+    return Object.freeze<SubscribeFeaturingResponse>({
+        subscription: toFeaturingSubscriptionView(sub),
+        payment: Object.freeze<SubscribePaymentSummary>({
+            status: payment.status,
+            provider: payment.provider,
+            providerRef: payment.providerRef ?? null,
+            redirectUrl: payment.redirectUrl ?? null,
+            errorCode: payment.errorCode ?? null,
+            errorMessage: payment.errorMessage ?? null,
+        }),
     });
 }

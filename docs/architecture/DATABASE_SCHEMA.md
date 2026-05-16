@@ -221,6 +221,8 @@ Placeholder table for the future online-payment flow. Cash bookings do not write
 
 Constraint (Phase 9 Track 6): `payment_intents_target_xor` — `(appointment_id IS NULL) <> (featuring_subscription_id IS NULL)` — exactly one of the two FKs must be set per row. Indexes: `(appointment_id, created_at DESC)` (existing) for booking-side reads; `(featuring_subscription_id, created_at DESC)` (new in 0018) for featuring-side reads.
 
+Phase 10 — migration 0019 adds `payment_intents_provider_ref_uniq`, a `UNIQUE` partial index on `provider_ref WHERE provider_ref IS NOT NULL`. The Chapa webhook handler (Phase 10 commit 3) receives a callback carrying the upstream `tx_ref` and looks up the matching row via this index. The uniqueness constraint blocks `provider_ref` collisions across providers (Chapa, future Telebirr) and catches webhook-replay-against-fresh-transaction bugs at the database layer. Cash bookings never write to `payment_intents` and are unaffected; the partial scope avoids rejecting rows with NULL `provider_ref` (PENDING rows pre-upstream-call, or future provider-less rows).
+
 ### `featuring_subscriptions`
 
 **Phase 9 Track 6 (migration 0018)**. Tracks each paid or comped featuring slot for a business. The customer-side discovery surface still reads `business_profiles.featured_until` as the single derived signal; the daily sweep Lambda projects `MAX(ends_at) WHERE status='ACTIVE'` into that column.

@@ -151,7 +151,7 @@ describe('featuring.listPackages — handler-level behaviour', () => {
 describe('featuring.subscribe — handler-level behaviour', () => {
     it('happy path activates and returns the subscription view', async () => {
         const env = buildEnv();
-        const sub = await env.service.subscribe({
+        const { subscription: sub } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,
@@ -210,6 +210,13 @@ describe('featuring.subscribe — handler-level behaviour', () => {
                     errorMessage: 'Bank declined.',
                     authorizedAt: new Date().toISOString(),
                 });
+            },
+            // Phase 10 — PaymentGateway port requires verify. Not
+            // exercised in this test (the decline path never reaches
+            // a webhook); the no-op throw matches CashGateway's own
+            // implementation.
+            async verify() {
+                throw new Error('verify not used in this test');
             },
         };
         const service = new FeaturingService({
@@ -285,7 +292,7 @@ describe('featuring.getActive — handler-level behaviour', () => {
 describe('featuring.listHistory — handler-level behaviour', () => {
     it('returns rows newest-first up to limit', async () => {
         const env = buildEnv();
-        const first = await env.service.subscribe({
+        const { subscription: first } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,

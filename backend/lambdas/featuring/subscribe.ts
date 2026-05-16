@@ -25,14 +25,13 @@ import {
     TokenExpiredError,
     TokenInvalidError,
 } from '../../shared/adapters/auth/AuthProvider.js';
-import { CashGateway } from '../../shared/adapters/payments/CashGateway.js';
 import {
     OnlinePaymentsUnavailableError,
-    type PaymentGateway,
     PaymentGatewayError,
 } from '../../shared/adapters/payments/PaymentGateway.js';
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
 import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
+import { createPaymentGateways } from '../../shared/factories/paymentGatewayFactory.js';
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import { PgFeaturingRepository } from '../../shared/domains/featuring/featuringRepository.js';
@@ -43,7 +42,7 @@ import {
     PaymentFailedError,
     UnknownPackageError,
 } from '../../shared/domains/featuring/featuringService.js';
-import { toFeaturingSubscriptionView } from '../../shared/domains/featuring/featuringView.js';
+import { toSubscribeFeaturingResponse } from '../../shared/domains/featuring/featuringView.js';
 import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
 import { UserService } from '../../shared/domains/users/userService.js';
 import {
@@ -66,17 +65,23 @@ const userService = new UserService(new PgUserRepository(pool));
 const businessRepo = new PgBusinessRepository(pool);
 const featuringRepo = new PgFeaturingRepository(pool);
 
-// MVP: CashGateway is the only wired gateway for featuring. It
-// returns SUCCEEDED synchronously; the operator settles the
-// payment out-of-band. When Telebirr / Chapa lands, the
-// constructor here switches on a future
-// `config.featuring.onlineProvider` flag.
-const paymentGateway: PaymentGateway = new CashGateway();
+// Phase 10 — factory selects the online gateway based on
+// `config.paymentsProvider`. `mock` (default) keeps the previous
+// behaviour where featuring uses `CashGateway` directly; `chapa`
+// switches in `ChapaGateway` so subscribe initiates a real hosted
+// checkout and returns PENDING + redirectUrl. The featuring path
+// uses the ONLINE slot — featuring purchases are never cash-on-
+// arrival; the operator settles out-of-band only under the mock
+// path until Chapa flips on.
+const paymentGateways = createPaymentGateways(config);
 
 const featuringService = new FeaturingService({
     featuringRepo,
     businessRepo,
-    paymentGateway,
+    paymentGateway:
+        config.paymentsProvider === 'chapa'
+            ? paymentGateways.online
+            : paymentGateways.cash,
     config: config.featuring,
 });
 
@@ -116,12 +121,17 @@ export const handler = async (
         if (!authz.ok) return authz.response;
 
         try {
-            const sub = await featuringService.subscribe({
-                businessId,
-                packageCode,
-                callerUserId: authz.user.id,
-            });
-            return ok(toFeaturingSubscriptionView(sub));
+            const { subscription, authorization } =
+                await featuringService.subscribe({
+                    businessId,
+                    packageCode,
+                    callerUserId: authz.user.id,
+                });
+            // Phase 10 — surface payment.redirectUrl when the gateway
+            // returns PENDING (Chapa). Mobile reads this and opens
+            // the hosted checkout; SUCCEEDED outcomes (Cash / Chapa
+            // post-webhook) ship `redirectUrl: null`.
+            return ok(toSubscribeFeaturingResponse(subscription, authorization));
         } catch (err) {
             if (err instanceof FeaturingDisabledError) {
                 return errorResponse(503, 'FEATURING_DISABLED', err.message);

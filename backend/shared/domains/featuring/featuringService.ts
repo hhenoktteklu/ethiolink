@@ -89,6 +89,24 @@ export interface ExpireSweepResult {
     readonly recomputedBusinessIds: readonly string[];
 }
 
+/**
+ * Phase 10 — result returned from `subscribe`. The handler returns
+ * `subscription` as the canonical view row and surfaces
+ * `authorization.redirectUrl` to the mobile client when the gateway
+ * went `PENDING` (Chapa hosted checkout). For `SUCCEEDED` outcomes
+ * the row is already `ACTIVE` and `authorization.redirectUrl` is
+ * `null`. The handler does not need to switch on the status; it
+ * reads `authorization.redirectUrl` (nullable) verbatim.
+ *
+ * The earlier shape returned `FeaturingSubscription` directly; this
+ * widening is additive and does not affect the wire shape — only
+ * the in-process service surface.
+ */
+export interface SubscribeResult {
+    readonly subscription: FeaturingSubscription;
+    readonly authorization: PaymentAuthorization;
+}
+
 // ---------------------------------------------------------------------------
 // Errors — each maps to a single HTTP status in the handler layer
 // ---------------------------------------------------------------------------
@@ -176,7 +194,7 @@ export class FeaturingService {
         return packagesFromConfig(this.config);
     }
 
-    async subscribe(input: SubscribeInput): Promise<FeaturingSubscription> {
+    async subscribe(input: SubscribeInput): Promise<SubscribeResult> {
         if (!this.config.enabled) {
             throw new FeaturingDisabledError();
         }
@@ -236,14 +254,27 @@ export class FeaturingService {
         //     declined transaction; the row stays PENDING_PAYMENT
         //     for the sweep to GC. SUCCEEDED transitions to ACTIVE
         //     and projects the featured_until column.
+        //
+        //     Phase 10: the handler needs `authorization.redirectUrl`
+        //     when PENDING (Chapa hosted checkout), so the service
+        //     returns both the row + the authorization. SUCCEEDED
+        //     paths return `redirectUrl: null` from the gateway,
+        //     which the wire view encodes as a JSON `null`.
         if (authorization.status === 'PENDING') {
-            return pending;
+            return Object.freeze<SubscribeResult>({
+                subscription: pending,
+                authorization,
+            });
         }
         if (authorization.status === 'FAILED') {
             throw new PaymentFailedError(authorization);
         }
 
-        return this.activate(pending.id, input.businessId);
+        const activated = await this.activate(pending.id, input.businessId);
+        return Object.freeze<SubscribeResult>({
+            subscription: activated,
+            authorization,
+        });
     }
 
     async comp(input: CompInput): Promise<FeaturingSubscription> {

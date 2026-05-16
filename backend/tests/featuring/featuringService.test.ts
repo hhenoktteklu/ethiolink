@@ -128,6 +128,22 @@ class FakeGateway implements PaymentGateway {
             authorizedAt: new Date().toISOString(),
         });
     }
+
+    // Phase 10 — webhook verify path. Not exercised in the
+    // service-level suite (the webhook handler ships in a later
+    // commit); the implementation echoes the last input's behavior
+    // so a future test can assert against it without ceremony.
+    async verify(providerRef: string): Promise<PaymentAuthorization> {
+        return Object.freeze<PaymentAuthorization>({
+            status: 'SUCCEEDED',
+            provider: 'TELEBIRR',
+            providerRef,
+            rawResponse: null,
+            errorCode: null,
+            errorMessage: null,
+            authorizedAt: new Date().toISOString(),
+        });
+    }
 }
 
 interface TestEnv {
@@ -189,7 +205,7 @@ describe('FeaturingService.subscribe — happy path', () => {
         const now = new Date('2026-06-01T00:00:00.000Z');
         const env = buildEnv({ now });
 
-        const sub = await env.service.subscribe({
+        const { subscription: sub } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,
@@ -223,7 +239,7 @@ describe('FeaturingService.subscribe — happy path', () => {
 
     it('resolves price + duration from package code (30d)', async () => {
         const env = buildEnv();
-        const sub = await env.service.subscribe({
+        const { subscription: sub } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_30D',
             callerUserId: OWNER_ID,
@@ -333,7 +349,7 @@ describe('FeaturingService.subscribe — rejection paths', () => {
         const env = buildEnv({
             gateway: new FakeGateway({ kind: 'pending' }),
         });
-        const sub = await env.service.subscribe({
+        const { subscription: sub } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,
@@ -344,6 +360,38 @@ describe('FeaturingService.subscribe — rejection paths', () => {
         const business = await env.businessRepo.findById(BUSINESS_ID);
         assert.strictEqual(business?.featuredUntil, null);
     });
+
+    it('Phase 10 — PENDING result carries the authorization for the handler', async () => {
+        // The handler needs `authorization.redirectUrl` to surface
+        // the Chapa hosted checkout to the mobile client. The
+        // service returns both the subscription AND the gateway
+        // authorization; this test pins the SubscribeResult shape.
+        const env = buildEnv({
+            gateway: new FakeGateway({ kind: 'pending' }),
+        });
+        const result = await env.service.subscribe({
+            businessId: BUSINESS_ID,
+            packageCode: 'FEATURING_7D',
+            callerUserId: OWNER_ID,
+        });
+        assert.strictEqual(result.authorization.status, 'PENDING');
+        assert.strictEqual(result.authorization.providerRef, 'pending-ref-1');
+        assert.strictEqual(result.subscription.status, 'PENDING_PAYMENT');
+    });
+
+    it('Phase 10 — SUCCEEDED result also carries the authorization', async () => {
+        // Even the synchronous SUCCEEDED path returns the
+        // authorization so the handler's wire-shape contract is
+        // uniform across both branches.
+        const env = buildEnv();
+        const result = await env.service.subscribe({
+            businessId: BUSINESS_ID,
+            packageCode: 'FEATURING_7D',
+            callerUserId: OWNER_ID,
+        });
+        assert.strictEqual(result.authorization.status, 'SUCCEEDED');
+        assert.strictEqual(result.subscription.status, 'ACTIVE');
+    });
 });
 
 describe('FeaturingService.subscribe with CashGateway', () => {
@@ -351,7 +399,7 @@ describe('FeaturingService.subscribe with CashGateway', () => {
         const env = buildEnv({
             gateway: new CashGateway() as unknown as FakeGateway,
         });
-        const sub = await env.service.subscribe({
+        const { subscription: sub } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,
@@ -549,7 +597,7 @@ describe('FeaturingService.expireSweep', () => {
 describe('FeaturingService.listHistoryForBusiness', () => {
     it('returns rows in created_at DESC order', async () => {
         const env = buildEnv();
-        const first = await env.service.subscribe({
+        const { subscription: first } = await env.service.subscribe({
             businessId: BUSINESS_ID,
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,

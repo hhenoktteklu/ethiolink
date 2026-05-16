@@ -852,11 +852,23 @@ paths:
               $ref: '#/components/schemas/SubscribeFeaturingRequest'
       responses:
         '200':
-          description: The created (and potentially-activated) subscription.
+          description: |
+            The created subscription plus the payment-gateway
+            authorization. Phase 10 widened this from the bare
+            `FeaturingSubscription` to `SubscribeFeaturingResponse`,
+            which wraps the subscription with a `payment` block
+            carrying `status` / `provider` / `providerRef` /
+            `redirectUrl` / `errorCode` / `errorMessage`. Under
+            `payments_provider = mock` (the default) cash settlement
+            returns `payment.status = SUCCEEDED` and
+            `payment.redirectUrl = null`. Under `payments_provider
+            = chapa` the gateway returns `payment.status = PENDING`
+            and a hosted-checkout URL; the subscription stays
+            `PENDING_PAYMENT` until the webhook flips it.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/FeaturingSubscription'
+                $ref: '#/components/schemas/SubscribeFeaturingResponse'
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -1035,11 +1047,21 @@ paths:
               $ref: '#/components/schemas/CreateAppointmentRequest'
       responses:
         '200':
-          description: The created appointment.
+          description: |
+            The created appointment plus the payment-gateway
+            authorization. Phase 10 widened this from the bare
+            `AppointmentView` to `CreateAppointmentResponse`, which
+            wraps the appointment with a `payment` block carrying
+            `status` / `provider` / `providerRef` / `redirectUrl`
+            / `errorCode` / `errorMessage`. Cash bookings always
+            return `payment.status = SUCCEEDED` and
+            `payment.redirectUrl = null`. Online bookings against
+            Chapa return `payment.status = PENDING` and a hosted-
+            checkout URL the mobile client should open.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AppointmentView'
+                $ref: '#/components/schemas/CreateAppointmentResponse'
         '400':
           $ref: '#/components/responses/ValidationError'
         '401':
@@ -2908,6 +2930,95 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FeaturingSubscription'
+    PaymentSummary:
+      type: object
+      description: |
+        Phase 10 — public payment-gateway authorization summary
+        returned on the appointment-create and featuring-subscribe
+        responses. Mirrors the consumable subset of the internal
+        `PaymentAuthorization` shape; internal fields like
+        `rawResponse` and `authorizedAt` are deliberately elided so
+        no provider-specific debug data leaks on the wire.
+      required:
+        - status
+        - provider
+        - providerRef
+        - redirectUrl
+        - errorCode
+        - errorMessage
+      properties:
+        status:
+          type: string
+          enum: [SUCCEEDED, PENDING, FAILED]
+          description: |
+            Gateway-reported authorization outcome. `PENDING` is
+            normal for redirect-then-confirm providers (Chapa,
+            future Telebirr); the webhook handler flips the row
+            to `SUCCEEDED` once the customer completes payment.
+        provider:
+          type: string
+          enum: [CASH, MOCK, TELEBIRR, CHAPA, CBE_BIRR]
+          description: |
+            Identifies which gateway issued this authorization.
+            Matches the `payment_intents.provider` CHECK list.
+        providerRef:
+          type: [string, 'null']
+          description: |
+            Upstream-issued transaction reference (Chapa `tx_ref`,
+            future Telebirr transaction id). `null` for `CASH`
+            (no upstream) and may be `null` for `FAILED` when the
+            gateway failed before issuing one.
+        redirectUrl:
+          type: [string, 'null']
+          format: uri
+          description: |
+            Provider-hosted checkout URL the customer should be
+            sent to. Populated only when `status === PENDING` and
+            the gateway uses a redirect-then-confirm model (Chapa,
+            future Telebirr). `null` for synchronous gateways
+            (`CASH`) and for terminal outcomes returned on the
+            initial call.
+        errorCode:
+          type: [string, 'null']
+          description: Short stable code for `FAILED` outcomes; `null` otherwise.
+        errorMessage:
+          type: [string, 'null']
+          description: Human-readable failure reason; `null` otherwise.
+    CreateAppointmentResponse:
+      type: object
+      description: |
+        Phase 10 — wire shape returned by `POST /v1/appointments`.
+        Pairs the freshly-inserted appointment with the gateway-
+        issued payment authorization. The appointment sits in the
+        `appointment` field rather than at the top level so the
+        response is unambiguously distinguishable from the
+        `AppointmentView` shape returned by list endpoints. Clients
+        that only consume the appointment can ignore the
+        `payment` block.
+      required: [appointment, payment]
+      properties:
+        appointment:
+          $ref: '#/components/schemas/AppointmentView'
+        payment:
+          $ref: '#/components/schemas/PaymentSummary'
+    SubscribeFeaturingResponse:
+      type: object
+      description: |
+        Phase 10 — wire shape returned by
+        `POST /v1/businesses/{businessId}/featuring/subscribe`.
+        Pairs the (potentially-activated) subscription with the
+        gateway-issued payment authorization. The subscription
+        sits in the `subscription` field rather than at the top
+        level to keep this response distinguishable from the
+        bare `FeaturingSubscription` shape returned by
+        `getActive` / `listHistory`. Clients that only consume
+        the subscription can ignore the `payment` block.
+      required: [subscription, payment]
+      properties:
+        subscription:
+          $ref: '#/components/schemas/FeaturingSubscription'
+        payment:
+          $ref: '#/components/schemas/PaymentSummary'
     SubscribeFeaturingRequest:
       type: object
       description: |

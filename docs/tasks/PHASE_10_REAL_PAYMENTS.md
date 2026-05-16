@@ -1,0 +1,78 @@
+# Phase 10 — Real Payments Roadmap
+
+> Phase 9 closed the platform's engineering surface (see [`PHASE_9_COMPLETION_SUMMARY.md`](./PHASE_9_COMPLETION_SUMMARY.md)). Phase 10 turns "the platform is live" into "the platform captures revenue end-to-end" by retiring the `MockOnlineGateway` placeholder with a real Ethiopian payments provider (Chapa) and threading the redirect-then-confirm flow through every consumer.
+
+The scoping deliverable lived in chat; this doc is the executable checklist + commit ledger.
+
+## Goal
+
+Replace `MockOnlineGateway` with a real Ethiopian mobile-money provider so the `ONLINE_PENDING` booking path and paid featuring can complete actual transactions. The `PaymentGateway` port and the discriminated `purpose: 'APPOINTMENT' | 'FEATURING'` input are already in place from Phase 9 — what's missing is one concrete provider implementation plus the webhook half, the secret + IAM plumbing, the mobile checkout surface, and the operator playbook.
+
+## Provider choice — Chapa first
+
+Recommended first provider: **Chapa** (https://chapa.co). Aggregator: under one Chapa account a merchant accepts Telebirr, CBE Birr, Amole, M-Pesa Ethiopia, Visa, and Mastercard. Sandbox is self-serve so the dev → integration → smoke loop closes inside one sprint. The wire shape (initialize → redirect → webhook → verify) matches the redirect-then-confirm flow the `PaymentGateway` port already expects. A direct first-party Telebirr integration becomes the natural Phase 10.5 follow-up if Chapa's aggregator fees ever justify dual-rail.
+
+## Checklist
+
+### Commit 1 — adapter (landed: `eed6885`)
+
+- [x] `backend/shared/adapters/payments/ChapaGateway.ts` — `authorize` + `verify`, injectable transport, AbortController timeout, typed `ChapaInvalidRequestError` / `ChapaUnavailableError` / `ChapaDeclinedError`.
+- [x] Widened `PaymentGateway` port with `verify(providerRef)` + `PaymentVerificationUnsupportedError`. `CashGateway` + `MockOnlineGateway` implement `verify` as a typed throw.
+- [x] `PaymentAuthorization` gains optional `redirectUrl: string | null`.
+- [x] `loadConfig` resolves `PAYMENTS_PROVIDER` + `CHAPA_*` env vars into `AppConfig.chapaProvider` + `AppConfig.paymentsProvider`.
+- [x] `loadSecretsThenConfig` resolves `CHAPA_SECRET_KEY_SECRET_ARN` + `CHAPA_WEBHOOK_SECRET_SECRET_ARN` (plain + JSON shapes; bundled-resource shape via the same parser).
+- [x] `paymentGatewayFactory` builds `(cash, online)` pair; routes online to `ChapaGateway` when `payments_provider = chapa`, throws `CHAPA_NOT_CONFIGURED` when chapa is selected but credentials are missing.
+- [x] Terraform `lambda` module variables + env-block entries + IAM grants on `appointments` / `featuring` / `integrations` roles (gated on the ARN being non-empty).
+- [x] `AWS_DEPLOYMENT.md` § "Payments posture" + `SECURITY_REVIEW.md` PCI scope note.
+- [x] Tests: adapter happy path (authorize + verify), failure modes (4xx / 5xx / network / declined / missing config), helper coverage (synthesizeTxRef, formatAmountEtb).
+
+**Behaviour at end of commit 1:** Production unchanged. Default `payments_provider = "mock"` keeps the historical Phase 9 behaviour where `ONLINE_PENDING` returns 400.
+
+### Commit 2 — route online appointments + featuring through factory (landed: this commit)
+
+- [x] Migration `0019_payment_intents_provider_ref_idx.sql` — `UNIQUE` partial index on `payment_intents(provider_ref) WHERE provider_ref IS NOT NULL`.
+- [x] Appointment Lambdas (8 — `create`, `accept`, `reject`, `cancel`, `complete`, `reschedule`, `listMine`, `listForBusiness`) switch from `new CashGateway()` + `new MockOnlineGateway()` to `createPaymentGateways(config)`.
+- [x] Featuring `subscribe` Lambda switches from a hand-built `CashGateway` to `paymentGatewayFactory.online` (or `cash` when `payments_provider = mock`).
+- [x] `AppointmentService.create` already returned `{ appointment, payment }`; the `create` handler now surfaces the payment via the new `CreateAppointmentResponse` wire shape (wraps `AppointmentView` with a `payment: PaymentSummary` block).
+- [x] `FeaturingService.subscribe` widened to return `{ subscription, authorization }`; the `subscribe` handler returns the new `SubscribeFeaturingResponse` wire shape.
+- [x] OpenAPI `POST /v1/appointments` response → `CreateAppointmentResponse`. OpenAPI `POST /v1/businesses/{id}/featuring/subscribe` response → `SubscribeFeaturingResponse`. Both reference a new shared `PaymentSummary` schema.
+- [x] `DATABASE_SCHEMA.md` updated with the new index.
+- [x] Tests: view-layer coverage for cash + Chapa-PENDING + Chapa-FAILED branches on both wrappers; service-level `SubscribeResult` shape assertions.
+
+**Behaviour at end of commit 2:** Production unchanged. The wire shape is widened additively — clients ignoring the new `payment` block still see the appointment / subscription. Mobile clients are not updated; they continue to call `POST /v1/appointments` with `paymentMethod = CASH` only. Once `payments_provider = chapa` is flipped in an env, online bookings will return `payment.redirectUrl` but the mobile UI doesn't open it yet — that's commit 4.
+
+### Commit 3 — Chapa webhook handler (next)
+
+- [ ] `backend/lambdas/integrations/chapaWebhook.ts` — `POST /v1/integrations/chapa/webhook`. Validates HMAC signature against the webhook secret with constant-time compare. Looks up `payment_intents` by `provider_ref`, re-fetches canonical status via `paymentGateway.verify(tx_ref)`, branches on SUCCEEDED / FAILED / PENDING.
+- [ ] On SUCCEEDED + APPOINTMENT path → `appointmentService.markPaymentSucceeded(appointmentId, paymentIntentId)`. On SUCCEEDED + FEATURING path → expose `featuringService.activate(subscriptionId)` publicly and call it.
+- [ ] On FAILED path → update `payment_intents.status = 'FAILED'`; leave the appointment / subscription PENDING for the sweep to GC.
+- [ ] Idempotency: replayed webhook against an already-SUCCEEDED row is a no-op.
+- [ ] OpenAPI route, Terraform Lambda + API GW route (public, WAF-fronted, no Cognito authorizer — secret-header is the auth).
+- [ ] Tests: signature mismatch / unknown tx_ref / SUCCEEDED-appointment / SUCCEEDED-featuring / FAILED / replayed-success branches.
+
+### Commit 4 — mobile online checkout
+
+- [ ] Booking flow on the Flutter customer app — toggle `paymentMethod` between cash / online; on online confirm, open `data.payment.redirectUrl` via `url_launcher`; transition to `PaymentWaitingScreen` polling `GET /v1/me/appointments/{id}` every 3s up to 90s.
+- [ ] Owner featuring screen — same dance on the Promote screen. After return, poll `GET /v1/businesses/{id}/featuring/active`.
+- [ ] Deep-link handling for `ethiolink://payments/return` (Android intent filter + iOS `CFBundleURLSchemes`).
+- [ ] Mobile tests for the online + waiting screens (loading / success / failure / timeout branches).
+
+### Commit 5 — admin reconciliation surface
+
+- [ ] Admin SPA: per-business `payment_intents` listing under `BusinessDetailPage`.
+- [ ] Admin endpoint `GET /v1/admin/payment-intents?from=&to=` for reconciliation export (CSV-shaped JSON).
+- [ ] CloudWatch dashboard extension: pending count, success rate per provider, mean authorize→succeed latency.
+
+### Commit 6 — operator runbook
+
+- [ ] `docs/operations/runbooks/payments-provider.md` — provider onboarding, Secrets Manager shapes, Terraform apply, sandbox → live key swap, mobile QA, webhook QA (manual invoke with sample signed payload + curl test), rollback (flip `payments_provider = mock`).
+
+## Open product decisions tracked in scoping
+
+- **Owner notifications on PENDING online bookings.** Decision: gate booking-requested notifications on `payment.status = SUCCEEDED` for online bookings. Cash bookings keep the existing immediate-notification path.
+- **Auto-cancel TTL for PENDING online appointments.** Decision: 15-minute TTL via an extension to the existing scheduled sweep. Slot reopens for other customers.
+- **Refund policy.** Decision: no automated refunds in Phase 10. The admin SPA's existing manual cancel flow stays the operator escape hatch; refund automation is a Phase 10.5 follow-up paired with a written refund policy.
+
+## Rollout / rollback
+
+Operator-led, opt-in per env. Flip `payments_provider = "chapa"` and supply the two Secrets Manager ARNs to activate; revert to `payments_provider = "mock"` to deactivate. Existing data is intact through either flip — the gateway pair is reconstructed at Lambda cold start.
