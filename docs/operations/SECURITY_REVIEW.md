@@ -177,14 +177,24 @@ Bot Control was reviewed and deliberately deferred. The Phase 7 baseline rules a
 | 4 | Low      | Single shared Lambda execution role                                | **Fixed** — Phase 8 commit "split Lambda IAM roles by domain" (11 per-domain roles). |
 | 5 | Low      | No HSTS preload-list submission                                    | **Deferred** — preload-eligible header shipped; submission scheduled after prod custom-domain bring-up. |
 | 6 | Low      | Bot Control rule group not enabled                                 | **Deferred** — cost/benefit gated on real traffic numbers. |
-| 7 | Low      | No customer-managed KMS keys (CMKs)                                | **Deferred** — see "Deferred — KMS" below. |
+| 7 | Low      | No customer-managed KMS keys (CMKs)                                | **Fixed (infra + docs); operator data-move pending** — Phase 9 Track 4. CMK module, consumer wiring, and the migration runbook all shipped; the maintenance-window data move is documented at [`docs/operations/runbooks/kms-migration.md`](runbooks/kms-migration.md). See "KMS — landed in Phase 9 Track 4" below. |
 | 8 | Info     | OPTIONS preflights are open                                        | **Accepted** — CORS is not an auth mechanism; per-resource origin allow-list is the binding control. |
 
 No criticals. The four "Fixed" items are landing in Phase 8 commits (this commit + the IAM-split commit). The four deferred items each have a recorded mitigation or follow-up.
 
-## Deferred — KMS
+## KMS — landed in Phase 9 Track 4
 
-Customer-managed KMS keys (CMKs) are deferred from Phase 8. The current encryption posture:
+Customer-managed KMS keys (CMKs) were deferred from Phase 8 and landed across three Phase 9 commits:
+
+- **`Phase 9: add KMS module` (`89e9576`)** — new `infra/terraform/modules/kms/` provisions six per-service CMKs (`rds`, `s3_media`, `s3_logs`, `s3_admin_frontend`, `secrets`, `lambda_env`) with annual rotation, service-principal use grants fenced by `kms:ViaService`, and `prevent_destroy = true` lifecycle. Aliases follow `alias/ethiolink-${env}-<service>`.
+- **`Phase 9: wire CMKs through consumers` (`10eca4c`)** — nullable `kms_key_*` inputs added to RDS / S3 / admin-frontend / secrets / Lambda modules; env stacks pipe `module.kms.<service>_key_arn` through. Per-domain Lambda roles gain scoped `kms:Decrypt` (and `kms:GenerateDataKey*` for the media role) under the same `kms:ViaService` fence; the SAR rotation Lambda gains `kms:Decrypt` on the secrets CMK.
+- **`Phase 9: add KMS migration runbook` (this commit)** — `docs/operations/runbooks/kms-migration.md` documents the maintenance-window data move (RDS snapshot copy + restore + cutover, per-bucket S3 `aws s3 cp` re-encryption, Secrets Manager forced rotation, Lambda env-var verification) plus rollback per resource and the six known risks.
+
+**Remaining operator step:** execute the runbook in dev, then prod. Until the dev pass completes, existing at-rest data continues encrypting under the AWS-managed keys; new writes after the wiring commit encrypt under the CMK. Once the dev pass completes, this finding moves from "Fixed (infra + docs); operator data-move pending" to "Fully fixed". The historical encryption posture below remains accurate for any environment that has not yet run the runbook.
+
+## Historical encryption posture (pre-migration)
+
+The encryption posture **before** the Phase 9 Track 4 migration runbook executes:
 
 - **RDS at rest.** `storage_encrypted = true` using the default AWS-managed `aws/rds` KMS key. Operator cannot rotate the key independently; AWS rotates it on AWS's schedule.
 - **S3 buckets at rest.** `aws_s3_bucket_server_side_encryption_configuration` with `sse_algorithm = "AES256"` — SSE-S3, not SSE-KMS. AWS manages the per-object keys.
@@ -202,15 +212,7 @@ Customer-managed KMS keys (CMKs) are deferred from Phase 8. The current encrypti
 
 The marginal security benefit at MVP scale is small — the threat model where a CMK helps (AWS itself behaving maliciously toward an EthioLink admin) is not in scope for the MVP. The default AWS-managed keys are encrypted with the same underlying HSMs and rotate on AWS's schedule.
 
-**Migration path** when CMK posture becomes appropriate (likely post-MVP, post-SOC-2-prep):
-
-1. Provision one CMK per service in `infra/terraform/modules/kms/` (new module).
-2. Update each consumer module to accept a `kms_key_id` input, defaulting to the AWS-managed key.
-3. Set the env-stack inputs to the new CMK ARNs.
-4. Re-encrypt at rest in a maintenance window: RDS snapshot+restore, S3 `aws s3 cp s3://bucket s3://bucket --recursive --metadata-directive REPLACE --sse aws:kms --sse-kms-key-id <arn>`.
-5. Audit IAM scopes — every Lambda role consuming a CMK-encrypted resource needs `kms:Decrypt` (and `kms:GenerateDataKey` for write paths) scoped to that key ARN.
-
-Tracked as `Phase 9 — KMS migration` in the post-MVP backlog.
+**Migration path** — superseded by Phase 9 Track 4. See [`docs/operations/runbooks/kms-migration.md`](runbooks/kms-migration.md) for the executable runbook covering all five legacy bullet points (CMK provisioning, consumer wiring, env-stack pipe-through, maintenance-window data move, IAM scope audit). The remaining work is operator execution — the engineering side of the migration has shipped.
 
 ## Sign-off
 

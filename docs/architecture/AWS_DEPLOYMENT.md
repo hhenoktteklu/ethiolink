@@ -550,7 +550,19 @@ The new IAM policies all use a `kms:ViaService` condition (`secretsmanager.${reg
 ### What the wiring commit does NOT do
 
 - Does not move any existing data at rest from the AWS-managed key to a CMK. The RDS instance flags drift but does not in-place re-encrypt; S3 objects already in the buckets keep their previous encryption; the existing version of each Secrets Manager secret remains under the old key until the next rotation.
-- Does not document or perform the maintenance-window data move — that lands in the next commit (`Phase 9: add KMS migration runbook`) alongside `docs/operations/runbooks/kms-migration.md`.
+
+### Data move — KMS migration runbook
+
+The maintenance-window data move is documented at [`docs/operations/runbooks/kms-migration.md`](../operations/runbooks/kms-migration.md). The runbook covers:
+
+- Pre-flight checklist (Terraform plan review, RDS pre-snapshot, S3 object-count baselines, Secrets Manager version capture, Lambda smoke baseline, alarm + window confirmation).
+- RDS re-encryption via snapshot copy under the new CMK, restore from copy, cutover (Option A: `terraform import`; Option B: rename) with a 10–20 minute read-only window.
+- S3 re-encryption via `aws s3 cp s3://bucket/ s3://bucket/ --recursive --metadata-directive REPLACE --sse aws:kms --sse-kms-key-id <arn>` per bucket, including the `media-public` / `media-private` / `logs` (with the today-prefix exclude trick) / `admin-frontend` (with a CloudFront invalidation chaser) flavors.
+- Secrets Manager re-encryption via forced rotation (RDS master) or no-op `put-secret-value` (non-rotating secrets).
+- Lambda env-var verification — the wiring commit already re-encrypted at rest; the runbook documents the spot-check.
+- End-to-end verification (resource-level + smoke + manual booking happy path) + per-resource rollback.
+- Dev-first execution + prod maintenance-window pattern (two operators on the bridge, Saturday 06:00–09:00 EAT, 72-hour pre-snapshot retention).
+- Known risks: RDS endpoint change vs. cached Lambda env (R1), SSE-KMS cost (R2), IAM `AccessDenied` (R3), SAR rotation Lambda perms (R4), pre-snapshot deletion timing (R5), `aws s3 cp` mid-flight on the logs bucket (R6).
 
 ## Disaster recovery
 
