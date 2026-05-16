@@ -48,6 +48,14 @@ dependencies:
   # in a future commit; the pubspec dependency is the same.
   dio: ^5.4.0
 
+  # Phase 9 Track 2 — open Telegram deep links from the Profile-tab
+  # link-Telegram screen. The package's `launchUrl` resolves a
+  # `t.me://` (Android) / `https://t.me/<bot>?start=<code>`
+  # universal-link (iOS) to the installed Telegram client. The
+  # `LinkTelegramScreen` accepts a `LinkLauncher` override so widget
+  # tests stay platform-channel-free.
+  url_launcher: ^6.2.5
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

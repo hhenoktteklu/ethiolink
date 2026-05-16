@@ -12,11 +12,14 @@ import '../../core/auth/auth_service.dart';
 import '../../core/auth/cognito_auth_service.dart';
 import '../../core/config/app_config_scope.dart';
 import '../auth/login_screen.dart';
+import 'data/telegram_link_repository.dart';
+import 'link_telegram_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({
     required this.session,
     this.authServiceOverride,
+    this.telegramLinkRepositoryOverride,
     super.key,
   });
 
@@ -26,6 +29,12 @@ class ProfileScreen extends StatelessWidget {
   /// down so tests can short-circuit the real Cognito service. The
   /// sign-out button below uses this when present.
   final AuthService? authServiceOverride;
+
+  /// Phase 9 Track 2 — test seam forwarded to `LinkTelegramScreen`
+  /// when the user taps the Notifications row. Production leaves
+  /// this `null` and the screen constructs its own
+  /// `HttpTelegramLinkRepository` over the `AppConfigScope`.
+  final TelegramLinkRepository? telegramLinkRepositoryOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +79,27 @@ class ProfileScreen extends StatelessWidget {
             _ConfigRow(label: 'Environment', value: config.environmentName),
             _ConfigRow(label: 'API base', value: config.apiBaseUrl),
             _ConfigRow(label: 'Cognito domain', value: config.cognitoDomain),
+            const SizedBox(height: 24),
+            _SectionHeader(text: 'Notifications'),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.telegram, color: colors.primary),
+              title: const Text('Telegram'),
+              subtitle: const Text(
+                'Link your Telegram account for real-time booking '
+                'notifications.',
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => LinkTelegramScreen(
+                      repositoryOverride: telegramLinkRepositoryOverride,
+                    ),
+                  ),
+                );
+              },
+            ),
             const Spacer(),
             OutlinedButton.icon(
               onPressed: () async {
@@ -97,6 +127,24 @@ class ProfileScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
       ),
     );
   }
