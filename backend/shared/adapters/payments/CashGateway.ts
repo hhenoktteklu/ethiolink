@@ -27,6 +27,7 @@ import type {
     PaymentAuthorizationInput,
     PaymentGateway,
 } from './PaymentGateway.js';
+import { PaymentVerificationUnsupportedError } from './PaymentGateway.js';
 
 export class CashGateway implements PaymentGateway {
     public readonly provider = 'CASH' as const;
@@ -41,6 +42,16 @@ export class CashGateway implements PaymentGateway {
             errorCode: null,
             errorMessage: null,
             authorizedAt: new Date().toISOString(),
+            redirectUrl: null,
         });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- params required by interface.
+    async verify(_providerRef: string): Promise<PaymentAuthorization> {
+        // Phase 10 first commit. Cash never goes PENDING — there is no
+        // upstream to verify against. A `verify` call on the cash
+        // gateway is a routing bug; throw the typed error so the
+        // webhook handler surfaces it.
+        throw new PaymentVerificationUnsupportedError('CASH');
     }
 }

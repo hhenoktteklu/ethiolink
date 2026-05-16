@@ -230,3 +230,78 @@ describe('loadConfig — telegramProvider', () => {
         });
     });
 });
+
+describe('loadConfig — paymentsProvider / chapaProvider (Phase 10)', () => {
+    it('defaults paymentsProvider to mock when unset', () => {
+        const config = loadConfig({ ...VALID_ENV });
+        assert.strictEqual(config.paymentsProvider, 'mock');
+    });
+
+    it('accepts paymentsProvider = chapa', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            PAYMENTS_PROVIDER: 'chapa',
+        });
+        assert.strictEqual(config.paymentsProvider, 'chapa');
+    });
+
+    it('rejects unknown paymentsProvider values', () => {
+        assert.throws(
+            () =>
+                loadConfig({ ...VALID_ENV, PAYMENTS_PROVIDER: 'telebirr' }),
+            InvalidConfigError,
+        );
+    });
+
+    it('returns chapaProvider = null when no Chapa env vars are set', () => {
+        const config = loadConfig({ ...VALID_ENV });
+        assert.strictEqual(config.chapaProvider, null);
+    });
+
+    it('returns chapaProvider = null when CHAPA_RETURN_URL is missing', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            CHAPA_SECRET_KEY: 'CHASECK_TEST-x',
+            CHAPA_WEBHOOK_SECRET: 'whsec',
+            // No CHAPA_RETURN_URL
+        });
+        assert.strictEqual(config.chapaProvider, null);
+    });
+
+    it('builds chapaProvider when all required vars are present', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            PAYMENTS_PROVIDER: 'chapa',
+            CHAPA_SECRET_KEY: 'CHASECK_TEST-x',
+            CHAPA_WEBHOOK_SECRET: 'whsec',
+            CHAPA_RETURN_URL: 'ethiolink://payments/return',
+            CHAPA_API_BASE_URL: 'https://api.chapa.test',
+            PAYMENTS_TIMEOUT_MS: '15000',
+            CHAPA_SECRET_KEY_SECRET_ARN: 'arn:sk',
+            CHAPA_WEBHOOK_SECRET_SECRET_ARN: 'arn:wh',
+        });
+        assert.deepStrictEqual(config.chapaProvider, {
+            apiBaseUrl: 'https://api.chapa.test',
+            secretKey: 'CHASECK_TEST-x',
+            secretKeySecretArn: 'arn:sk',
+            webhookSecret: 'whsec',
+            webhookSecretSecretArn: 'arn:wh',
+            returnUrl: 'ethiolink://payments/return',
+            timeoutMs: 15000,
+            providerName: 'CHAPA',
+        });
+    });
+
+    it('defaults CHAPA_API_BASE_URL to the production host', () => {
+        const config = loadConfig({
+            ...VALID_ENV,
+            CHAPA_SECRET_KEY: 'k',
+            CHAPA_WEBHOOK_SECRET: 'w',
+            CHAPA_RETURN_URL: 'ethiolink://payments/return',
+        });
+        assert.strictEqual(
+            config.chapaProvider?.apiBaseUrl,
+            'https://api.chapa.co',
+        );
+    });
+});

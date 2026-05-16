@@ -333,6 +333,60 @@ Provisioned by `infra/terraform/modules/secrets/`. The RDS master secret created
 
 **IAM scope.** The SAR template's rotation Lambda gets exactly the secret-specific permissions it needs (`secretsmanager:DescribeSecret` / `GetSecretValue` / `PutSecretValue` / `UpdateSecretVersionStage` scoped to the single secret ARN). The lone `secretsmanager:GetRandomPassword` action is on `*` because the API doesn't support resource-level scoping for that one.
 
+### Payments posture
+
+Phase 10 first commit introduces Chapa as the real online payment provider, replacing the historical `MockOnlineGateway` that refused every `ONLINE_PENDING` booking with `400 ONLINE_PAYMENTS_UNAVAILABLE`. The integration is opt-in per env and dormant by default — the existing dev / prod stacks pick up the new infrastructure with zero behaviour change until the operator flips `payments_provider = "chapa"` and supplies the two Secrets Manager ARNs.
+
+**Provider choice.** Chapa is an Ethiopian payments aggregator (https://chapa.co) that fronts Telebirr, CBE Birr, Amole, M-Pesa Ethiopia, Visa, and Mastercard from a single REST API. It's the recommended first provider because (a) sandbox access is self-serve so the dev → integration → smoke loop closes inside one sprint, (b) one Chapa integration buys the customer access to five underlying rails without a separate first-party integration for each, and (c) the wire shape (initialize → redirect → webhook → verify) matches the redirect-then-confirm flow the `PaymentGateway` port already expects. A direct first-party Telebirr integration is the natural Phase 10.5 follow-up if Chapa's aggregator fees ever justify dual-rail; the `PaymentProvider` enum already includes `TELEBIRR` and `CBE_BIRR` for that future drop-in.
+
+**Module + variables.** The `infra/terraform/modules/lambda/` module gains six new variables (defaults preserve existing behaviour):
+
+| Variable                            | Default              | Notes                                                                                                                               |
+| ----------------------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `payments_provider`                 | `"mock"`             | Routing flag. `"chapa"` opts in; `paymentGatewayFactory` then constructs `ChapaGateway` when the credentials resolve.               |
+| `chapa_api_base_url`                | `""` → `https://api.chapa.co` | Production endpoint; sandbox runs on the same host with sandbox-mode `CHASECK_TEST-…` keys, so an override is rarely needed. |
+| `chapa_return_url`                  | `""`                 | Mobile deep link Chapa redirects to after hosted-checkout completion (e.g. `ethiolink://payments/return`). Required when Chapa is wired. |
+| `chapa_secret_key_secret_arn`       | `""`                 | Secrets Manager ARN for the Chapa secret key (`CHASECK_…`). SecretString may be plain or `{ secretKey: '…' }` JSON.                  |
+| `chapa_webhook_secret_secret_arn`   | `""`                 | Secrets Manager ARN for the HMAC webhook-signing secret. Plain or `{ webhookSecret: '…' }` JSON.                                     |
+| `payments_timeout_ms`               | `12000`              | HTTP request timeout for outbound Chapa calls.                                                                                       |
+
+When ANY of the three required vars (`chapa_return_url`, `chapa_secret_key_secret_arn`, `chapa_webhook_secret_secret_arn`) is empty, `config.chapaProvider` resolves to `null` and `paymentGatewayFactory` keeps `MockOnlineGateway` in place — the historical Phase 9 behaviour. When `payments_provider = "chapa"` is set but the secrets aren't, the factory throws `CHAPA_NOT_CONFIGURED` at Lambda cold start so the misconfig surfaces loud rather than silently routing through the mock.
+
+**Secrets Manager shapes.** Both secrets accept either a plain string OR a JSON-wrapped form so an operator can bundle them in one Secrets Manager resource if preferred (point the same ARN at both env vars and let the parser pick the right field). Examples:
+
+```text
+# CHAPA_SECRET_KEY_SECRET_ARN — plain string
+CHASECK_LIVE-XXXXXXXXXXXXXXXX
+```
+
+```json
+{
+  "secretKey": "CHASECK_LIVE-XXXXXXXXXXXXXXXX",
+  "rotatedAt": "2026-05-16T00:00:00Z",
+  "rotatedBy": "henok@ethiolink.local"
+}
+```
+
+```json
+{
+  "secretKey": "CHASECK_LIVE-XXXXXXXXXXXXXXXX",
+  "webhookSecret": "whsec_LIVE-XXXXXXXXXXXXXXXX"
+}
+```
+
+The third form (bundled) lets one Secrets Manager resource serve both env vars; the resolver picks `secretKey` for `CHAPA_SECRET_KEY_SECRET_ARN` and `webhookSecret` for `CHAPA_WEBHOOK_SECRET_SECRET_ARN` even when both point at the same ARN.
+
+**IAM grants.** Both secrets are gated on the matching ARN being non-empty so dev / prod stacks that haven't wired Chapa get zero extra IAM surface. When the ARNs are set:
+
+- `chapa_secret_key_secret_arn` → `secretsmanager:GetSecretValue` + `DescribeSecret` granted to **three** Lambda area roles: `appointments` (authorize at booking time), `featuring` (authorize at subscribe time), `integrations` (verify from the webhook handler — Phase 10 commit 3).
+- `chapa_webhook_secret_secret_arn` → same actions, granted only to `integrations` (the webhook handler validates the HMAC header).
+
+The grants mirror the SMS / Telegram secret patterns — `for_each` over a per-secret area set, conditioned on the ARN being non-empty. No other Lambda area gains payments permissions.
+
+**Outputs.** `ChapaGateway.authorize` returns `{ status: 'PENDING', redirectUrl, providerRef: tx_ref, … }` — the redirect URL is the Chapa-hosted checkout page; the mobile client opens it via `url_launcher` and deep-links back via `chapa_return_url`. Cold-start config resolution via `loadSecretsThenConfig` caches both secrets at module scope so warm invocations skip the network call.
+
+**What this commit does NOT do.** Adapter-only landing. No handler / service routing changes — the appointment + featuring Lambdas still hand-construct `CashGateway` + `MockOnlineGateway` inline; the follow-up `Phase 10: route online appointments through Chapa` commit threads `paymentGatewayFactory` through. No webhook handler — that's commit 3. Production behaviour stays unchanged with the default `payments_provider = "mock"`.
+
 ### WAF
 
 Provisioned by `infra/terraform/modules/waf/`. One regional WAFv2 Web ACL per environment, associated with the API Gateway stage ARN.

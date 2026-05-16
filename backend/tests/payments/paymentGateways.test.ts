@@ -19,6 +19,7 @@ import { MockOnlineGateway } from '../../shared/adapters/payments/MockOnlineGate
 import {
     OnlinePaymentsUnavailableError,
     PaymentGatewayError,
+    PaymentVerificationUnsupportedError,
 } from '../../shared/adapters/payments/PaymentGateway.js';
 
 const SAMPLE_INPUT = Object.freeze({
@@ -56,6 +57,29 @@ describe('CashGateway', () => {
             result.authorizedAt,
             /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
         );
+        // Phase 10 — synchronous gateways set `redirectUrl: null`.
+        assert.strictEqual(result.redirectUrl ?? null, null);
+    });
+
+    it('verify() throws PaymentVerificationUnsupportedError', async () => {
+        // Phase 10 — cash never returns PENDING from authorize, so
+        // verify is unreachable; the throw makes a routing bug loud.
+        const gw = new CashGateway();
+        await assert.rejects(
+            () => gw.verify('any-ref'),
+            (err: unknown) => {
+                assert.ok(
+                    err instanceof PaymentVerificationUnsupportedError,
+                    `expected PaymentVerificationUnsupportedError, got ${err}`,
+                );
+                assert.ok(err instanceof PaymentGatewayError);
+                assert.strictEqual(
+                    err.code,
+                    'PAYMENT_VERIFICATION_UNSUPPORTED',
+                );
+                return true;
+            },
+        );
     });
 
     it('ignores the idempotency key (cash has no upstream)', async () => {
@@ -88,6 +112,18 @@ describe('MockOnlineGateway', () => {
                 assert.ok(err.message.length > 0);
                 return true;
             },
+        );
+    });
+
+    it('verify() throws PaymentVerificationUnsupportedError', async () => {
+        // Phase 10 — mock never authorizes, so no payment_intents
+        // row ever points at it; verify is unreachable.
+        const gw = new MockOnlineGateway();
+        await assert.rejects(
+            () => gw.verify('any-ref'),
+            (err: unknown) =>
+                err instanceof PaymentVerificationUnsupportedError &&
+                err.code === 'PAYMENT_VERIFICATION_UNSUPPORTED',
         );
     });
 });

@@ -15,12 +15,17 @@
 // module.
 //
 // Design notes:
-//   * **One method, `authorize`, in MVP.** Real online providers (and
-//     a future capture/refund flow) will extend this surface — likely
-//     with a `confirm(providerRef)` called from a webhook handler and
-//     a `refund(providerRef, amount)` for admin overrides. None of
-//     that is needed for cash, and modeling it now would be guesswork.
-//     The interface stays narrow until a real call site demands more.
+//   * **Two methods now — `authorize` + `verify`.** Phase 10 first
+//     commit widens the port to model the redirect-then-confirm flow
+//     real providers (Chapa, Telebirr) need. `authorize` initiates
+//     the upstream transaction (synchronous SUCCEEDED for cash;
+//     asynchronous PENDING + a `redirectUrl` for Chapa); `verify`
+//     is the read-after-write call the webhook handler issues
+//     against the upstream provider once it pings us. Cash + Mock
+//     keep `verify` as a safe no-op / unsupported branch — they
+//     never reach the PENDING state. A future `refund(providerRef,
+//     amount)` lands when the admin refund tooling does. The
+//     interface still stays as narrow as the call sites demand.
 //   * **Result vs. throw split.** A regular "the user's card was
 //     declined" outcome returns a `FAILED` result so the booking
 //     service can persist a `payment_intents` row with the failure
@@ -141,6 +146,20 @@ export interface PaymentAuthorization {
     readonly errorMessage: string | null;
     /** ISO-8601 timestamp the result was produced. */
     readonly authorizedAt: string;
+    /**
+     * Provider-hosted checkout URL the customer should be sent to.
+     * Populated only when `status === 'PENDING'` and the gateway
+     * uses a redirect-then-confirm model (Chapa, future Telebirr).
+     * `null` for synchronous gateways (`CASH`) and for terminal
+     * outcomes returned on the initial call (`SUCCEEDED` /
+     * `FAILED` without a redirect step).
+     *
+     * Phase 10 first commit. The handler layer surfaces this on
+     * the API response so the mobile client can open the hosted
+     * checkout. Existing callers that ignore the field see no
+     * behaviour change.
+     */
+    readonly redirectUrl?: string | null;
 }
 
 /**
@@ -176,6 +195,28 @@ export class OnlinePaymentsUnavailableError extends PaymentGatewayError {
 }
 
 /**
+ * Raised when {@link PaymentGateway.verify} is called on a gateway
+ * that does not support the operation — i.e. synchronous gateways
+ * (`CashGateway`) and the mock (`MockOnlineGateway`). The webhook
+ * handler should never reach a `verify` against these because
+ * neither gateway ever returns `PENDING` from `authorize`. Keeping
+ * the typed error means a future refactor that mis-routes a
+ * webhook into one of these gateways fails loudly rather than
+ * silently dropping the lookup.
+ *
+ * Phase 10 first commit.
+ */
+export class PaymentVerificationUnsupportedError extends PaymentGatewayError {
+    constructor(provider: PaymentProvider) {
+        super(
+            'PAYMENT_VERIFICATION_UNSUPPORTED',
+            `Provider ${provider} does not support verify(); webhook routing bug?`,
+        );
+        this.name = 'PaymentVerificationUnsupportedError';
+    }
+}
+
+/**
  * Provider-agnostic port. Implementations live alongside this file;
  * the booking service depends on the interface, never on a concrete
  * class.
@@ -196,4 +237,30 @@ export interface PaymentGateway {
      *   upstream unreachable, misconfigured).
      */
     authorize(input: PaymentAuthorizationInput): Promise<PaymentAuthorization>;
+
+    /**
+     * Read-after-write verification against the upstream provider.
+     * Called by the webhook handler once the provider pings us; the
+     * webhook payload is not trusted on its own — we re-fetch the
+     * canonical status from the provider before mutating any
+     * domain state.
+     *
+     * Behaviour:
+     *   * For redirect-then-confirm gateways (Chapa, future
+     *     Telebirr) — perform the upstream `verify` round-trip and
+     *     return a `PaymentAuthorization` with `SUCCEEDED` or
+     *     `FAILED` (PENDING is allowed but unusual: it means the
+     *     webhook fired before the provider's own state settled,
+     *     which we handle by no-oping the domain transition and
+     *     letting the next webhook retry land).
+     *   * For synchronous gateways (`CashGateway`,
+     *     `MockOnlineGateway`) — throw
+     *     `PaymentVerificationUnsupportedError`. Neither gateway
+     *     ever returns `PENDING` from `authorize`, so the webhook
+     *     handler should never reach this branch; the throw makes
+     *     a routing bug loud.
+     *
+     * Phase 10 first commit.
+     */
+    verify(providerRef: string): Promise<PaymentAuthorization>;
 }

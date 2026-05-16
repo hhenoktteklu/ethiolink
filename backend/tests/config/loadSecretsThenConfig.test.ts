@@ -702,3 +702,156 @@ describe('loadSecretsThenConfig — Telegram secret resolution', () => {
         );
     });
 });
+
+describe('loadSecretsThenConfig — Chapa secret resolution (Phase 10)', () => {
+    const CHAPA_SK_ARN =
+        'arn:aws:secretsmanager:eu-west-1:123:secret:ethiolink/dev/payments/chapa-secret-key';
+    const CHAPA_WH_ARN =
+        'arn:aws:secretsmanager:eu-west-1:123:secret:ethiolink/dev/payments/chapa-webhook';
+
+    const ENV_WITH_CHAPA_ARNS: NodeJS.ProcessEnv = Object.freeze({
+        NODE_ENV: 'test',
+        LOG_LEVEL: 'info',
+        APP_REGION: 'eu-west-1',
+        PG_HOST: 'localhost',
+        PG_DATABASE: 'ethiolink',
+        PG_USER: 'ethiolink',
+        PG_PASSWORD: 'local-pw',
+        COGNITO_USER_POOL_ID: 'pool',
+        COGNITO_APP_CLIENT_ID_MOBILE: 'mob',
+        COGNITO_APP_CLIENT_ID_ADMIN: 'adm',
+        COGNITO_REGION: 'eu-west-1',
+        PAYMENTS_PROVIDER: 'chapa',
+        CHAPA_RETURN_URL: 'ethiolink://payments/return',
+        CHAPA_SECRET_KEY_SECRET_ARN: CHAPA_SK_ARN,
+        CHAPA_WEBHOOK_SECRET_SECRET_ARN: CHAPA_WH_ARN,
+    });
+
+    it('resolves plain-string secrets and builds chapaProvider', async () => {
+        const resolver = new MultiResolver({
+            [CHAPA_SK_ARN]: 'CHASECK_TEST-resolved',
+            [CHAPA_WH_ARN]: 'whsec_resolved',
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: ENV_WITH_CHAPA_ARNS,
+            secretsResolver: resolver,
+            chapaSecretCache: new Map<string, string>(),
+        });
+
+        assert.strictEqual(config.paymentsProvider, 'chapa');
+        assert.ok(config.chapaProvider);
+        assert.strictEqual(
+            config.chapaProvider.secretKey,
+            'CHASECK_TEST-resolved',
+        );
+        assert.strictEqual(
+            config.chapaProvider.webhookSecret,
+            'whsec_resolved',
+        );
+        assert.strictEqual(
+            config.chapaProvider.secretKeySecretArn,
+            CHAPA_SK_ARN,
+        );
+        assert.deepStrictEqual(
+            [...resolver.calls].sort(),
+            [CHAPA_SK_ARN, CHAPA_WH_ARN].sort(),
+        );
+    });
+
+    it('resolves JSON-shape secrets ({secretKey} / {webhookSecret})', async () => {
+        const resolver = new MultiResolver({
+            [CHAPA_SK_ARN]: JSON.stringify({
+                secretKey: 'CHASECK_LIVE-fromjson',
+                rotatedAt: '2026-05-01',
+            }),
+            [CHAPA_WH_ARN]: JSON.stringify({
+                webhookSecret: 'whsec_fromjson',
+            }),
+        });
+
+        const config = await loadSecretsThenConfig({
+            env: ENV_WITH_CHAPA_ARNS,
+            secretsResolver: resolver,
+            chapaSecretCache: new Map<string, string>(),
+        });
+        assert.strictEqual(
+            config.chapaProvider?.secretKey,
+            'CHASECK_LIVE-fromjson',
+        );
+        assert.strictEqual(
+            config.chapaProvider?.webhookSecret,
+            'whsec_fromjson',
+        );
+    });
+
+    it('caches resolved secrets across calls (warm Lambda)', async () => {
+        const resolver = new MultiResolver({
+            [CHAPA_SK_ARN]: 'sk-once',
+            [CHAPA_WH_ARN]: 'wh-once',
+        });
+        const cache = new Map<string, string>();
+        await loadSecretsThenConfig({
+            env: ENV_WITH_CHAPA_ARNS,
+            secretsResolver: resolver,
+            chapaSecretCache: cache,
+        });
+        await loadSecretsThenConfig({
+            env: ENV_WITH_CHAPA_ARNS,
+            secretsResolver: resolver,
+            chapaSecretCache: cache,
+        });
+        // Two ARNs resolved exactly once each (warm hit on the second
+        // call hits the cache).
+        assert.strictEqual(resolver.calls.length, 2);
+    });
+
+    it('skips resolution when the plain env vars are already set', async () => {
+        const resolver = new MultiResolver({});
+        const config = await loadSecretsThenConfig({
+            env: {
+                ...ENV_WITH_CHAPA_ARNS,
+                CHAPA_SECRET_KEY: 'plain-sk',
+                CHAPA_WEBHOOK_SECRET: 'plain-wh',
+            },
+            secretsResolver: resolver,
+            chapaSecretCache: new Map<string, string>(),
+        });
+        assert.strictEqual(config.chapaProvider?.secretKey, 'plain-sk');
+        assert.strictEqual(config.chapaProvider?.webhookSecret, 'plain-wh');
+        // No resolver calls — the env-var-wins escape hatch.
+        assert.strictEqual(resolver.calls.length, 0);
+    });
+
+    it('throws SecretResolutionError on empty Chapa secret', async () => {
+        const resolver = new MultiResolver({
+            [CHAPA_SK_ARN]: '',
+            [CHAPA_WH_ARN]: 'wh',
+        });
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: ENV_WITH_CHAPA_ARNS,
+                    secretsResolver: resolver,
+                    chapaSecretCache: new Map<string, string>(),
+                }),
+            SecretResolutionError,
+        );
+    });
+
+    it('throws SecretResolutionError on JSON missing the requested field', async () => {
+        const resolver = new MultiResolver({
+            [CHAPA_SK_ARN]: JSON.stringify({ apiKey: 'wrong-field' }),
+            [CHAPA_WH_ARN]: 'wh',
+        });
+        await assert.rejects(
+            () =>
+                loadSecretsThenConfig({
+                    env: ENV_WITH_CHAPA_ARNS,
+                    secretsResolver: resolver,
+                    chapaSecretCache: new Map<string, string>(),
+                }),
+            SecretResolutionError,
+        );
+    });
+});

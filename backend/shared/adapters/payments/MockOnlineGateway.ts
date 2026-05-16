@@ -29,7 +29,10 @@ import type {
     PaymentAuthorizationInput,
     PaymentGateway,
 } from './PaymentGateway.js';
-import { OnlinePaymentsUnavailableError } from './PaymentGateway.js';
+import {
+    OnlinePaymentsUnavailableError,
+    PaymentVerificationUnsupportedError,
+} from './PaymentGateway.js';
 
 const UNAVAILABLE_MESSAGE =
     'Online payments are not yet available. Please select cash payment.';
@@ -40,5 +43,15 @@ export class MockOnlineGateway implements PaymentGateway {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- params required by interface.
     async authorize(_input: PaymentAuthorizationInput): Promise<PaymentAuthorization> {
         throw new OnlinePaymentsUnavailableError(UNAVAILABLE_MESSAGE);
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- params required by interface.
+    async verify(_providerRef: string): Promise<PaymentAuthorization> {
+        // The mock gateway never authorizes anything, so no
+        // `payment_intents` row ever points at provider = 'MOCK' with
+        // a non-null `provider_ref`. A `verify` call on the mock is
+        // therefore unreachable in production; throwing the typed
+        // error makes a misrouted webhook loud.
+        throw new PaymentVerificationUnsupportedError('MOCK');
     }
 }

@@ -383,6 +383,15 @@ locals {
     TELEGRAM_TIMEOUT_MS             = tostring(var.telegram_timeout_ms)
     PAYMENTS_PROVIDER_CASH         = var.payments_provider_cash
     PAYMENTS_PROVIDER_ONLINE       = var.payments_provider_online
+    # Phase 10 — Chapa payment provider routing + config. The
+    # selector flag drives `paymentGatewayFactory`; the rest of
+    # the block is dormant when the secret ARNs are empty.
+    PAYMENTS_PROVIDER                  = var.payments_provider
+    PAYMENTS_TIMEOUT_MS                = tostring(var.payments_timeout_ms)
+    CHAPA_API_BASE_URL                 = var.chapa_api_base_url
+    CHAPA_RETURN_URL                   = var.chapa_return_url
+    CHAPA_SECRET_KEY_SECRET_ARN        = var.chapa_secret_key_secret_arn
+    CHAPA_WEBHOOK_SECRET_SECRET_ARN    = var.chapa_webhook_secret_secret_arn
     BOOKING_CANCEL_CUTOFF_MINUTES  = tostring(var.booking_cancel_cutoff_minutes)
     BOOKING_SLOT_STEP_MINUTES      = tostring(var.booking_slot_step_minutes)
     BOOKING_BUFFER_MINUTES         = tostring(var.booking_buffer_minutes)
@@ -810,6 +819,94 @@ resource "aws_iam_role_policy" "lambda_telegram_webhook_secret" {
   name   = "${local.base_name}-lambda-telegram-webhook-secret-${each.key}"
   role   = aws_iam_role.lambda_exec[each.key].id
   policy = data.aws_iam_policy_document.lambda_telegram_webhook_secret[0].json
+}
+
+# -----------------------------------------------------------------------------
+# Phase 10 — Chapa payment provider secret reads.
+#
+# Two Chapa secrets sit in Secrets Manager (same pattern as Telegram):
+#
+#   * `chapa_secret_key_secret_arn` — merchant secret key
+#     (`CHASECK_…`) used by `ChapaGateway` to authenticate
+#     `/v1/transaction/initialize` + `/v1/transaction/verify`
+#     calls. Read by `appointments` (booking authorize), `featuring`
+#     (subscription authorize), and `integrations` (webhook handler
+#     issuing the verify round-trip — Phase 10 commit 3).
+#
+#   * `chapa_webhook_secret_secret_arn` — HMAC signing secret used
+#     by the future webhook Lambda to validate inbound Chapa
+#     callbacks. Read only by `integrations`.
+#
+# Both policies are gated on their ARN being non-empty so env
+# stacks that haven't wired Chapa get no extra IAM surface — the
+# default `payments_provider = "mock"` path adds zero grants.
+# -----------------------------------------------------------------------------
+
+locals {
+  # Three areas consume the Chapa secret key. The `appointments` +
+  # `featuring` roles authorize through the gateway at booking /
+  # subscribe time; the `integrations` role calls `verify` from the
+  # webhook handler (Phase 10 commit 3).
+  chapa_secret_key_consumer_areas = (
+    var.chapa_secret_key_secret_arn != ""
+    ? toset(["appointments", "featuring", "integrations"])
+    : toset([])
+  )
+  # Only the webhook handler validates the HMAC header against the
+  # webhook secret. No other area needs this read.
+  chapa_webhook_secret_consumer_areas = (
+    var.chapa_webhook_secret_secret_arn != ""
+    ? toset(["integrations"])
+    : toset([])
+  )
+}
+
+data "aws_iam_policy_document" "lambda_chapa_secret_key" {
+  count = var.chapa_secret_key_secret_arn != "" ? 1 : 0
+
+  statement {
+    sid    = "ReadChapaSecretKey"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+
+    resources = [var.chapa_secret_key_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_chapa_secret_key" {
+  for_each = local.chapa_secret_key_consumer_areas
+
+  name   = "${local.base_name}-lambda-chapa-secret-key-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_chapa_secret_key[0].json
+}
+
+data "aws_iam_policy_document" "lambda_chapa_webhook_secret" {
+  count = var.chapa_webhook_secret_secret_arn != "" ? 1 : 0
+
+  statement {
+    sid    = "ReadChapaWebhookSecret"
+    effect = "Allow"
+
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret",
+    ]
+
+    resources = [var.chapa_webhook_secret_secret_arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_chapa_webhook_secret" {
+  for_each = local.chapa_webhook_secret_consumer_areas
+
+  name   = "${local.base_name}-lambda-chapa-webhook-secret-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_chapa_webhook_secret[0].json
 }
 
 # -----------------------------------------------------------------------------

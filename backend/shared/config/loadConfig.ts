@@ -216,6 +216,71 @@ export interface FeaturingConfig {
     readonly enabled: boolean;
 }
 
+/**
+ * Phase 10 — payments provider routing flag. Controls which
+ * payment gateway the `paymentGatewayFactory` wires alongside the
+ * always-on `CashGateway`:
+ *
+ *   * `'mock'`  — default. `MockOnlineGateway` is wired for the
+ *                 `ONLINE_PENDING` path; every online attempt
+ *                 throws `OnlinePaymentsUnavailableError` and the
+ *                 booking flow refuses with a 400. Preserves the
+ *                 historical Phase 9 behaviour.
+ *   * `'chapa'` — when `config.chapaProvider` is non-null,
+ *                 `ChapaGateway` is wired for `ONLINE_PENDING`
+ *                 appointments and paid featuring purchases. The
+ *                 gateway initiates a Chapa hosted checkout and
+ *                 returns PENDING + a redirect URL.
+ *
+ * Future providers (`'telebirr'`, `'production'`) slot in here
+ * without a schema change. Unknown values throw
+ * `InvalidConfigError` at config-load time so a typo in the env
+ * stack fails the cold start loudly rather than silently routing
+ * traffic through the mock.
+ */
+export type PaymentsProvider = 'mock' | 'chapa';
+
+/**
+ * Phase 10 — Chapa payment provider configuration. Populated only
+ * when EVERY required env var resolves (`PAYMENTS_PROVIDER=chapa`,
+ * `CHAPA_SECRET_KEY`, `CHAPA_WEBHOOK_SECRET`, `CHAPA_RETURN_URL`);
+ * `null` otherwise.
+ *
+ * Production credential resolution mirrors the SMS / Telegram
+ * patterns:
+ *   * `CHAPA_SECRET_KEY` env var holds the plain secret in dev /
+ *     docker-compose.
+ *   * `CHAPA_SECRET_KEY_SECRET_ARN` points at a Secrets Manager
+ *     secret for prod; `loadSecretsThenConfig` resolves the ARN
+ *     and writes the value into `CHAPA_SECRET_KEY` before
+ *     delegating here.
+ *   * Same pattern for `CHAPA_WEBHOOK_SECRET` /
+ *     `CHAPA_WEBHOOK_SECRET_SECRET_ARN`.
+ *
+ * The two ARN fields are passthrough metadata — the gateway does
+ * not consume them; they're recorded so an operator can verify at
+ * a glance whether a Lambda is on the production secret wiring vs.
+ * the dev plain-env wiring.
+ */
+export interface ChapaProviderConfig {
+    /** Chapa REST API base. Defaults to `https://api.chapa.co`; sandbox: same host, dev keys. */
+    readonly apiBaseUrl: string;
+    /** Resolved Chapa secret key (`CHASECK_…`). Plain in dev; resolved from Secrets Manager in prod. */
+    readonly secretKey: string;
+    /** ARN of the Secrets Manager secret holding the secret key, when set. Empty string in dev. */
+    readonly secretKeySecretArn: string;
+    /** Resolved webhook signing secret. Adapter does not consume — only the future webhook handler does. */
+    readonly webhookSecret: string;
+    /** ARN of the Secrets Manager secret holding the webhook secret, when set. */
+    readonly webhookSecretSecretArn: string;
+    /** Default return URL passed to Chapa as `return_url` (mobile deep link). */
+    readonly returnUrl: string;
+    /** HTTP request timeout in milliseconds. Default 12000 (12s). */
+    readonly timeoutMs: number;
+    /** Provider identifier echoed on `PaymentAuthorization.provider` + persisted to `payment_intents.provider`. Always `'CHAPA'`. */
+    readonly providerName: 'CHAPA';
+}
+
 export interface AppConfig {
     readonly nodeEnv: NodeEnv;
     readonly logLevel: LogLevel;
@@ -231,6 +296,13 @@ export interface AppConfig {
     /** Telegram provider config when wired; `null` when the operator hasn't opted in. */
     readonly telegramProvider: TelegramProviderConfig | null;
     /**
+     * Phase 10 — Chapa provider config when wired; `null` when the
+     * operator hasn't opted in. The factory checks this slot
+     * before constructing a real gateway and falls back to
+     * `MockOnlineGateway` otherwise.
+     */
+    readonly chapaProvider: ChapaProviderConfig | null;
+    /**
      * Provider-selector flag. The notification-service factory
      * reads this alongside `smsProvider` to decide whether to wire
      * `GenericSmsGateway` for the `SMS` channel. `'mock'` is the
@@ -238,6 +310,15 @@ export interface AppConfig {
      * config is present.
      */
     readonly notificationsProvider: NotificationsProvider;
+    /**
+     * Phase 10 — payments provider routing flag. The
+     * `paymentGatewayFactory` reads this alongside `chapaProvider`
+     * to decide whether to wire `ChapaGateway` for the online
+     * channel. `'mock'` is the safe default and keeps
+     * `MockOnlineGateway` in place even when Chapa config is
+     * present.
+     */
+    readonly paymentsProvider: PaymentsProvider;
 }
 
 /** Raised when required config is missing. Carries the full list of names. */
@@ -284,6 +365,9 @@ const VALID_NOTIFICATIONS_PROVIDERS: readonly NotificationsProvider[] = [
     'telegram',
     'production',
 ];
+const VALID_PAYMENTS_PROVIDERS: readonly PaymentsProvider[] = ['mock', 'chapa'];
+
+const DEFAULT_CHAPA_API_BASE_URL = 'https://api.chapa.co';
 
 /**
  * Read and validate configuration from the given env-like map.
@@ -370,10 +454,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         }),
         smsProvider: buildSmsProviderConfig(env),
         telegramProvider: buildTelegramProviderConfig(env),
+        chapaProvider: buildChapaProviderConfig(env),
         notificationsProvider: parseEnum<NotificationsProvider>(
             'NOTIFICATIONS_PROVIDER',
             env.NOTIFICATIONS_PROVIDER,
             VALID_NOTIFICATIONS_PROVIDERS,
+            'mock',
+        ),
+        paymentsProvider: parseEnum<PaymentsProvider>(
+            'PAYMENTS_PROVIDER',
+            env.PAYMENTS_PROVIDER,
+            VALID_PAYMENTS_PROVIDERS,
             'mock',
         ),
     });
@@ -460,6 +551,62 @@ function buildTelegramProviderConfig(
             env.TELEGRAM_TIMEOUT_MS,
             10000,
         ),
+    });
+}
+
+/**
+ * Phase 10 — build the optional Chapa provider config. Returns
+ * `null` when any of the required values (`CHAPA_SECRET_KEY`,
+ * `CHAPA_WEBHOOK_SECRET`, `CHAPA_RETURN_URL`) is missing — the
+ * `paymentGatewayFactory` checks the slot before constructing a
+ * real gateway and falls back to `MockOnlineGateway` otherwise.
+ *
+ * Secrets Manager resolution (`CHAPA_SECRET_KEY_SECRET_ARN` +
+ * `CHAPA_WEBHOOK_SECRET_SECRET_ARN`) lives in
+ * `loadSecretsThenConfig`; this function only reads the
+ * already-resolved env vars.
+ *
+ * `CHAPA_API_BASE_URL` defaults to `https://api.chapa.co` — the
+ * production endpoint. The sandbox runs on the same host with
+ * sandbox-mode secret keys (`CHASECK_TEST-…`), so operators
+ * normally don't need to override this.
+ *
+ * `CHAPA_RETURN_URL` is intentionally required even though Chapa
+ * accepts the field as optional — without it the mobile client
+ * never deep-links back into the app after the user completes
+ * payment, and the booking / featuring screens hang on the
+ * waiting-screen poll until the timeout. Making it required
+ * surfaces the misconfig at cold start, not at the first booking.
+ */
+function buildChapaProviderConfig(
+    env: NodeJS.ProcessEnv,
+): ChapaProviderConfig | null {
+    const secretKey = env.CHAPA_SECRET_KEY?.trim() ?? '';
+    const webhookSecret = env.CHAPA_WEBHOOK_SECRET?.trim() ?? '';
+    const returnUrl = env.CHAPA_RETURN_URL?.trim() ?? '';
+
+    if (!secretKey || !webhookSecret || !returnUrl) {
+        return null;
+    }
+
+    const apiBaseUrl =
+        env.CHAPA_API_BASE_URL?.trim() || DEFAULT_CHAPA_API_BASE_URL;
+
+    return Object.freeze<ChapaProviderConfig>({
+        apiBaseUrl,
+        secretKey,
+        secretKeySecretArn:
+            env.CHAPA_SECRET_KEY_SECRET_ARN?.trim() ?? '',
+        webhookSecret,
+        webhookSecretSecretArn:
+            env.CHAPA_WEBHOOK_SECRET_SECRET_ARN?.trim() ?? '',
+        returnUrl,
+        timeoutMs: parsePositiveInteger(
+            'PAYMENTS_TIMEOUT_MS',
+            env.PAYMENTS_TIMEOUT_MS,
+            12000,
+        ),
+        providerName: 'CHAPA',
     });
 }
 

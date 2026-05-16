@@ -308,6 +308,87 @@ variable "payments_provider_online" {
   default     = "mock"
 }
 
+# -----------------------------------------------------------------------------
+# Phase 10 — Chapa payment provider config.
+#
+# All variables default to empty / mock so the existing env stacks
+# remain valid without any change. Operators wire Chapa by setting:
+#
+#   * `payments_provider = "chapa"`              — routing flag.
+#                                                  `paymentGatewayFactory`
+#                                                  picks `ChapaGateway`.
+#   * `chapa_secret_key_secret_arn`              — Secrets Manager
+#                                                  ARN for the Chapa
+#                                                  secret key
+#                                                  (`CHASECK_…`).
+#                                                  `loadSecretsThenConfig`
+#                                                  resolves into
+#                                                  `CHAPA_SECRET_KEY`.
+#   * `chapa_webhook_secret_secret_arn`          — Secrets Manager
+#                                                  ARN for the
+#                                                  webhook signing
+#                                                  secret used by the
+#                                                  future webhook
+#                                                  Lambda.
+#   * `chapa_return_url`                         — Mobile deep link
+#                                                  (e.g.
+#                                                  ethiolink://payments/return).
+#                                                  Required when
+#                                                  Chapa is wired.
+#
+# Until ALL of the above are set, `config.chapaProvider` resolves
+# to `null` and `paymentGatewayFactory` keeps `MockOnlineGateway`
+# in place. This makes the Chapa rollout strictly opt-in.
+#
+# IAM grants — when `chapa_secret_key_secret_arn` is set, the
+# `appointments`, `featuring`, and `integrations` Lambda areas all
+# gain a scoped `secretsmanager:GetSecretValue` on that ARN
+# (appointments + featuring authorize through the gateway;
+# integrations runs the webhook handler in a later commit). The
+# webhook secret is read only by `integrations`.
+# -----------------------------------------------------------------------------
+
+variable "payments_provider" {
+  description = "Phase 10 — payments provider routing flag. `mock` (default) keeps `MockOnlineGateway` for the online path; `chapa` wires `ChapaGateway` when the Chapa secret/return-URL env vars are also set. Future providers (Telebirr) extend this enum."
+  type        = string
+  default     = "mock"
+
+  validation {
+    condition     = contains(["mock", "chapa"], var.payments_provider)
+    error_message = "payments_provider must be one of: mock, chapa."
+  }
+}
+
+variable "chapa_api_base_url" {
+  description = "Chapa REST API base URL. Defaults to the production endpoint `https://api.chapa.co`; the sandbox uses the same host with sandbox-mode secret keys (`CHASECK_TEST-…`). Empty falls back to the SDK default."
+  type        = string
+  default     = ""
+}
+
+variable "chapa_return_url" {
+  description = "Default `return_url` Chapa redirects the customer to after the hosted checkout flow. Mobile clients register this as a deep link (e.g. `ethiolink://payments/return`). Empty when Chapa is not wired."
+  type        = string
+  default     = ""
+}
+
+variable "chapa_secret_key_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the Chapa secret key (`CHASECK_…`). SecretString may be a plain string OR a JSON object with a `secretKey` field. Empty when Chapa is not wired. When set, the `appointments`, `featuring`, and `integrations` Lambda IAM roles each get `secretsmanager:GetSecretValue` scoped to this ARN."
+  type        = string
+  default     = ""
+}
+
+variable "chapa_webhook_secret_secret_arn" {
+  description = "ARN of the Secrets Manager secret holding the Chapa webhook signing secret. SecretString may be plain OR `{ webhookSecret: '...' }`. Empty when Chapa is not wired. When set, only the `integrations` Lambda IAM role gets `secretsmanager:GetSecretValue` scoped to this ARN."
+  type        = string
+  default     = ""
+}
+
+variable "payments_timeout_ms" {
+  description = "HTTP request timeout for the Chapa gateway, in milliseconds. Default 12000 (12s)."
+  type        = number
+  default     = 12000
+}
+
 variable "booking_cancel_cutoff_minutes" {
   description = "Customer-initiated cancellation cutoff. Defaults to 240 minutes (4 hours) — matches `backend/.env.example` and the test suite."
   type        = number

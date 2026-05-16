@@ -119,6 +119,16 @@ export interface LoadSecretsThenConfigOptions {
      * Lambda invocations skip the network call after cold start.
      */
     readonly telegramSecretCache?: Map<string, string>;
+
+    /**
+     * Phase 10 — cache of resolved Chapa secrets keyed by secret
+     * ARN. One map serves both `CHAPA_SECRET_KEY_SECRET_ARN` and
+     * `CHAPA_WEBHOOK_SECRET_SECRET_ARN` because the cache key is
+     * the full ARN (collisions are impossible across kinds).
+     * Lives at module scope so warm Lambda invocations skip the
+     * network call after cold start.
+     */
+    readonly chapaSecretCache?: Map<string, string>;
 }
 
 /**
@@ -162,6 +172,13 @@ const defaultSmsApiKeyCache = new Map<string, string>();
  */
 const defaultTelegramSecretCache = new Map<string, string>();
 
+/**
+ * Phase 10 — cache for resolved Chapa secrets (secret key +
+ * webhook secret). Same shape as the Telegram cache: one map,
+ * full-ARN keys.
+ */
+const defaultChapaSecretCache = new Map<string, string>();
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -187,6 +204,8 @@ export async function loadSecretsThenConfig(
     const smsCache = options.smsApiKeyCache ?? defaultSmsApiKeyCache;
     const telegramCache =
         options.telegramSecretCache ?? defaultTelegramSecretCache;
+    const chapaCache =
+        options.chapaSecretCache ?? defaultChapaSecretCache;
 
     // Start with the input env. Both resolution paths below may
     // layer values onto this map; `loadConfig` consumes the
@@ -273,6 +292,41 @@ export async function loadSecretsThenConfig(
         derived = { ...derived, TELEGRAM_WEBHOOK_SECRET: secret };
     }
 
+    // ---- Chapa payment provider secrets (Phase 10) -----------------------
+    //
+    // Same pattern as SMS / Telegram. Resolution triggers when the
+    // ARN is set AND the corresponding plain env var is NOT set.
+    // The secret key and the webhook signing secret live in
+    // separate ARNs so they can be rotated independently — Chapa
+    // can issue a new merchant secret key without invalidating the
+    // webhook secret, and vice versa. Both secrets support the
+    // `parseFlatOrJsonSecret` shape (plain string or
+    // `{ secretKey | webhookSecret: '...' }`) so an operator can
+    // bundle both into one Secrets Manager resource if preferred
+    // (pointing the same ARN at both env vars and letting the JSON
+    // resolver pick the right field).
+    const chapaSecretKeyArn = env.CHAPA_SECRET_KEY_SECRET_ARN?.trim();
+    if (chapaSecretKeyArn && !isPresent(env.CHAPA_SECRET_KEY)) {
+        let key = chapaCache.get(chapaSecretKeyArn);
+        if (!key) {
+            const raw = await resolver.resolve(chapaSecretKeyArn);
+            key = parseChapaSecret(raw, 'secretKey');
+            chapaCache.set(chapaSecretKeyArn, key);
+        }
+        derived = { ...derived, CHAPA_SECRET_KEY: key };
+    }
+
+    const chapaWebhookArn = env.CHAPA_WEBHOOK_SECRET_SECRET_ARN?.trim();
+    if (chapaWebhookArn && !isPresent(env.CHAPA_WEBHOOK_SECRET)) {
+        let secret = chapaCache.get(chapaWebhookArn);
+        if (!secret) {
+            const raw = await resolver.resolve(chapaWebhookArn);
+            secret = parseChapaSecret(raw, 'webhookSecret');
+            chapaCache.set(chapaWebhookArn, secret);
+        }
+        derived = { ...derived, CHAPA_WEBHOOK_SECRET: secret };
+    }
+
     return loadConfig(derived);
 }
 
@@ -285,6 +339,7 @@ export function clearSecretsCache(): void {
     defaultCache.clear();
     defaultSmsApiKeyCache.clear();
     defaultTelegramSecretCache.clear();
+    defaultChapaSecretCache.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -490,6 +545,68 @@ function parseTelegramSecret(
         if (typeof v !== 'string' || v === '') {
             throw new SecretResolutionError(
                 `Telegram secret JSON is missing the \`${field}\` string field.`,
+            );
+        }
+        return v;
+    }
+
+    return trimmed;
+}
+
+/**
+ * Phase 10 — parse a Chapa secret payload. Same shape contract as
+ * the Telegram parser: plain string OR JSON object with the named
+ * field. The two Chapa secrets (`secretKey`, `webhookSecret`) can
+ * live in separate Secrets Manager resources OR in one bundled
+ * resource — pointing the same ARN at both env vars and letting
+ * this parser pick the right field is the supported shape.
+ *
+ *   * Plain string — the SecretString IS the value.
+ *   * JSON `{ "secretKey": "CHASECK_…", "webhookSecret": "..." }`
+ *     — only the named `field` is consumed; other keys are
+ *     ignored.
+ *
+ * Empty / malformed-JSON / missing-field payloads throw
+ * `SecretResolutionError` so a misconfigured secret fails the
+ * cold start loudly.
+ */
+function parseChapaSecret(
+    raw: string,
+    field: 'secretKey' | 'webhookSecret',
+): string {
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+        throw new SecretResolutionError(
+            `Chapa ${field} secret is empty. Set it to either the plain ` +
+                'value or a JSON object with `secretKey` and/or `webhookSecret` fields.',
+        );
+    }
+
+    if (trimmed.startsWith('{')) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch (err) {
+            throw new SecretResolutionError(
+                `Chapa ${field} secret looks like JSON but failed to parse: ${
+                    err instanceof Error ? err.message : String(err)
+                }`,
+            );
+        }
+        if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            Array.isArray(parsed)
+        ) {
+            throw new SecretResolutionError(
+                `Chapa ${field} secret JSON must be a non-array object.`,
+            );
+        }
+        const obj = parsed as Record<string, unknown>;
+        const v = obj[field];
+        if (typeof v !== 'string' || v === '') {
+            throw new SecretResolutionError(
+                `Chapa secret JSON is missing the \`${field}\` string field.`,
             );
         }
         return v;
