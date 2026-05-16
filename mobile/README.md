@@ -45,6 +45,10 @@ mobile/
                                   business_detail_repositories
       bookings/
         bookings_screen.dart    Placeholder bookings tab (history fetch lands next)
+      owner/
+        owner_tab.dart                          Role-gated "My Business" tab (Phase 9 Track 3.5)
+        models/owner_business_view.dart         Owner-side BusinessOwnerView model (wraps BusinessDetail + status + ownerUserId)
+        data/owner_business_repository.dart     GET /v1/me/business + failure-kind classifier
       profile/
         profile_screen.dart     Profile + env display + sign out
   test/
@@ -197,13 +201,14 @@ If the browser closes but the app stays on the LoginScreen, the deep link didn't
 - ✅ Business detail — tap a business row → `BusinessDetailScreen` composing four concurrent fetches: `GET /v1/businesses/{id}` (header, description, contact channels, address, rating), `/services` (bookable services with price + duration), `/staff` (active roster), `/reviews` (recent reviews with star glyphs). Each section renders its own loading / success / empty / error sub-state.
 - ✅ Booking flow — tap "Book" on a service row → `BookingFlowScreen` wizard. Staff step (skipped when only one active staff member) → date picker (14 days) → slot grid powered by `GET /v1/businesses/{id}/staff/{sid}/slots` → confirmation recap → `POST /v1/appointments` (CASH only for MVP) → success screen with the appointment id. Error handling switches on the API error code: `SLOT_UNAVAILABLE` → "Pick another slot" with one-tap return to the slot step; `UNAUTHENTICATED` → sign-in-required panel; network / 5xx → generic retry.
 - ✅ Bookings tab — live `GET /v1/me/appointments` list grouped into Upcoming + Past. Each row carries a status-coloured badge, the start time, and the price + payment method. Tap a row → `AppointmentDetailScreen` with the full booking metadata and the lifecycle actions: Cancel (visible while `REQUESTED`/`ACCEPTED`, optional reason) and Review (visible while `COMPLETED`, 1–5 stars + optional comment). 409 CONFLICT on cancel → "Past the cancellation cutoff" copy; 409 CONFLICT on review → "Already reviewed" copy.
+- 🚧 Owner tab (Phase 9 Track 3.5 in progress) — role-gated 4th bottom-nav destination visible only when `session.role == 'BUSINESS_OWNER'`. Loads `GET /v1/me/business` via `HttpOwnerBusinessRepository` and branches on the outcome: 200 APPROVED → 5-card dashboard placeholder (Profile / Services / Staff / Availability / Bookings — each currently shows a "coming soon" SnackBar); 200 DRAFT or REJECTED → "submit for review" banner above the dashboard; 200 PENDING_REVIEW or SUSPENDED → read-only "awaiting review" / "contact support" banner; 404 → "Create your business" CTA placeholder (form lands in the next commit); 403 → "Sign out and back in" copy (stale `cognito:groups`); network → retry. CUSTOMER and ADMIN sessions don't see the tab.
 - ✅ Profile tab — session info + env display + working sign-out (clears secure storage + best-effort hosted-UI logout).
 - ✅ `AppConfig` + `AppConfigScope` inherited-widget pattern.
 - ✅ `AuthService` port with two implementations: `CognitoAuthService` (production) + `FakeAuthService` (tests + offline demo). `LoginScreen` accepts an optional override so widget tests stay platform-channel-free.
 - ✅ `ApiClient` over Dio with an `AuthTokenInterceptor` — attaches `Authorization: Bearer <idToken>` when a session exists; public endpoints work without one. One-shot 401 retry after a token refresh.
 - ✅ `CategoriesRepository` port with `HttpCategoriesRepository` over the `ApiClient`. `BrowseScreen` accepts a repository override so widget tests stay network-free.
 - ✅ `flutter_lints` + strict analyzer settings.
-- ✅ Widget tests covering login render + fake-auth tap + missing-config detection + BrowseScreen's loading / success / empty / error states. Unit tests covering id-token claim decoding + role precedence + Category JSON parsing.
+- ✅ Widget tests covering login render + fake-auth tap + missing-config detection + BrowseScreen's loading / success / empty / error states + BrowseScreen role-gating of the "My Business" tab + OwnerTab's loading / APPROVED / PENDING_REVIEW / DRAFT / 404 / 403 / network branches. Unit tests covering id-token claim decoding + role precedence + Category JSON parsing + OwnerBusinessView parsing + OwnerBusinessRepository URL + 404/403/401/500 classification.
 
 ## What the scaffold deliberately does NOT ship
 
@@ -214,7 +219,7 @@ Each item below is on the immediate Phase 9 Track 3 backlog. The scaffold leaves
 - ❌ Per-platform scaffolding (`android/`, `ios/`, ...). Regenerated locally; iOS Info.plist edits for the `ethiolink://` URL scheme land in a follow-up.
 - ❌ Localization beyond English. The `flutter_localizations` package is wired so a future `am.arb` bundle drops in without a pubspec change.
 - ❌ Push notifications via FCM / APNs. Out of MVP scope per `docs/product/MVP_SCOPE.md`.
-- ❌ Booking funnel, slot picker, business-owner flows. Each is a dedicated future commit.
+- ❌ Owner create-business form, services / staff / availability / bookings owner screens. The "My Business" tab landed (Track 3.5 in progress) but every dashboard card currently SnackBar-stubs; the create-business form replaces the placeholder CTA in the next commit.
 
 ## Running tests
 
@@ -234,4 +239,4 @@ flutter analyze
 
 ## Next recommended mobile commit
 
-**"Phase 9: mobile customer surface — completion summary"** — capture the Track 3 acceptance state. With history + cancel + review landed, the customer-facing MVP loop is end-to-end: browse → book → see in history → cancel before cutoff OR review after the business marks COMPLETED. The next code-side track is the business-owner mobile flows (sign-up + service / staff CRUD + accept/reject/complete) but those are Phase 9.5 / Phase 10 candidates — the customer surface is the binding launch gate. The completion-summary commit captures the seven mobile commits + the operator-led gates that remain (per-platform deep-link verification on real devices, App Store / Play Store TestFlight uploads, optional `cached_network_image` + business cover photos polish pass).
+**"Phase 9: add owner create-business form"** — replace the `_CreateBusinessCta` SnackBar placeholder on the owner tab's 404 branch with a real multi-step form. Posts to `POST /v1/businesses` to create the row in `DRAFT`, then surfaces the "submit for review" CTA (`POST /v1/businesses/{id}/submit`) once the DRAFT exists. Form steps: basics (name + category + city + description) → contact (phone + telegram + whatsapp) → review (preview + submit). Reuses the failure-kind classifier pattern from `OwnerBusinessRepository` for the create + submit calls. After this commit the owner-mobile MVP loop is browse-as-owner → create business → submit → admin approves → status flips to APPROVED → 5-card dashboard activates. The downstream commits then replace each dashboard card stub with the real CRUD screen (services first — that's the table appointments depend on).

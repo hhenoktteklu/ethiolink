@@ -33,6 +33,8 @@ import '../../core/api/api_client.dart';
 import '../../core/auth/auth_service.dart';
 import '../../core/config/app_config_scope.dart';
 import '../bookings/bookings_screen.dart';
+import '../owner/data/owner_business_repository.dart';
+import '../owner/owner_tab.dart';
 import '../profile/profile_screen.dart';
 import 'businesses_screen.dart';
 import 'data/businesses_repository.dart';
@@ -45,6 +47,7 @@ class BrowseScreen extends StatefulWidget {
     this.authServiceOverride,
     this.categoriesRepositoryOverride,
     this.businessesRepositoryOverride,
+    this.ownerBusinessRepositoryOverride,
     super.key,
   });
 
@@ -64,6 +67,11 @@ class BrowseScreen extends StatefulWidget {
   /// `BusinessesScreen` when the user taps a category card.
   /// Production leaves this `null`.
   final BusinessesRepository? businessesRepositoryOverride;
+
+  /// Test-injected owner-business repository. Forwarded to the
+  /// `OwnerTab` (visible only when `session.role == 'BUSINESS_OWNER'`).
+  /// Production leaves this `null`.
+  final OwnerBusinessRepository? ownerBusinessRepositoryOverride;
 
   @override
   State<BrowseScreen> createState() => _BrowseScreenState();
@@ -86,6 +94,13 @@ class _BrowseScreenState extends State<BrowseScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Phase 9 Track 3.5 — role-gated owner tab. The "My Business"
+    // surface lives behind the same bottom-nav as the customer
+    // tabs but only renders when the session's role grants
+    // owner access. ADMIN users default to the customer tabs
+    // (admin operations live in the admin SPA today).
+    final showOwnerTab = widget.session.role == 'BUSINESS_OWNER';
+
     final tabs = <Widget>[
       _BrowseTab(
         session: widget.session,
@@ -93,6 +108,10 @@ class _BrowseScreenState extends State<BrowseScreen> {
         businessesRepositoryOverride: widget.businessesRepositoryOverride,
       ),
       BookingsScreen(session: widget.session),
+      if (showOwnerTab)
+        OwnerTab(
+          repositoryOverride: widget.ownerBusinessRepositoryOverride,
+        ),
       ProfileScreen(
         session: widget.session,
         authServiceOverride: widget.authServiceOverride,
@@ -104,18 +123,24 @@ class _BrowseScreenState extends State<BrowseScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (i) => setState(() => _selectedIndex = i),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.search_outlined),
             selectedIcon: Icon(Icons.search),
             label: 'Browse',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.event_outlined),
             selectedIcon: Icon(Icons.event),
             label: 'Bookings',
           ),
-          NavigationDestination(
+          if (showOwnerTab)
+            const NavigationDestination(
+              icon: Icon(Icons.storefront_outlined),
+              selectedIcon: Icon(Icons.storefront),
+              label: 'My Business',
+            ),
+          const NavigationDestination(
             icon: Icon(Icons.person_outline),
             selectedIcon: Icon(Icons.person),
             label: 'Profile',

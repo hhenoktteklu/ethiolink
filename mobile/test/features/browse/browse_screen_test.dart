@@ -20,6 +20,8 @@ import 'package:ethiolink/features/browse/data/businesses_repository.dart';
 import 'package:ethiolink/features/browse/data/categories_repository.dart';
 import 'package:ethiolink/features/browse/models/business_summary.dart';
 import 'package:ethiolink/features/browse/models/category.dart';
+import 'package:ethiolink/features/owner/data/owner_business_repository.dart';
+import 'package:ethiolink/features/owner/models/owner_business_view.dart';
 
 const _testConfig = AppConfig(
   apiBaseUrl: 'https://example.test',
@@ -35,6 +37,24 @@ final _testSession = AuthSession(
   role: 'CUSTOMER',
   expiresAt: DateTime.utc(2030),
 );
+
+AuthSession _sessionWithRole(String role) {
+  return AuthSession(
+    userId: 'user-1',
+    email: 'test@example.com',
+    role: role,
+    expiresAt: DateTime.utc(2030),
+  );
+}
+
+/// Repository whose `getMine` future never completes. Used by the
+/// role-gating tests so the visible-tab assertion runs without
+/// requiring the OwnerTab to fully render (we just need to confirm
+/// the nav destination is/isn't on screen).
+class _PendingOwnerRepo implements OwnerBusinessRepository {
+  @override
+  Future<OwnerBusinessView> getMine() => Completer<OwnerBusinessView>().future;
+}
 
 /// Scriptable repository for the three widget tests. Each test
 /// configures either a delayed completer (loading), a value
@@ -81,15 +101,18 @@ Future<void> _pumpBrowse(
   WidgetTester tester, {
   required CategoriesRepository repository,
   BusinessesRepository? businessesRepository,
+  OwnerBusinessRepository? ownerBusinessRepository,
+  AuthSession? session,
 }) async {
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,
       child: MaterialApp(
         home: BrowseScreen(
-          session: _testSession,
+          session: session ?? _testSession,
           categoriesRepositoryOverride: repository,
           businessesRepositoryOverride: businessesRepository,
+          ownerBusinessRepositoryOverride: ownerBusinessRepository,
         ),
       ),
     ),
@@ -178,5 +201,55 @@ void main() {
     expect(find.byType(BusinessesScreen), findsOneWidget);
     // It issued its initial fetch with the right category slug.
     expect(businessesRepo.lastCategory, 'salon');
+  });
+
+  // ----------------------------------------------------------------
+  // Role-gating: Phase 9 Track 3.5. The "My Business" tab in the
+  // bottom navigation only appears for BUSINESS_OWNER sessions.
+  // CUSTOMER and ADMIN sessions see the 3-tab nav (Browse /
+  // Bookings / Profile) — admin operations live in the admin SPA.
+  // ----------------------------------------------------------------
+
+  testWidgets('shows the My Business tab for BUSINESS_OWNER sessions',
+      (tester) async {
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value(<Category>[]),
+      ownerBusinessRepository: _PendingOwnerRepo(),
+      session: _sessionWithRole('BUSINESS_OWNER'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('My Business'), findsOneWidget);
+    expect(find.text('Browse'), findsOneWidget);
+    expect(find.text('Bookings'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
+  });
+
+  testWidgets('hides the My Business tab for CUSTOMER sessions',
+      (tester) async {
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value(<Category>[]),
+      session: _sessionWithRole('CUSTOMER'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('My Business'), findsNothing);
+    expect(find.text('Browse'), findsOneWidget);
+    expect(find.text('Bookings'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
+  });
+
+  testWidgets('hides the My Business tab for ADMIN sessions',
+      (tester) async {
+    await _pumpBrowse(
+      tester,
+      repository: FakeCategoriesRepository.value(<Category>[]),
+      session: _sessionWithRole('ADMIN'),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('My Business'), findsNothing);
   });
 }
