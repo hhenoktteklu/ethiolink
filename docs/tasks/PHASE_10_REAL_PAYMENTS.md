@@ -54,7 +54,16 @@ Recommended first provider: **Chapa** (https://chapa.co). Aggregator: under one 
 - [x] Terraform: new `integrations-chapa-webhook` Lambda function in the lambda module + new `v1/integrations/chapa/webhook` path + `POST_v1_integrations_chapa_webhook` route in the API Gateway module (public, application-side auth). The Chapa-secret IAM grants from commit 1 already include the `integrations` role — no new IAM resources needed.
 - [x] Tests: 18 cases across `paymentIntentsRepository.test.ts` (idempotent CAS contract) + `chapaWebhookHandler.test.ts` (signature mismatch, missing signature, `sha256=` prefix accepted, 503 when not configured, malformed body, missing tx_ref, nested tx_ref, unknown tx_ref, SUCCEEDED-featuring, SUCCEEDED-appointment, FAILED-appointment, FAILED-featuring-stays-PENDING, NoActive / InvalidActivationState swallowed, verify PENDING, ChapaUnavailable → 500, ChapaInvalidRequest → 200, replay-SUCCEEDED idempotent, FAILED-against-SUCCEEDED downgrade-refused).
 
-### Commit 4 — mobile online checkout
+### Commit 4 — persist pending payment intents at authorize time (landed: this commit)
+
+- [x] `AppointmentService` deps widened with optional `paymentIntentsRepo: PaymentIntentsRepository`. `create()` calls `insertOrFindByProviderRef` whenever the gateway authorization comes back as `PENDING` with a non-null `providerRef`. Cash + synchronous SUCCEEDED outcomes do NOT write — the schema doc explicitly says cash bookings skip `payment_intents`.
+- [x] `FeaturingService` deps widened with optional `paymentIntentsRepo` + `logger`. `subscribe()` mirrors the same insert at the PENDING branch.
+- [x] Persist failures bubble up so the handler 500s and Chapa retries — leaving an orphan row would silently break the webhook lookup. The two services log `payment_intent_persist_failed` before re-throwing.
+- [x] `payment_intent_repo_missing` is logged loudly (error level) when an online gateway returns PENDING + a providerRef but no repo is wired. The subscription / appointment is already inserted; we don't roll it back, but the operator sees the misconfig in CloudWatch and either wires the repo or rolls back to `payments_provider = mock`.
+- [x] Lambda handlers wire `new PgPaymentIntentsRepository(pool)` in `backend/lambdas/appointments/create.ts` + `backend/lambdas/featuring/subscribe.ts`. Other appointment Lambdas (accept / reject / cancel / etc.) do NOT need the repo — they only run the lifecycle state machine.
+- [x] Tests pin: PENDING online inserts a single row keyed by the right target id with `status = PENDING` + provider + amount + providerRef; cash gateway inserts nothing; duplicate providerRef under retry collapses to one row; missing repo + PENDING + providerRef logs `payment_intent_repo_missing` without throwing; PENDING + null providerRef neither inserts nor warns.
+
+### Commit 5 — mobile online checkout
 
 - [ ] Booking flow on the Flutter customer app — toggle `paymentMethod` between cash / online; on online confirm, open `data.payment.redirectUrl` via `url_launcher`; transition to `PaymentWaitingScreen` polling `GET /v1/me/appointments/{id}` every 3s up to 90s.
 - [ ] Owner featuring screen — same dance on the Promote screen. After return, poll `GET /v1/businesses/{id}/featuring/active`.

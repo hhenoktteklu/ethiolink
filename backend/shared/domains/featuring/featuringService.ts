@@ -44,7 +44,9 @@ import type {
 } from '../../adapters/payments/PaymentGateway.js';
 import { PaymentGatewayError } from '../../adapters/payments/PaymentGateway.js';
 import type { FeaturingConfig } from '../../config/loadConfig.js';
+import type { Logger } from '../../logging/logger.js';
 import type { BusinessRepository } from '../businesses/businessRepository.js';
+import type { PaymentIntentsRepository } from '../payments/paymentIntentsRepository.js';
 import type {
     FeaturingPackageCode,
     FeaturingRepository,
@@ -184,6 +186,26 @@ export interface FeaturingServiceDeps {
     readonly config: FeaturingConfig;
     /** Injectable clock — tests pass a fixed value. */
     readonly now?: () => Date;
+    /**
+     * Phase 10 commit 4 — optional payment-intents repo. When set,
+     * `subscribe()` persists a `payment_intents` row whenever the
+     * payment gateway returns `PENDING` with a non-null
+     * `providerRef` (Chapa hosted checkout). The webhook handler
+     * (Phase 10 commit 3) reverse-looks-up via `findByProviderRef`.
+     * Cash + synchronous SUCCEEDED outcomes do not write here per
+     * `DATABASE_SCHEMA.md`. When unset, the persist is skipped —
+     * existing tests + the local-dev path without an online gateway
+     * continue working unchanged.
+     */
+    readonly paymentIntentsRepo?: PaymentIntentsRepository;
+    /**
+     * Structured logger — used to surface the
+     * `payment_intent_repo_missing` warning when an online
+     * provider returns PENDING but no repo is wired. Optional so
+     * existing tests stay buoyant; a no-op default lands when
+     * unset.
+     */
+    readonly logger?: Logger;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -197,6 +219,8 @@ export class FeaturingService {
     private readonly paymentGateway: PaymentGateway;
     private readonly config: FeaturingConfig;
     private readonly nowFn: () => Date;
+    private readonly paymentIntentsRepo: PaymentIntentsRepository | null;
+    private readonly logger: Logger | null;
 
     constructor(deps: FeaturingServiceDeps) {
         this.featuringRepo = deps.featuringRepo;
@@ -204,6 +228,8 @@ export class FeaturingService {
         this.paymentGateway = deps.paymentGateway;
         this.config = deps.config;
         this.nowFn = deps.now ?? (() => new Date());
+        this.paymentIntentsRepo = deps.paymentIntentsRepo ?? null;
+        this.logger = deps.logger ?? null;
     }
 
     listPackages(): readonly FeaturingPackage[] {
@@ -280,6 +306,63 @@ export class FeaturingService {
         //     paths return `redirectUrl: null` from the gateway,
         //     which the wire view encodes as a JSON `null`.
         if (authorization.status === 'PENDING') {
+            // Phase 10 commit 4 — persist a payment_intents row so
+            // the webhook handler can find the subscription via
+            // `findByProviderRef`. Gated on a non-null providerRef
+            // (Chapa hosted checkout returns one; future async
+            // providers should too). The persist is idempotent at
+            // the DB layer via `ON CONFLICT (provider_ref) DO
+            // NOTHING`.
+            if (authorization.providerRef) {
+                if (this.paymentIntentsRepo) {
+                    try {
+                        await this.paymentIntentsRepo.insertOrFindByProviderRef({
+                            appointmentId: null,
+                            featuringSubscriptionId: pending.id,
+                            provider: authorization.provider,
+                            amountEtb: pkg.priceEtb,
+                            providerRef: authorization.providerRef,
+                            status: 'PENDING',
+                            rawResponse: authorization.rawResponse ?? null,
+                        });
+                    } catch (err) {
+                        // The subscription row exists in
+                        // PENDING_PAYMENT and the gateway already
+                        // returned a redirect URL to the owner;
+                        // failing to persist the intent leaves the
+                        // webhook handler with nothing to find.
+                        // Bubble up so the handler 500s and Chapa
+                        // can retry the entire flow from a fresh
+                        // subscribe attempt.
+                        this.logger?.error(
+                            'featuring.subscribe.payment_intent_persist_failed',
+                            {
+                                subscriptionId: pending.id,
+                                providerRef: authorization.providerRef,
+                                error:
+                                    err instanceof Error
+                                        ? err.message
+                                        : String(err),
+                            },
+                        );
+                        throw err;
+                    }
+                } else {
+                    // Online provider produced PENDING + providerRef
+                    // but the operator forgot to wire the repo. The
+                    // webhook will arrive and find nothing. Log
+                    // loudly; the operator wires the repo or rolls
+                    // back to `payments_provider = mock`.
+                    this.logger?.error(
+                        'featuring.subscribe.payment_intent_repo_missing',
+                        {
+                            subscriptionId: pending.id,
+                            provider: authorization.provider,
+                            providerRef: authorization.providerRef,
+                        },
+                    );
+                }
+            }
             return Object.freeze<SubscribeResult>({
                 subscription: pending,
                 authorization,

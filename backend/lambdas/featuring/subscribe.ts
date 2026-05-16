@@ -35,6 +35,7 @@ import { createPaymentGateways } from '../../shared/factories/paymentGatewayFact
 import { getPool } from '../../shared/db/pgClient.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import { PgFeaturingRepository } from '../../shared/domains/featuring/featuringRepository.js';
+import { PgPaymentIntentsRepository } from '../../shared/domains/payments/paymentIntentsRepository.js';
 import {
     AlreadyActiveError,
     FeaturingDisabledError,
@@ -83,6 +84,13 @@ const featuringService = new FeaturingService({
             ? paymentGateways.online
             : paymentGateways.cash,
     config: config.featuring,
+    // Phase 10 commit 4 — persists a payment_intents row when the
+    // online gateway returns PENDING with a providerRef. Cash
+    // SUCCEEDED outcomes (the default `payments_provider = mock`
+    // path) never reach the persist branch because the
+    // authorization carries `providerRef: null`.
+    paymentIntentsRepo: new PgPaymentIntentsRepository(pool),
+    logger: baseLogger,
 });
 
 const ALLOWED_PACKAGES = new Set(['FEATURING_7D', 'FEATURING_30D']);

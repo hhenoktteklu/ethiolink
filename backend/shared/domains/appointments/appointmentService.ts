@@ -82,6 +82,7 @@ import type {
     BookingTemplateKey,
     BookingTemplatePayload,
 } from '../notifications/templateRegistry.js';
+import type { PaymentIntentsRepository } from '../payments/paymentIntentsRepository.js';
 import type { Service, ServiceRepository } from '../services/serviceRepository.js';
 import type { User, UserRepository } from '../users/userRepository.js';
 
@@ -312,6 +313,22 @@ export interface AppointmentServiceDependencies {
      */
     readonly logger: Logger;
     readonly options: AppointmentServiceOptions;
+    /**
+     * Phase 10 commit 4 — optional payment-intents repo. When set,
+     * `create()` persists a `payment_intents` row whenever the
+     * payment gateway returns `PENDING` with a non-null
+     * `providerRef` (i.e. Chapa hosted checkout). The row gives the
+     * webhook handler (Phase 10 commit 3) something to find via
+     * `findByProviderRef`. When unset, the service skips the
+     * persist call — existing tests + the local-dev path without
+     * an online gateway continue working unchanged.
+     *
+     * Cash + synchronous SUCCEEDED outcomes do not write here; the
+     * schema doc explicitly says cash bookings do not create
+     * `payment_intents` rows. The persist is gated on
+     * `status === 'PENDING' && providerRef !== null`.
+     */
+    readonly paymentIntentsRepo?: PaymentIntentsRepository;
 }
 
 // ---------------------------------------------------------------------------
@@ -447,7 +464,70 @@ export class AppointmentService {
             throw err;
         }
 
-        // (5) Notify the business owner that a customer just booked.
+        // (5) Phase 10 — persist a payment_intents row when the
+        //     gateway returned PENDING with a `providerRef` (Chapa
+        //     hosted checkout). The webhook handler (Phase 10
+        //     commit 3) reverse-looks-up via `findByProviderRef`
+        //     and flips the row to SUCCEEDED / FAILED. Cash +
+        //     synchronous SUCCEEDED outcomes do not write here per
+        //     `DATABASE_SCHEMA.md`. The repo dep is optional —
+        //     local-dev and existing tests without an online
+        //     gateway pass `undefined` and the persist is skipped.
+        if (
+            payment.status === 'PENDING' &&
+            payment.providerRef !== null &&
+            payment.providerRef !== undefined
+        ) {
+            if (this.deps.paymentIntentsRepo) {
+                try {
+                    await this.deps.paymentIntentsRepo.insertOrFindByProviderRef({
+                        appointmentId: appointment.id,
+                        featuringSubscriptionId: null,
+                        provider: payment.provider,
+                        amountEtb: service.priceEtb,
+                        providerRef: payment.providerRef,
+                        status: 'PENDING',
+                        rawResponse: payment.rawResponse ?? null,
+                    });
+                } catch (err) {
+                    // Persist failures are loud — the appointment
+                    // exists (txn already committed) and the
+                    // customer redirected to Chapa, but the
+                    // webhook will arrive with no row to find.
+                    // Surface for the handler to 500 so the
+                    // operator gets paged via CloudWatch alarms.
+                    this.deps.logger.error(
+                        'appointments.create.payment_intent_persist_failed',
+                        {
+                            appointmentId: appointment.id,
+                            providerRef: payment.providerRef,
+                            error:
+                                err instanceof Error
+                                    ? err.message
+                                    : String(err),
+                        },
+                    );
+                    throw err;
+                }
+            } else {
+                // Online provider produced a PENDING + providerRef
+                // but the operator forgot to wire the repo. This
+                // is a programming error — the webhook will arrive
+                // and find nothing. Log loudly so the operator
+                // sees it in CloudWatch and either wires the repo
+                // or rolls payments_provider back to mock.
+                this.deps.logger.error(
+                    'appointments.create.payment_intent_repo_missing',
+                    {
+                        appointmentId: appointment.id,
+                        provider: payment.provider,
+                        providerRef: payment.providerRef,
+                    },
+                );
+            }
+        }
+
+        // (6) Notify the business owner that a customer just booked.
         // Best-effort — see `notifyBookingEvent` for the swallow contract.
         await this.notifyBusinessOwner(appointment, 'booking.requested.business');
 

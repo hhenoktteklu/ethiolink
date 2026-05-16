@@ -60,6 +60,7 @@ import {
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import { SlotService } from '../../shared/domains/availability/slotService.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
+import { PgPaymentIntentsRepository } from '../../shared/domains/payments/paymentIntentsRepository.js';
 import { PgServiceRepository } from '../../shared/domains/services/serviceRepository.js';
 import { PgStaffRepository } from '../../shared/domains/staff/staffRepository.js';
 import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
@@ -123,6 +124,11 @@ const appointmentService = new AppointmentService({
     onlineGateway: paymentGateways.online,
     notificationService,
     logger: baseLogger,
+    // Phase 10 commit 4 — persists a payment_intents row when the
+    // online gateway returns PENDING + a providerRef. Wired for
+    // every env; gated at runtime on the gateway returning a
+    // providerRef (cash + the historical mock path never reach it).
+    paymentIntentsRepo: new PgPaymentIntentsRepository(pool),
     options: {
         cancelCutoffMinutes: config.booking.cancelCutoffMinutes,
         timezone: config.booking.defaultTimezone,
