@@ -524,3 +524,34 @@ output "secrets_rotation_lambda_name" {
   description = "Name of the SAR-deployed rotation Lambda. Useful for `aws logs tail` during incident response."
   value       = module.secrets_rotation.rotation_lambda_name
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS
+#
+# Per-service customer-managed keys (`rds`, `s3_media`, `s3_logs`,
+# `s3_admin_frontend`, `secrets`, `lambda_env`). This commit lands
+# the keys ONLY — the consumer modules (rds, s3, secrets, lambda)
+# keep their AWS-managed encryption until the follow-up commit
+# threads the new ARNs through their `kms_key_*` inputs and the
+# operator runs the re-encryption runbook.
+#
+# Dev uses the AWS-minimum 7-day deletion window so a throwaway
+# stack can tear down quickly. Prod keeps the 30-day default.
+# -----------------------------------------------------------------------------
+
+module "kms" {
+  source = "../../modules/kms"
+
+  environment             = "dev"
+  deletion_window_in_days = 7
+}
+
+output "kms_key_arns" {
+  description = "Map of service slug → CMK ARN for the dev env. Stands by unused until the consumer-wiring commit; surface here so the operator can review the plan before any data moves."
+  value       = module.kms.key_arns
+}
+
+output "kms_alias_names" {
+  description = "Map of service slug → alias name (`alias/ethiolink-dev-<service>`). Convenient for `aws kms describe-key --key-id <alias>` smoke checks after apply."
+  value       = module.kms.alias_names
+}

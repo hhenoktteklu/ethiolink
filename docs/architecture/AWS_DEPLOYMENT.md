@@ -495,6 +495,51 @@ REMINDER_FUNCTION_NAME=ethiolink-dev-scheduled-send-reminders \
     bash backend/scripts/smoke.sh
 ```
 
+## KMS posture
+
+Phase 9 Track 4 introduces customer-managed KMS keys (CMKs) — one per consuming service — replacing the AWS-managed keys that shipped through Phase 8. **As of the `Phase 9: add KMS module` commit the keys exist but are unused**; consumer modules (rds, s3, secrets, lambda) still encrypt under the AWS-managed defaults until the follow-up commit threads the CMK ARNs through their `kms_key_*` inputs and the operator runs the re-encryption runbook.
+
+### Module + keys
+
+Provisioned by `infra/terraform/modules/kms/`. Six keys, each a `SYMMETRIC_DEFAULT` `ENCRYPT_DECRYPT` AES-GCM 256 key with annual AWS-managed rotation:
+
+| Service slug          | Alias (dev / prod)                                  | Consumer (post-wiring)                                     | Key-policy use grant                                                      |
+| --------------------- | --------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `rds`                 | `alias/ethiolink-${env}-rds`                        | RDS Postgres storage + `ethiolink/${env}/rds/master` secret | `rds.amazonaws.com`, fenced by `kms:ViaService = rds.${region}.amazonaws.com` |
+| `s3_media`            | `alias/ethiolink-${env}-s3-media`                   | `media-public` + `media-private` buckets                   | `s3.amazonaws.com`, fenced by `kms:ViaService = s3.${region}.amazonaws.com` |
+| `s3_logs`             | `alias/ethiolink-${env}-s3-logs`                    | Server-access-logs bucket                                  | `s3.amazonaws.com` + `logging.s3.amazonaws.com` (delivery service)        |
+| `s3_admin_frontend`   | `alias/ethiolink-${env}-s3-admin-frontend`          | Admin SPA bucket                                           | `s3.amazonaws.com` + `cloudfront.amazonaws.com` (OAC reads) fenced by `aws:SourceAccount` |
+| `secrets`             | `alias/ethiolink-${env}-secrets`                    | Secrets Manager entries                                    | `secretsmanager.amazonaws.com`, fenced by `kms:ViaService`                |
+| `lambda_env`          | `alias/ethiolink-${env}-lambda-env`                 | Lambda environment-variable blobs                          | `lambda.amazonaws.com`, fenced by `kms:ViaService`                        |
+
+Every key also carries the standard "account root can administer this key" statement (`kms:*` for `arn:aws:iam::${account_id}:root`) — without it the operator has no recovery path if a per-service grant turns out to be wrong, and a key with no admin statement is undeleteable from the console.
+
+### Key-rotation + deletion guardrails
+
+- **Rotation.** `enable_key_rotation = true` on every key. AWS rotates the backing key material annually with no operator action required. Historical ciphertexts stay decryptable through the rotation event because AWS retains the previous backing key material against the same key id.
+- **Deletion window.** `deletion_window_in_days` defaults to 30 in prod, set to 7 in dev (faster throwaway). This is the period AWS waits after a `ScheduleKeyDeletion` call before the key is irrevocably destroyed; during the window `CancelKeyDeletion` recovers the key intact.
+- **`prevent_destroy = true`** on every `aws_kms_key` resource. The Terraform-side guard is the hard "you cannot `terraform destroy` this by mistake"; the deletion window is the AWS-side recovery net for a `ScheduleKeyDeletion` call that did make it through.
+
+### Outputs
+
+The module exposes:
+
+- Per-service ARN + key id (`rds_key_arn` / `rds_key_id`, etc.).
+- Aggregated maps `key_arns`, `key_ids`, `alias_names` keyed by service slug, useful for the env stack to print a single block of every CMK in the env and for future observability dashboards to enumerate keys without naming each one explicitly.
+
+Both env stacks (`environments/dev/main.tf`, `environments/prod/main.tf`) construct the module and re-export `kms_key_arns` + `kms_alias_names`. The outputs stand by unused — the consumer modules don't read them yet — by design: the first apply in each environment provisions the keys without disturbing any existing data, so the operator can review a clean Terraform plan before any data moves.
+
+### What this commit does NOT do
+
+- Does not flip `aws_db_instance.this.kms_key_id` on the RDS module.
+- Does not flip `sse_algorithm` from `AES256` to `aws:kms` on any S3 bucket.
+- Does not flip `kms_key_id` on `aws_secretsmanager_secret.*` resources.
+- Does not flip `kms_key_arn` on `aws_lambda_function.*` resources.
+- Does not add `kms:Decrypt` / `kms:GenerateDataKey*` IAM grants to any Lambda execution role.
+- Does not move any existing data at rest from the AWS-managed key to a CMK.
+
+All five wiring steps land in the follow-up `Phase 9: wire CMKs through consumer modules` commit, gated behind a `kms_key_*` input on each consumer module that defaults to `null` (= AWS-managed; no behavior change when unset). The data-move step lands in `Phase 9: add KMS migration runbook` alongside `docs/operations/runbooks/kms-migration.md`.
+
 ## Disaster recovery
 
 The DR procedure is documented in [`docs/operations/DR_RUNBOOK.md`](../operations/DR_RUNBOOK.md). Highlights:

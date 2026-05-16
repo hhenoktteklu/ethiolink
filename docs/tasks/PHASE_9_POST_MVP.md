@@ -199,7 +199,7 @@ The first track is sequenced; the rest are recommended workstreams to schedule a
 
 ### Track 4 — KMS migration
 
-- [ ] `infra/terraform/modules/kms/` module created with one `aws_kms_key` per consuming service.
+- [x] `infra/terraform/modules/kms/` module created with one `aws_kms_key` per consuming service. *(Phase 9 commit `Phase 9: add KMS module`. Six keys: `rds`, `s3_media`, `s3_logs`, `s3_admin_frontend`, `secrets`, `lambda_env`. Each is a `SYMMETRIC_DEFAULT` `ENCRYPT_DECRYPT` key with `enable_key_rotation = true`, `prevent_destroy = true` on the resource lifecycle, and a key policy that combines an account-root admin grant with a service-principal use grant fenced behind `kms:ViaService` where AWS supports it. Aliases follow the `alias/ethiolink-${env}-<service>` schema. The S3-logs key additionally grants `logging.s3.amazonaws.com` (delivery service); the s3-admin-frontend key additionally grants `cloudfront.amazonaws.com` for OAC reads, fenced by `aws:SourceAccount`. Dev uses the AWS-minimum 7-day `deletion_window_in_days`; prod keeps the 30-day default. Both env stacks construct the module and re-export `kms_key_arns` + `kms_alias_names` — the outputs stand by unused until the follow-up commit wires them through the consumer modules. See `docs/architecture/AWS_DEPLOYMENT.md` § "KMS posture".)*
 - [ ] Each consumer module accepts a `kms_key_id` input defaulting to `null` (= AWS-managed; no behavior change when unset).
 - [ ] Env stacks wire the new module's key ARNs to the consumer modules.
 - [ ] Per-domain Lambda IAM roles gain `kms:Decrypt` (+ `kms:GenerateDataKey*` for write paths) scoped to the relevant key ARNs.

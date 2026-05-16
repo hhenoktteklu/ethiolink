@@ -562,3 +562,36 @@ output "secrets_rotation_lambda_name" {
   description = "Name of the rotation Lambda — operator uses for `aws logs tail` during incident response."
   value       = module.secrets_rotation.rotation_lambda_name
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS
+#
+# Per-service customer-managed keys (`rds`, `s3_media`, `s3_logs`,
+# `s3_admin_frontend`, `secrets`, `lambda_env`). This commit lands
+# the keys ONLY — the consumer modules (rds, s3, secrets, lambda)
+# keep their AWS-managed encryption until the follow-up commit
+# threads the new ARNs through their `kms_key_*` inputs and the
+# operator runs the re-encryption runbook.
+#
+# Prod keeps the module-default 30-day deletion window. The keys
+# carry `prevent_destroy = true` on top — the Terraform-side guard
+# is a hard "you can't `terraform destroy` this key by mistake",
+# while the 30-day window is the AWS-side recovery net for a
+# `ScheduleKeyDeletion` call that did make it through.
+# -----------------------------------------------------------------------------
+
+module "kms" {
+  source = "../../modules/kms"
+
+  environment = "prod"
+}
+
+output "kms_key_arns" {
+  description = "Map of service slug → CMK ARN for the prod env. Stands by unused until the consumer-wiring commit; surface here so the operator can review the plan before any data moves."
+  value       = module.kms.key_arns
+}
+
+output "kms_alias_names" {
+  description = "Map of service slug → alias name (`alias/ethiolink-prod-<service>`). Convenient for `aws kms describe-key --key-id <alias>` smoke checks after apply."
+  value       = module.kms.alias_names
+}
