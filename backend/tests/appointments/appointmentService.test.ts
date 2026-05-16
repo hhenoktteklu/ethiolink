@@ -375,6 +375,7 @@ function seedUser(
         status: 'ACTIVE' as const,
         displayName,
         telegramChatId,
+        locale: 'en' as const,
         createdAt: now,
         updatedAt: now,
     });

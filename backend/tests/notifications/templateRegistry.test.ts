@@ -154,3 +154,45 @@ describe('templateRegistry — unknown keys', () => {
         );
     });
 });
+
+describe('templateRegistry — locale handling', () => {
+    it('defaults to English when no locale is supplied', () => {
+        const body = renderTemplate('booking.accepted.customer', PAYLOAD).body;
+        assert.match(body, /accepted your/);
+    });
+
+    it('explicitly returns the English renderer for locale=en', () => {
+        const body = renderTemplate(
+            'booking.accepted.customer',
+            PAYLOAD,
+            'en',
+        ).body;
+        assert.match(body, /accepted your/);
+    });
+
+    it('falls back to English when the requested locale has no entry', () => {
+        // Phase 9 Track 5: MVP ships English-only. Asking for `'am'`
+        // must transparently return the English body until the
+        // Amharic content pass lands. The dispatcher relies on this
+        // so widening `users.locale` doesn't break delivery.
+        const enBody = renderTemplate(
+            'booking.accepted.customer',
+            PAYLOAD,
+            'en',
+        ).body;
+        const amBody = renderTemplate(
+            'booking.accepted.customer',
+            PAYLOAD,
+            'am',
+        ).body;
+        assert.strictEqual(amBody, enBody);
+    });
+
+    it('locale fallback applies to every registered key', () => {
+        for (const key of BOOKING_TEMPLATE_KEYS) {
+            const enBody = renderTemplate(key, PAYLOAD, 'en').body;
+            const amBody = renderTemplate(key, PAYLOAD, 'am').body;
+            assert.strictEqual(amBody, enBody, `fallback should hold for ${key}`);
+        }
+    });
+});

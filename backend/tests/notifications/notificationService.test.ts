@@ -420,3 +420,64 @@ describe('NotificationService — sanity', () => {
         );
     });
 });
+
+describe('NotificationService — locale handling (Phase 9 Track 5)', () => {
+    it('renders the English body for a default-locale (en) recipient', async () => {
+        const users = new InMemoryUserRepository();
+        const logs = new InMemoryNotificationLogRepository();
+        const gw = new ConfigurableGateway('MOCK', 'MOCK', {
+            kind: 'sent',
+            providerRef: 'mock-en',
+        });
+        const svc = new NotificationService({
+            userRepository: users,
+            notificationLogRepository: logs,
+            gateways: { MOCK: gw },
+            logger: silentLogger(),
+        });
+
+        const recipient = await seedUser(users);
+        // Sanity: fresh row defaults to 'en'.
+        assert.strictEqual(recipient.locale, 'en');
+
+        await svc.dispatch({
+            templateKey: TEMPLATE_KEY,
+            recipientUserId: recipient.id,
+            payload: { ...PAYLOAD },
+        });
+
+        assert.ok(gw.lastInput);
+        assert.match(gw.lastInput!.rendered.body, /accepted your/);
+    });
+
+    it('falls back to the English body for an am-locale recipient (MVP has no Amharic renderers yet)', async () => {
+        const users = new InMemoryUserRepository();
+        const logs = new InMemoryNotificationLogRepository();
+        const gw = new ConfigurableGateway('MOCK', 'MOCK', {
+            kind: 'sent',
+            providerRef: 'mock-am',
+        });
+        const svc = new NotificationService({
+            userRepository: users,
+            notificationLogRepository: logs,
+            gateways: { MOCK: gw },
+            logger: silentLogger(),
+        });
+
+        const recipient = await seedUser(users);
+        const switched = await users.setLocale(recipient.id, 'am');
+        assert.strictEqual(switched.locale, 'am');
+
+        await svc.dispatch({
+            templateKey: TEMPLATE_KEY,
+            recipientUserId: recipient.id,
+            payload: { ...PAYLOAD },
+        });
+
+        // Same English text — registry fallback to 'en' is the
+        // contract under test. When Amharic renderers ship, this
+        // assertion will need updating to the Amharic copy.
+        assert.ok(gw.lastInput);
+        assert.match(gw.lastInput!.rendered.body, /accepted your/);
+    });
+});

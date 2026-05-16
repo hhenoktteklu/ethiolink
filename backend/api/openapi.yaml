@@ -2176,7 +2176,7 @@ components:
   schemas:
     User:
       type: object
-      required: [id, role, createdAt, updatedAt]
+      required: [id, role, locale, createdAt, updatedAt]
       properties:
         id:
           type: string
@@ -2192,6 +2192,14 @@ components:
         role:
           type: string
           enum: [CUSTOMER, BUSINESS_OWNER, ADMIN]
+        locale:
+          type: string
+          enum: [en, am]
+          description: |
+            Preferred UI + notification locale. Phase 9 Track 5.
+            Defaults to `en` server-side; mutated through
+            `PATCH /v1/me`. The Flutter app reads this at sign-in
+            to prime its UI locale.
         createdAt:
           type: string
           format: date-time
@@ -2203,12 +2211,20 @@ components:
       description: |
         Patch shape for `PATCH /v1/me`. All fields optional.
         `null` clears a field; a string sets it. Strings are trimmed by
-        the server before validation.
+        the server before validation. `locale` does NOT accept `null`
+        (the column is `NOT NULL`); omit the field to leave it
+        unchanged.
       properties:
         displayName:
           type: [string, 'null']
           minLength: 1
           maxLength: 100
+        locale:
+          type: string
+          enum: [en, am]
+          description: |
+            Preferred UI + notification locale. Phase 9 Track 5.
+            Unknown values yield a 400 VALIDATION_ERROR.
     LocalizedText:
       type: object
       description: |

@@ -15,7 +15,7 @@
 
 import type { UserRole } from '../../adapters/auth/AuthProvider.js';
 
-import type { User, UserStatus } from './userRepository.js';
+import type { User, UserLocale, UserStatus } from './userRepository.js';
 
 /** Wire shape for a user. ISO-8601 timestamps, omits internal fields. */
 export interface UserView {
@@ -24,6 +24,12 @@ export interface UserView {
     readonly phone: string | null;
     readonly displayName: string | null;
     readonly role: UserRole;
+    /**
+     * Phase 9 Track 5: preferred UI + notification locale. Mirrors
+     * `users.locale`. The Flutter app reads this at sign-in to prime
+     * its UI locale; `PATCH /v1/me` lets the user mutate it.
+     */
+    readonly locale: UserLocale;
     readonly createdAt: string;
     readonly updatedAt: string;
 }
@@ -35,6 +41,7 @@ export function toUserView(user: User): UserView {
         phone: user.phone,
         displayName: user.displayName,
         role: user.role,
+        locale: user.locale,
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
     });

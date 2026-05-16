@@ -20,6 +20,16 @@ import { BaseRepository, RepositoryError } from '../../repositories/baseReposito
 
 export type UserStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED';
 
+/**
+ * Phase 9 Track 5: preferred UI + notification locale. The CHECK
+ * constraint on `users.locale` (migration 0016) is the schema-side
+ * mirror of this union. New locales arrive as a paired migration
+ * + union widening.
+ */
+export type UserLocale = 'en' | 'am';
+
+export const SUPPORTED_USER_LOCALES: readonly UserLocale[] = ['en', 'am'];
+
 /** Domain shape of a user row. Dates are JavaScript `Date` (pg parses timestamptz). */
 export interface User {
     readonly id: string;
@@ -39,6 +49,14 @@ export interface User {
      * `recipient.telegramChatId`.
      */
     readonly telegramChatId: string | null;
+    /**
+     * Phase 9 Track 5: preferred UI + notification locale.
+     * Defaults to `'en'` (DB-side default on migration 0016). The
+     * notification dispatcher reads this and threads it into
+     * `renderTemplate(key, payload, locale)`. The Flutter app
+     * reads it at sign-in to prime its UI locale.
+     */
+    readonly locale: UserLocale;
     readonly createdAt: Date;
     readonly updatedAt: Date;
 }
@@ -63,6 +81,15 @@ export interface UpsertUserFromAuthInput {
  */
 export interface UpdateUserFields {
     readonly displayName?: string | null;
+    /**
+     * Phase 9 Track 5: preferred locale. `undefined` leaves the
+     * column unchanged; a value sets it. `null` is NOT accepted —
+     * the column is `NOT NULL` so there's no "clear locale"
+     * affordance. Setting an unknown value (anything outside
+     * `SUPPORTED_USER_LOCALES`) is the caller's responsibility to
+     * reject at the HTTP boundary.
+     */
+    readonly locale?: UserLocale;
 }
 
 /**
@@ -107,6 +134,13 @@ export interface UserRepository {
      * column.
      */
     setTelegramChatId(id: string, chatId: string | null): Promise<User>;
+    /**
+     * Phase 9 Track 5: set the user's `locale`. Used by
+     * `PATCH /v1/me` when the caller updates only their locale;
+     * also reachable via the `update` patch surface. Throws
+     * `RepositoryError` if the id is missing.
+     */
+    setLocale(id: string, locale: UserLocale): Promise<User>;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,13 +156,14 @@ interface UserRow {
     status: UserStatus;
     display_name: string | null;
     telegram_chat_id: string | null;
+    locale: UserLocale;
     created_at: Date;
     updated_at: Date;
 }
 
 const USER_COLUMNS =
     'id, cognito_sub, email, phone, role, status, display_name, ' +
-    'telegram_chat_id, created_at, updated_at';
+    'telegram_chat_id, locale, created_at, updated_at';
 
 export class PgUserRepository extends BaseRepository implements UserRepository {
     async upsertFromAuth(input: UpsertUserFromAuthInput): Promise<User> {
@@ -165,8 +200,12 @@ export class PgUserRepository extends BaseRepository implements UserRepository {
     }
 
     async update(id: string, patch: UpdateUserFields): Promise<User> {
-        // Phase 1 only allows display_name. Skip the round-trip if nothing changed.
-        if (patch.displayName === undefined) {
+        // Phase 9 Track 5: `update` now spans `display_name` +
+        // `locale`. When the caller passes an empty patch (neither
+        // field defined) we short-circuit with a fresh read so the
+        // service-layer "load, return latest" contract holds
+        // without an unnecessary UPDATE.
+        if (patch.displayName === undefined && patch.locale === undefined) {
             const existing = await this.findById(id);
             if (!existing) {
                 throw new RepositoryError(`User ${id} not found.`);
@@ -174,14 +213,47 @@ export class PgUserRepository extends BaseRepository implements UserRepository {
             return existing;
         }
 
+        // COALESCE-style partial update — each field falls through
+        // to its current row value when the patch leaves it
+        // undefined. We pass `null` for "undefined" because the
+        // SQL `COALESCE(NULLIF($2, NULL), display_name)` pattern
+        // doesn't work with the typed pg adapter; instead we use
+        // a 3-arg COALESCE with the placeholder + a "did the
+        // caller send this field?" boolean.
+        //
+        // Concretely: for each field we send (newValue, didSend).
+        // `didSend = false` keeps the existing column value.
         const row = await this.oneOrNone<UserRow>(
             `
             UPDATE users
-               SET display_name = $2
+               SET display_name = CASE WHEN $3::boolean THEN $2 ELSE display_name END,
+                   locale       = CASE WHEN $5::boolean THEN $4 ELSE locale END
              WHERE id = $1
             RETURNING ${USER_COLUMNS};
             `,
-            [id, patch.displayName],
+            [
+                id,
+                patch.displayName === undefined ? null : patch.displayName,
+                patch.displayName !== undefined,
+                patch.locale === undefined ? 'en' : patch.locale,
+                patch.locale !== undefined,
+            ],
+        );
+        if (!row) {
+            throw new RepositoryError(`User ${id} not found.`);
+        }
+        return mapRow(row);
+    }
+
+    async setLocale(id: string, locale: UserLocale): Promise<User> {
+        const row = await this.oneOrNone<UserRow>(
+            `
+            UPDATE users
+               SET locale = $2
+             WHERE id = $1
+            RETURNING ${USER_COLUMNS};
+            `,
+            [id, locale],
         );
         if (!row) {
             throw new RepositoryError(`User ${id} not found.`);
@@ -253,6 +325,7 @@ function mapRow(row: UserRow): User {
         status: row.status,
         displayName: row.display_name,
         telegramChatId: row.telegram_chat_id,
+        locale: row.locale,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
     });

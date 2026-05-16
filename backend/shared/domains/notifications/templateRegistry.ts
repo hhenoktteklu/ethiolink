@@ -62,10 +62,22 @@
 //     (e.g. an SMS sender id override, an email template id for
 //     SendGrid dynamic templates). The shape is reserved so the
 //     gateway interface doesn't need a v2 when that lands.
+//
+//   * **Locale-aware (Phase 9 Track 5).** `renderTemplate` takes a
+//     `locale` argument; the registry is a `Record<TemplateKey,
+//     Record<UserLocale, Renderer>>` keyed first by template, then
+//     by language. MVP ships English renderers only — Amharic
+//     entries arrive in a follow-up content pass. The lookup falls
+//     back to `'en'` when the requested locale has no entry, so
+//     adding a locale to `users.locale` doesn't break notification
+//     delivery; the user just keeps receiving the English copy
+//     until the translations land. The argument defaults to `'en'`
+//     so existing call sites continue compiling without changes.
 
 import { DateTime } from 'luxon';
 
 import type { NotificationRenderedMessage } from '../../adapters/notifications/NotificationGateway.js';
+import type { UserLocale } from '../users/userRepository.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -140,79 +152,127 @@ export class UnknownTemplateKeyError extends Error {
 
 type Renderer = (payload: BookingTemplatePayload) => NotificationRenderedMessage;
 
-const RENDERERS: Readonly<Record<BookingTemplateKey, Renderer>> = Object.freeze({
-    'booking.requested.business': (p) =>
-        plain(
-            `${customerLabel(p)} just booked ${p.serviceName} on ${formatStartsAt(
-                p.startsAtUtc,
-            )}. Open the EthioLink app to accept or reject.`,
-        ),
+/**
+ * Per-template, per-locale renderer table. The outer key is the
+ * `BookingTemplateKey`, the inner key is a `UserLocale`. MVP ships
+ * `'en'` entries only — `'am'` (Amharic) lands in a follow-up
+ * content pass. `renderTemplate` falls back to `'en'` when the
+ * requested locale isn't present, so the dispatcher can safely
+ * pass `user.locale` through verbatim today.
+ */
+const RENDERERS: Readonly<
+    Record<BookingTemplateKey, Readonly<Partial<Record<UserLocale, Renderer>>>>
+> = Object.freeze({
+    'booking.requested.business': Object.freeze({
+        en: (p) =>
+            plain(
+                `${customerLabel(p)} just booked ${p.serviceName} on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}. Open the EthioLink app to accept or reject.`,
+            ),
+    }),
 
-    'booking.accepted.customer': (p) =>
-        plain(
-            `${p.businessName} accepted your ${p.serviceName} booking on ${formatStartsAt(
-                p.startsAtUtc,
-            )}. See you then!`,
-        ),
+    'booking.accepted.customer': Object.freeze({
+        en: (p) =>
+            plain(
+                `${p.businessName} accepted your ${p.serviceName} booking on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}. See you then!`,
+            ),
+    }),
 
-    'booking.rejected.customer': (p) =>
-        plain(
-            `${p.businessName} couldn't accept your ${p.serviceName} booking on ${formatStartsAt(
-                p.startsAtUtc,
-            )}. Please pick another time or another business.`,
-        ),
+    'booking.rejected.customer': Object.freeze({
+        en: (p) =>
+            plain(
+                `${p.businessName} couldn't accept your ${p.serviceName} booking on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}. Please pick another time or another business.`,
+            ),
+    }),
 
-    'booking.cancelled.business': (p) =>
-        plain(
-            `${customerLabel(p)} cancelled their ${p.serviceName} booking on ${formatStartsAt(
-                p.startsAtUtc,
-            )}${reasonSuffix(p.cancelReason)}.`,
-        ),
+    'booking.cancelled.business': Object.freeze({
+        en: (p) =>
+            plain(
+                `${customerLabel(p)} cancelled their ${p.serviceName} booking on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}${reasonSuffix(p.cancelReason)}.`,
+            ),
+    }),
 
-    'booking.cancelled.customer': (p) =>
-        plain(
-            `${p.businessName} cancelled your ${p.serviceName} booking on ${formatStartsAt(
-                p.startsAtUtc,
-            )}${reasonSuffix(p.cancelReason)}. We're sorry for the inconvenience.`,
-        ),
+    'booking.cancelled.customer': Object.freeze({
+        en: (p) =>
+            plain(
+                `${p.businessName} cancelled your ${p.serviceName} booking on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}${reasonSuffix(p.cancelReason)}. We're sorry for the inconvenience.`,
+            ),
+    }),
 
-    'booking.rescheduled.business': (p) =>
-        plain(
-            `${customerLabel(p)} rescheduled their ${p.serviceName} booking to ${formatStartsAt(
-                p.startsAtUtc,
-            )}${notesSuffix(p.rescheduleNotes)}.`,
-        ),
+    'booking.rescheduled.business': Object.freeze({
+        en: (p) =>
+            plain(
+                `${customerLabel(p)} rescheduled their ${p.serviceName} booking to ${formatStartsAt(
+                    p.startsAtUtc,
+                )}${notesSuffix(p.rescheduleNotes)}.`,
+            ),
+    }),
 
-    'booking.reminder.customer': (p) =>
-        plain(
-            `Reminder: your ${p.serviceName} appointment with ${p.businessName} is on ${formatStartsAt(
-                p.startsAtUtc,
-            )}. See you soon!`,
-        ),
+    'booking.reminder.customer': Object.freeze({
+        en: (p) =>
+            plain(
+                `Reminder: your ${p.serviceName} appointment with ${p.businessName} is on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}. See you soon!`,
+            ),
+    }),
 
-    'booking.reminder.business': (p) =>
-        plain(
-            `Reminder: ${customerLabel(p)} has a ${p.serviceName} appointment with you on ${formatStartsAt(
-                p.startsAtUtc,
-            )}.`,
-        ),
+    'booking.reminder.business': Object.freeze({
+        en: (p) =>
+            plain(
+                `Reminder: ${customerLabel(p)} has a ${p.serviceName} appointment with you on ${formatStartsAt(
+                    p.startsAtUtc,
+                )}.`,
+            ),
+    }),
 });
+
+const FALLBACK_LOCALE: UserLocale = 'en';
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Render the given `templateKey` against `payload`. Throws
- * `UnknownTemplateKeyError` if the key isn't registered — the
- * dispatcher treats that as a non-retryable configuration error.
+ * Render the given `templateKey` against `payload`, in the
+ * requested `locale`. Throws `UnknownTemplateKeyError` if the
+ * key isn't registered — the dispatcher treats that as a
+ * non-retryable configuration error.
+ *
+ * Locale fallback: if the requested locale has no entry for this
+ * template (e.g. `'am'` while only `'en'` is registered), the
+ * registry transparently falls back to `'en'`. This makes it
+ * safe for `users.locale` to widen ahead of the translation pass
+ * — users stay receiving the English copy until their locale's
+ * renderer lands.
+ *
+ * `locale` defaults to `'en'` so existing callers don't have to
+ * change.
  */
 export function renderTemplate(
     templateKey: string,
     payload: BookingTemplatePayload,
+    locale: UserLocale = FALLBACK_LOCALE,
 ): NotificationRenderedMessage {
-    const renderer = (RENDERERS as Record<string, Renderer | undefined>)[templateKey];
+    const perLocale = (
+        RENDERERS as Record<string, Readonly<Partial<Record<UserLocale, Renderer>>> | undefined>
+    )[templateKey];
+    if (!perLocale) {
+        throw new UnknownTemplateKeyError(templateKey);
+    }
+    const renderer = perLocale[locale] ?? perLocale[FALLBACK_LOCALE];
     if (!renderer) {
+        // Defensive: if a template is registered with no English
+        // entry the call site is buggy. Surface it loudly.
         throw new UnknownTemplateKeyError(templateKey);
     }
     return renderer(payload);

@@ -6,9 +6,14 @@
 //     not yet created (no Phase 1 migration for it). When that table
 //     lands, add a customer-profile patch path here.
 //
+// Phase 9 Track 5 additions:
+//   * `locale` — mutable here. Accepts `'en'` or `'am'`; anything else
+//     is a 400 VALIDATION_ERROR. `null` is NOT accepted (the column
+//     is `NOT NULL`); `undefined` / field absent leaves it unchanged.
+//
 // Body shape (all fields optional; an empty `{}` is a valid no-op):
 //
-//     { "displayName": string | null }
+//     { "displayName": string | null, "locale": "en" | "am" }
 //
 // `null` clears the field; a string sets it. Strings are trimmed and
 // length-bounded; whitespace-only strings are rejected.
@@ -26,7 +31,9 @@ import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig
 import { getPool } from '../../shared/db/pgClient.js';
 import {
     type UpdateUserFields,
+    type UserLocale,
     PgUserRepository,
+    SUPPORTED_USER_LOCALES,
 } from '../../shared/domains/users/userRepository.js';
 import {
     UserNotFoundError,
@@ -134,13 +141,34 @@ function parsePatchBody(rawBody: string | null): UpdateUserFields {
     }
 
     const obj = parsed as Record<string, unknown>;
-    const out: { displayName?: string | null } = {};
+    const out: { displayName?: string | null; locale?: UserLocale } = {};
 
     if ('displayName' in obj) {
         out.displayName = parseDisplayName(obj.displayName);
     }
+    if ('locale' in obj) {
+        out.locale = parseLocale(obj.locale);
+    }
 
     return out;
+}
+
+function parseLocale(value: unknown): UserLocale {
+    // `null` is rejected explicitly — the column is NOT NULL and
+    // there's no "clear locale" affordance.
+    if (typeof value !== 'string') {
+        throw new ValidationFailure(
+            `locale must be one of ${SUPPORTED_USER_LOCALES.join(', ')}.`,
+            { field: 'locale', allowed: SUPPORTED_USER_LOCALES },
+        );
+    }
+    if (!(SUPPORTED_USER_LOCALES as readonly string[]).includes(value)) {
+        throw new ValidationFailure(
+            `locale must be one of ${SUPPORTED_USER_LOCALES.join(', ')}.`,
+            { field: 'locale', allowed: SUPPORTED_USER_LOCALES },
+        );
+    }
+    return value as UserLocale;
 }
 
 function parseDisplayName(value: unknown): string | null {

@@ -23,6 +23,7 @@ import type {
     UpdateUserFields,
     UpsertUserFromAuthInput,
     User,
+    UserLocale,
     UserRepository,
     UserStatus,
 } from '../../shared/domains/users/userRepository.js';
@@ -58,6 +59,7 @@ export class InMemoryUserRepository implements UserRepository {
                   status: 'ACTIVE',
                   displayName: input.displayName,
                   telegramChatId: null,
+                  locale: 'en',
                   createdAt: now,
                   updatedAt: now,
               });
@@ -80,14 +82,19 @@ export class InMemoryUserRepository implements UserRepository {
         if (!existing) {
             throw new RepositoryError(`User ${id} not found.`);
         }
-        // displayName === undefined means "leave unchanged". An explicit
-        // `null` clears the field.
-        if (patch.displayName === undefined) {
+        // Empty patch → no-op fresh read, mirrors the Pg
+        // implementation's short-circuit.
+        if (patch.displayName === undefined && patch.locale === undefined) {
             return existing;
         }
         const updated = Object.freeze<User>({
             ...existing,
-            displayName: patch.displayName,
+            displayName:
+                patch.displayName === undefined
+                    ? existing.displayName
+                    : patch.displayName,
+            locale:
+                patch.locale === undefined ? existing.locale : patch.locale,
             updatedAt: new Date(),
         });
         this.rowsById.set(updated.id, updated);
@@ -103,6 +110,21 @@ export class InMemoryUserRepository implements UserRepository {
         const updated = Object.freeze<User>({
             ...existing,
             status,
+            updatedAt: new Date(),
+        });
+        this.rowsById.set(updated.id, updated);
+        this.rowsBySub.set(updated.cognitoSub, updated);
+        return updated;
+    }
+
+    async setLocale(id: string, locale: UserLocale): Promise<User> {
+        const existing = this.rowsById.get(id);
+        if (!existing) {
+            throw new RepositoryError(`User ${id} not found.`);
+        }
+        const updated = Object.freeze<User>({
+            ...existing,
+            locale,
             updatedAt: new Date(),
         });
         this.rowsById.set(updated.id, updated);

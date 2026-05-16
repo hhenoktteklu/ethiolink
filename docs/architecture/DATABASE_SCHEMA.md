@@ -28,6 +28,7 @@ Mirror of Cognito identities. One row per authenticated principal across all rol
 | status            | text NOT NULL  | CHECK in ('ACTIVE','SUSPENDED','DELETED'), default 'ACTIVE' |
 | display_name      | text           |                                                             |
 | telegram_chat_id  | text           | nullable; set via the Telegram linking flow (Phase 9 Track 2, migration 0014). Partial index on `id WHERE telegram_chat_id IS NOT NULL` |
+| locale            | text NOT NULL  | CHECK in ('en','am'), default `'en'`. Phase 9 Track 5 (migration 0016). Mutable through `PATCH /v1/me`. Drives the Flutter UI locale + the notification template registry's per-locale renderer lookup (English fallback when an Amharic renderer isn't registered yet). |
 | created_at        | timestamptz    |                                                             |
 | updated_at        | timestamptz    |                                                             |
 

@@ -240,7 +240,10 @@ export class NotificationService {
         }
 
         // (2) Render template. UnknownTemplateKeyError surfaces.
-        const rendered = renderTemplate(input.templateKey, input.payload);
+        //     Phase 9 Track 5: pass the recipient's locale so the
+        //     registry can pick an Amharic renderer when one exists;
+        //     it falls back to English transparently when not.
+        const rendered = renderTemplate(input.templateKey, input.payload, user.locale);
 
         // (3) Look up gateway BEFORE inserting the log row, so a
         //     missing gateway doesn't litter `notification_logs`

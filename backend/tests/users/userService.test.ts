@@ -144,6 +144,46 @@ describe('UserService.update', () => {
         assert.strictEqual(updated.displayName, 'New Name');
     });
 
+    it('updates locale to am', async () => {
+        const repo = new InMemoryUserRepository();
+        const service = new UserService(repo);
+        const created = await service.syncFromPrincipal(principal());
+        assert.strictEqual(created.locale, 'en');
+
+        const updated = await service.update(created.id, { locale: 'am' });
+
+        assert.strictEqual(updated.locale, 'am');
+        // Display name is untouched when the patch only carries locale.
+        assert.strictEqual(updated.displayName, created.displayName);
+    });
+
+    it('updates display_name and locale together', async () => {
+        const repo = new InMemoryUserRepository();
+        const service = new UserService(repo);
+        const created = await service.syncFromPrincipal(principal());
+
+        const updated = await service.update(created.id, {
+            displayName: 'New Name',
+            locale: 'am',
+        });
+
+        assert.strictEqual(updated.displayName, 'New Name');
+        assert.strictEqual(updated.locale, 'am');
+    });
+
+    it('leaves locale alone when the patch omits it', async () => {
+        const repo = new InMemoryUserRepository();
+        const service = new UserService(repo);
+        const created = await service.syncFromPrincipal(principal());
+
+        // Bring the row to 'am' so we can verify omission preserves it.
+        await service.update(created.id, { locale: 'am' });
+        const after = await service.update(created.id, { displayName: 'Bob' });
+
+        assert.strictEqual(after.displayName, 'Bob');
+        assert.strictEqual(after.locale, 'am');
+    });
+
     it('clears display_name when patched with null', async () => {
         const repo = new InMemoryUserRepository();
         const service = new UserService(repo);
