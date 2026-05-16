@@ -170,29 +170,118 @@ describe('templateRegistry — locale handling', () => {
         assert.match(body, /accepted your/);
     });
 
-    it('falls back to English when the requested locale has no entry', () => {
-        // Phase 9 Track 5: MVP ships English-only. Asking for `'am'`
-        // must transparently return the English body until the
-        // Amharic content pass lands. The dispatcher relies on this
-        // so widening `users.locale` doesn't break delivery.
-        const enBody = renderTemplate(
-            'booking.accepted.customer',
-            PAYLOAD,
-            'en',
-        ).body;
-        const amBody = renderTemplate(
+    it('every registered key renders a non-empty English body', () => {
+        for (const key of BOOKING_TEMPLATE_KEYS) {
+            const body = renderTemplate(key, PAYLOAD, 'en').body;
+            assert.ok(body.length > 0, `en body must be non-empty for ${key}`);
+            // English bodies contain only ASCII (plus the
+            // standard punctuation we use). A quick sanity check
+            // that we didn't accidentally swap an Amharic glyph
+            // into an English renderer.
+            assert.doesNotMatch(
+                body,
+                /[ሀ-፿]/,
+                `en body should not contain Ethiopic glyphs for ${key}`,
+            );
+        }
+    });
+
+    it('every registered key renders a non-empty Amharic body', () => {
+        for (const key of BOOKING_TEMPLATE_KEYS) {
+            const body = renderTemplate(key, PAYLOAD, 'am').body;
+            assert.ok(body.length > 0, `am body must be non-empty for ${key}`);
+            // Amharic bodies must contain at least one Ethiopic
+            // script glyph (U+1200-U+137F). If a renderer
+            // accidentally returns the English copy this will
+            // catch it.
+            assert.match(
+                body,
+                /[ሀ-፿]/,
+                `am body should contain Ethiopic glyphs for ${key}`,
+            );
+        }
+    });
+
+    it('Amharic body differs from English body for every key', () => {
+        for (const key of BOOKING_TEMPLATE_KEYS) {
+            const enBody = renderTemplate(key, PAYLOAD, 'en').body;
+            const amBody = renderTemplate(key, PAYLOAD, 'am').body;
+            assert.notStrictEqual(
+                amBody,
+                enBody,
+                `am body must differ from en body for ${key}`,
+            );
+        }
+    });
+
+    it('Amharic body preserves proper nouns (business/service/customer) verbatim', () => {
+        // We don't transliterate user-entered data. Latin-script
+        // names flow through into the Amharic copy.
+        const body = renderTemplate(
             'booking.accepted.customer',
             PAYLOAD,
             'am',
         ).body;
-        assert.strictEqual(amBody, enBody);
+        assert.match(body, /Habesha Beauty Lounge/);
+        assert.match(body, /Hair braiding/);
     });
 
-    it('locale fallback applies to every registered key', () => {
-        for (const key of BOOKING_TEMPLATE_KEYS) {
-            const enBody = renderTemplate(key, PAYLOAD, 'en').body;
-            const amBody = renderTemplate(key, PAYLOAD, 'am').body;
-            assert.strictEqual(amBody, enBody, `fallback should hold for ${key}`);
-        }
+    it('Amharic body formats startsAt with Amharic weekday + month + meridiem', () => {
+        // UTC 11:00 -> Addis 14:00 (UTC+3). Friday 15 May 2026.
+        // Friday = ዓርብ; May = ሜይ; 2:00 PM = ከሰዓት.
+        const body = renderTemplate(
+            'booking.accepted.customer',
+            PAYLOAD,
+            'am',
+        ).body;
+        assert.match(body, /ዓርብ/);
+        assert.match(body, /ሜይ/);
+        assert.match(body, /2:00 ከሰዓት/);
+    });
+
+    it('Amharic body uses Amharic suffix labels for reason / notes', () => {
+        const cancelledBiz = renderTemplate(
+            'booking.cancelled.business',
+            PAYLOAD,
+            'am',
+        ).body;
+        assert.match(cancelledBiz, /ምክንያት: Closed for maintenance/);
+
+        const rescheduledBiz = renderTemplate(
+            'booking.rescheduled.business',
+            PAYLOAD,
+            'am',
+        ).body;
+        assert.match(
+            rescheduledBiz,
+            /ማስታወሻ: Customer asked for later in the day/,
+        );
+    });
+
+    it('Amharic body falls back to "አንድ ደንበኛ" when customerDisplayName is null', () => {
+        const anon: BookingTemplatePayload = {
+            ...PAYLOAD,
+            customerDisplayName: null,
+        };
+        const body = renderTemplate(
+            'booking.requested.business',
+            anon,
+            'am',
+        ).body;
+        assert.match(body, /አንድ ደንበኛ/);
+    });
+
+    it('falls back to English when an unsupported locale is requested', () => {
+        // The type union only allows 'en' | 'am' at compile time,
+        // but the registry guards against runtime callers (string
+        // boundary) too. Casting to bypass the union mirrors what
+        // a misconfigured caller might do.
+        const enBody = renderTemplate('booking.accepted.customer', PAYLOAD, 'en').body;
+        const fallback = renderTemplate(
+            'booking.accepted.customer',
+            PAYLOAD,
+            'fr' as unknown as 'en',
+        ).body;
+        assert.strictEqual(fallback, enBody);
     });
 });

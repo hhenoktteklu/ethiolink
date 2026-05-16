@@ -66,13 +66,23 @@
 //   * **Locale-aware (Phase 9 Track 5).** `renderTemplate` takes a
 //     `locale` argument; the registry is a `Record<TemplateKey,
 //     Record<UserLocale, Renderer>>` keyed first by template, then
-//     by language. MVP ships English renderers only — Amharic
-//     entries arrive in a follow-up content pass. The lookup falls
-//     back to `'en'` when the requested locale has no entry, so
-//     adding a locale to `users.locale` doesn't break notification
-//     delivery; the user just keeps receiving the English copy
-//     until the translations land. The argument defaults to `'en'`
-//     so existing call sites continue compiling without changes.
+//     by language. Both `'en'` and `'am'` (Amharic) ship with
+//     entries for every booking template. The lookup still falls
+//     back to `'en'` when a future locale lands without all its
+//     renderers, so widening `users.locale` ahead of the content
+//     pass remains safe. The argument defaults to `'en'` so
+//     existing call sites continue compiling without changes.
+//
+//   * **Amharic copy notes.** Weekday + month names use Amharic
+//     abbreviations from a hardcoded lookup (not Intl) so tests
+//     are deterministic and don't depend on the Node ICU build.
+//     Hours are formatted with ጥዋት (morning) / ከሰዓት
+//     (afternoon) instead of AM / PM. Proper nouns —
+//     `businessName`, `serviceName`, `customerDisplayName` — pass
+//     through verbatim; we don't transliterate user-entered data.
+//     The "(reason: ...)" / "(notes: ...)" suffixes pick up
+//     Amharic labels (ምክንያት / ማስታወሻ) when the renderer locale
+//     is `'am'`.
 
 import { DateTime } from 'luxon';
 
@@ -154,11 +164,11 @@ type Renderer = (payload: BookingTemplatePayload) => NotificationRenderedMessage
 
 /**
  * Per-template, per-locale renderer table. The outer key is the
- * `BookingTemplateKey`, the inner key is a `UserLocale`. MVP ships
- * `'en'` entries only — `'am'` (Amharic) lands in a follow-up
- * content pass. `renderTemplate` falls back to `'en'` when the
- * requested locale isn't present, so the dispatcher can safely
- * pass `user.locale` through verbatim today.
+ * `BookingTemplateKey`, the inner key is a `UserLocale`. Both
+ * `'en'` and `'am'` ship with an entry for every booking template
+ * (Phase 9 Track 5 content pass). `renderTemplate` still falls
+ * back to `'en'` when a future locale is registered without all
+ * its entries, so widening `users.locale` remains safe.
  */
 const RENDERERS: Readonly<
     Record<BookingTemplateKey, Readonly<Partial<Record<UserLocale, Renderer>>>>
@@ -166,9 +176,17 @@ const RENDERERS: Readonly<
     'booking.requested.business': Object.freeze({
         en: (p) =>
             plain(
-                `${customerLabel(p)} just booked ${p.serviceName} on ${formatStartsAt(
+                `${customerLabel(p, 'en')} just booked ${p.serviceName} on ${formatStartsAt(
                     p.startsAtUtc,
+                    'en',
                 )}. Open the EthioLink app to accept or reject.`,
+            ),
+        am: (p) =>
+            plain(
+                `${customerLabel(p, 'am')} ለ${p.serviceName} ቀጠሮ ቦታ ይዘዋል፣ ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )}። ለመቀበል ወይም ለመቃወም EthioLink አፕልኬሽን ይክፈቱ።`,
             ),
     }),
 
@@ -177,7 +195,15 @@ const RENDERERS: Readonly<
             plain(
                 `${p.businessName} accepted your ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
+                    'en',
                 )}. See you then!`,
+            ),
+        am: (p) =>
+            plain(
+                `${p.businessName} የ${p.serviceName} ቀጠሮዎን ተቀብለዋል፣ ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )}። በዚያ ቀን እንገናኝ!`,
             ),
     }),
 
@@ -186,16 +212,32 @@ const RENDERERS: Readonly<
             plain(
                 `${p.businessName} couldn't accept your ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
+                    'en',
                 )}. Please pick another time or another business.`,
+            ),
+        am: (p) =>
+            plain(
+                `${p.businessName} የ${p.serviceName} ቀጠሮዎን በ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )} መቀበል አልቻለም። እባክዎ ሌላ ሰዓት ወይም ሌላ ቢዝነስ ይምረጡ።`,
             ),
     }),
 
     'booking.cancelled.business': Object.freeze({
         en: (p) =>
             plain(
-                `${customerLabel(p)} cancelled their ${p.serviceName} booking on ${formatStartsAt(
+                `${customerLabel(p, 'en')} cancelled their ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
-                )}${reasonSuffix(p.cancelReason)}.`,
+                    'en',
+                )}${reasonSuffix(p.cancelReason, 'en')}.`,
+            ),
+        am: (p) =>
+            plain(
+                `${customerLabel(p, 'am')} የ${p.serviceName} ቀጠሯቸውን በ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )} ሰርዘዋል${reasonSuffix(p.cancelReason, 'am')}።`,
             ),
     }),
 
@@ -204,16 +246,32 @@ const RENDERERS: Readonly<
             plain(
                 `${p.businessName} cancelled your ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
-                )}${reasonSuffix(p.cancelReason)}. We're sorry for the inconvenience.`,
+                    'en',
+                )}${reasonSuffix(p.cancelReason, 'en')}. We're sorry for the inconvenience.`,
+            ),
+        am: (p) =>
+            plain(
+                `${p.businessName} የ${p.serviceName} ቀጠሮዎን በ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )} ሰርዟል${reasonSuffix(p.cancelReason, 'am')}። ስለ ችግሩ ይቅርታ እንጠይቃለን።`,
             ),
     }),
 
     'booking.rescheduled.business': Object.freeze({
         en: (p) =>
             plain(
-                `${customerLabel(p)} rescheduled their ${p.serviceName} booking to ${formatStartsAt(
+                `${customerLabel(p, 'en')} rescheduled their ${p.serviceName} booking to ${formatStartsAt(
                     p.startsAtUtc,
-                )}${notesSuffix(p.rescheduleNotes)}.`,
+                    'en',
+                )}${notesSuffix(p.rescheduleNotes, 'en')}.`,
+            ),
+        am: (p) =>
+            plain(
+                `${customerLabel(p, 'am')} የ${p.serviceName} ቀጠሯቸውን ወደ ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )} ቀይረዋል${notesSuffix(p.rescheduleNotes, 'am')}።`,
             ),
     }),
 
@@ -222,16 +280,32 @@ const RENDERERS: Readonly<
             plain(
                 `Reminder: your ${p.serviceName} appointment with ${p.businessName} is on ${formatStartsAt(
                     p.startsAtUtc,
+                    'en',
                 )}. See you soon!`,
+            ),
+        am: (p) =>
+            plain(
+                `ማስታወሻ: የ${p.serviceName} ቀጠሮዎ ከ${p.businessName} ጋር በ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )} ነው። በቅርቡ እንገናኝ!`,
             ),
     }),
 
     'booking.reminder.business': Object.freeze({
         en: (p) =>
             plain(
-                `Reminder: ${customerLabel(p)} has a ${p.serviceName} appointment with you on ${formatStartsAt(
+                `Reminder: ${customerLabel(p, 'en')} has a ${p.serviceName} appointment with you on ${formatStartsAt(
                     p.startsAtUtc,
+                    'en',
                 )}.`,
+            ),
+        am: (p) =>
+            plain(
+                `ማስታወሻ: ${customerLabel(p, 'am')} ከእርስዎ ጋር የ${p.serviceName} ቀጠሮ አላቸው፣ ${formatStartsAt(
+                    p.startsAtUtc,
+                    'am',
+                )}።`,
             ),
     }),
 });
@@ -307,28 +381,97 @@ function plain(body: string): NotificationRenderedMessage {
     });
 }
 
-function customerLabel(p: BookingTemplatePayload): string {
-    return p.customerDisplayName ?? 'A customer';
+function customerLabel(
+    p: BookingTemplatePayload,
+    locale: UserLocale,
+): string {
+    if (p.customerDisplayName) return p.customerDisplayName;
+    return locale === 'am' ? 'አንድ ደንበኛ' : 'A customer';
 }
 
-function reasonSuffix(reason: string | null | undefined): string {
+function reasonSuffix(
+    reason: string | null | undefined,
+    locale: UserLocale,
+): string {
     if (!reason) return '';
-    return ` (reason: ${reason})`;
+    const label = locale === 'am' ? 'ምክንያት' : 'reason';
+    return ` (${label}: ${reason})`;
 }
 
-function notesSuffix(notes: string | null | undefined): string {
+function notesSuffix(
+    notes: string | null | undefined,
+    locale: UserLocale,
+): string {
     if (!notes) return '';
-    return ` (notes: ${notes})`;
+    const label = locale === 'am' ? 'ማስታወሻ' : 'notes';
+    return ` (${label}: ${notes})`;
 }
 
 /**
  * Pretty-print a UTC ISO-8601 timestamp in Addis Ababa local
  * time. Falls back to the raw ISO string if Luxon can't parse it
  * — defensive only; the dispatcher always passes a valid value.
+ *
+ * English: relies on Luxon's default format (e.g. "Fri 15 May,
+ * 2:00 PM"). Amharic: hand-rolled with the
+ * `AM_WEEKDAY_SHORT` / `AM_MONTH_SHORT` lookups + ጥዋት/ከሰዓት
+ * meridiem, so the output is deterministic regardless of the
+ * Node ICU build.
  */
-function formatStartsAt(startsAtUtc: string): string {
+function formatStartsAt(
+    startsAtUtc: string,
+    locale: UserLocale,
+): string {
     const dt = DateTime.fromISO(startsAtUtc, { zone: 'utc' }).setZone(ADDIS_TZ);
     if (!dt.isValid) return startsAtUtc;
+    if (locale === 'am') {
+        const weekday = AM_WEEKDAY_SHORT[dt.weekday] ?? '';
+        const month = AM_MONTH_SHORT[dt.month] ?? '';
+        const hour24 = dt.hour;
+        const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+        const minute = dt.minute.toString().padStart(2, '0');
+        const meridiem = hour24 < 12 ? 'ጥዋት' : 'ከሰዓት';
+        return `${weekday} ${dt.day} ${month}, ${hour12}:${minute} ${meridiem}`;
+    }
     // e.g. "Fri 17 May, 2:00 PM"
     return dt.toFormat('ccc d LLL, h:mm a');
 }
+
+/**
+ * Amharic weekday abbreviations, indexed by Luxon's
+ * `DateTime#weekday` (1 = Monday … 7 = Sunday). Hand-rolled so
+ * the output doesn't depend on the Node runtime's ICU
+ * Amharic data — keeps unit tests deterministic across CI
+ * runners.
+ */
+const AM_WEEKDAY_SHORT: Readonly<Record<number, string>> = Object.freeze({
+    1: 'ሰኞ',
+    2: 'ማክሰ',
+    3: 'ረቡዕ',
+    4: 'ሐሙስ',
+    5: 'ዓርብ',
+    6: 'ቅዳሜ',
+    7: 'እሁድ',
+});
+
+/**
+ * Amharic Gregorian month abbreviations, indexed by Luxon's
+ * `DateTime#month` (1 = January … 12 = December). Ethiopian
+ * calendar months (መስከረም/ጥቅምት/…) are deliberately NOT used —
+ * the system stores Gregorian timestamps and these messages are
+ * pretty-prints of the Gregorian date in Amharic script.
+ */
+const AM_MONTH_SHORT: Readonly<Record<number, string>> = Object.freeze({
+    1: 'ጃንዋ',
+    2: 'ፌብሩ',
+    3: 'ማርች',
+    4: 'ኤፕሪ',
+    5: 'ሜይ',
+    6: 'ጁን',
+    7: 'ጁላይ',
+    8: 'ኦገስ',
+    9: 'ሴፕቴ',
+    10: 'ኦክቶ',
+    11: 'ኖቬም',
+    12: 'ዲሴም',
+});

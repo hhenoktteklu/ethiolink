@@ -64,7 +64,7 @@ In scope (recommended workstreams, in rough priority order):
 - **Telegram bot provider integration.** Provision a BotFather bot, add `users.telegram_chat_id` via migration 0014, add `/v1/me/link-telegram` linking endpoint, ship `TelegramBotGateway` implementing `NotificationGateway`. Routes through the dispatcher when the user has a linked chat id.
 - **Flutter mobile scaffold + customer-side MVP.** `mobile/` directory at the repo root; `flutter create` scaffold + workspace integration; `flutter_appauth` PKCE wiring against the existing Cognito mobile app-client; OpenAPI-generated Dart client; customer browse + booking + history flows; business sign-up + service / staff CRUD + accept-reject-complete flow. Push notifications via FCM/APNs remain deferred per `MVP_SCOPE.md`. Lint + test workflow at `.github/workflows/lint-test-mobile.yml`.
 - **KMS-managed encryption migration.** New `infra/terraform/modules/kms/` with one CMK per consuming service (rds, s3-media-public, s3-media-private, secrets, lambda-env). Each consumer module gains a `kms_key_id` input defaulting to `null` (= AWS-managed). Re-encryption at rest in a maintenance window: RDS snapshot + restore-with-CMK; S3 `cp --recursive --sse aws:kms`; Secrets Manager `update-secret --kms-key-id`. Per-domain Lambda roles gain `kms:Decrypt` (+ `kms:GenerateDataKey*` for write paths) scoped to the relevant key ARNs.
-- **Amharic / native localization.** Migration 0016 adds `users.locale` with default `'en'` + CHECK in `('en', 'am')`. `PATCH /v1/me` accepts `locale`. Template registry is keyed `template × locale`, with English-only entries in MVP and a transparent fallback to English when a locale-specific renderer isn't registered yet — letting `users.locale` widen ahead of the translation pass. Flutter app ships with both ARB bundles (deferred). Admin SPA gets `react-i18next` scaffolding (lower priority — operator surface).
+- **Amharic / native localization.** Migration 0016 adds `users.locale` with default `'en'` + CHECK in `('en', 'am')`. `PATCH /v1/me` accepts `locale`. Template registry is keyed `template × locale`, with **English and Amharic entries for every booking template** as of the content pass. The registry still falls back to English when a renderer is missing, so adding a third locale stays safe. Date / time formatting uses a hand-rolled Amharic weekday + month abbreviation table + ጥዋት / ከሰዓት meridiem so unit tests don't depend on the Node ICU build. Flutter app ships with both ARB bundles (deferred). Admin SPA gets `react-i18next` scaffolding (lower priority — operator surface).
 - **Marketplace growth features.** Each is a separate workstream with its own commit cadence:
   - **Search / discovery improvements.** GIN index on `business_profiles.description` for full-text search; optional PostGIS lat/lon radius search; new `search` query param on `GET /v1/businesses`.
   - **Paid featuring.** `featuring_subscriptions` table + checkout flow + daily expiration sweep + business-side self-service featuring UI. Gated on the online-payment provider landing first.
@@ -146,10 +146,9 @@ The list spans the recommended workstreams. Files marked *(new)* don't exist tod
 - `backend/shared/domains/users/userView.ts` *(extended — `UserView.locale`)*
 - `backend/lambdas/me/patch.ts` *(extended — `parseLocale` validator)*
 - `backend/api/openapi.yaml` *(extended — `User.locale` + `PatchMeRequest.locale`)*
-- `backend/shared/domains/notifications/templateRegistry.ts` *(widened — per-locale renderer table, `renderTemplate(key, payload, locale = 'en')`, transparent fallback to English when a locale-specific renderer is missing)*
+- `backend/shared/domains/notifications/templateRegistry.ts` *(widened — per-locale renderer table, `renderTemplate(key, payload, locale = 'en')`, transparent fallback to English when a locale-specific renderer is missing; Amharic renderers landed for every booking template as part of the content pass commit)*
 - `backend/shared/domains/notifications/notificationService.ts` *(passes `user.locale` to `renderTemplate`)*
 - `mobile/lib/i18n/{en,am}.arb` *(deferred — Flutter ARB bundles)*
-- Per-template Amharic renderers in `templateRegistry.ts` *(deferred — content pass)*
 - `admin/src/i18n/{en,am}.json` *(deferred — admin SPA bundles, lower priority)*
 
 ### Marketplace growth
@@ -210,9 +209,10 @@ The first track is sequenced; the rest are recommended workstreams to schedule a
 
 - [x] Migration 0016 adds `users.locale` with `CHECK in ('en', 'am')`. *(Foundation commit — `Phase 9: add localization foundation`.)*
 - [x] `PATCH /v1/me` accepts `locale`; the notification dispatcher reads `recipient.locale` when picking templates. *(Same commit; registry falls back to English when an Amharic renderer isn't registered yet, so widening `users.locale` is safe ahead of the translation pass.)*
-- [ ] Template registry has `.am` variants for every customer-facing template.
+- [x] Template registry has `.am` variants for every customer-facing template. *(Content-pass commit — `Phase 9: add Amharic notification templates`. Amharic renderers cover all eight booking template keys. Date / time formatting falls back to a hand-rolled Amharic weekday + month abbreviation table + ጥዋት / ከሰዓት meridiem so the output is deterministic across CI runners regardless of the Node ICU build. Proper nouns — business name, service name, customer display name — pass through verbatim; we don't transliterate user-entered Latin-script data. Cancel-reason and reschedule-notes suffixes pick up Amharic labels (ምክንያት / ማስታወሻ). The English fallback still applies if a future locale lands without all its renderers.)*
 - [ ] Flutter app ships with both `en` and `am` ARB bundles; locale picker in app settings.
 - [ ] Admin SPA i18n scaffolding (lower priority).
+- [ ] Native-speaker review of the Amharic copy before prod rollout. The translations were authored by the engineering team and should be vetted by a native Amharic-speaking reviewer (see the Risks section of this document) before the Flutter app surfaces them to real customers.
 
 ### Track 6 — Marketplace growth (independent commits)
 

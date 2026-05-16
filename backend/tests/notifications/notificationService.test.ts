@@ -450,7 +450,7 @@ describe('NotificationService — locale handling (Phase 9 Track 5)', () => {
         assert.match(gw.lastInput!.rendered.body, /accepted your/);
     });
 
-    it('falls back to the English body for an am-locale recipient (MVP has no Amharic renderers yet)', async () => {
+    it('renders the Amharic body for an am-locale recipient', async () => {
         const users = new InMemoryUserRepository();
         const logs = new InMemoryNotificationLogRepository();
         const gw = new ConfigurableGateway('MOCK', 'MOCK', {
@@ -474,10 +474,49 @@ describe('NotificationService — locale handling (Phase 9 Track 5)', () => {
             payload: { ...PAYLOAD },
         });
 
-        // Same English text — registry fallback to 'en' is the
-        // contract under test. When Amharic renderers ship, this
-        // assertion will need updating to the Amharic copy.
+        // The dispatcher reads `user.locale` and threads it into
+        // `renderTemplate`; the Amharic renderer is what the
+        // gateway receives. Verify the body is Amharic (Ethiopic
+        // script + ተቀብለዋል — "accepted/received") and not the
+        // English copy.
         assert.ok(gw.lastInput);
-        assert.match(gw.lastInput!.rendered.body, /accepted your/);
+        assert.match(gw.lastInput!.rendered.body, /[ሀ-፿]/);
+        assert.match(gw.lastInput!.rendered.body, /ተቀብለዋል/);
+        assert.doesNotMatch(gw.lastInput!.rendered.body, /accepted your/);
+    });
+
+    it('Amharic body for the recipient differs from the English body for the same payload', async () => {
+        const users = new InMemoryUserRepository();
+        const logs = new InMemoryNotificationLogRepository();
+        const gw = new ConfigurableGateway('MOCK', 'MOCK', {
+            kind: 'sent',
+            providerRef: 'mock-mixed',
+        });
+        const svc = new NotificationService({
+            userRepository: users,
+            notificationLogRepository: logs,
+            gateways: { MOCK: gw },
+            logger: silentLogger(),
+        });
+
+        // First dispatch as en.
+        const enRecipient = await seedUser(users);
+        await svc.dispatch({
+            templateKey: TEMPLATE_KEY,
+            recipientUserId: enRecipient.id,
+            payload: { ...PAYLOAD },
+        });
+        const enBody = gw.lastInput!.rendered.body;
+
+        // Flip the same row to am, dispatch again.
+        await users.setLocale(enRecipient.id, 'am');
+        await svc.dispatch({
+            templateKey: TEMPLATE_KEY,
+            recipientUserId: enRecipient.id,
+            payload: { ...PAYLOAD },
+        });
+        const amBody = gw.lastInput!.rendered.body;
+
+        assert.notStrictEqual(amBody, enBody);
     });
 });
