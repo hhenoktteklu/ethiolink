@@ -29,6 +29,16 @@ import '../models/owner_business_view.dart';
 abstract class BusinessActionsRepository {
   Future<OwnerBusinessView> createBusiness(CreateBusinessRequest request);
   Future<OwnerBusinessView> submitBusiness(String businessId);
+
+  /// Phase 9 Track 3.5 polish — owner profile editor. Wraps
+  /// `PATCH /v1/businesses/{id}`. Fields-keys present in the body
+  /// either set the value or clear the column when `null` (per the
+  /// OpenAPI `PatchBusinessRequest` contract — absent = "no
+  /// change", null = clear).
+  Future<OwnerBusinessView> updateBusiness(
+    String businessId,
+    PatchBusinessRequest request,
+  );
 }
 
 /// Hand-rolled request object — keeps the call site clean and
@@ -85,6 +95,85 @@ class CreateBusinessRequest {
     addIfPresent('phone', phone);
     addIfPresent('telegramHandle', telegramHandle);
     addIfPresent('whatsappPhone', whatsappPhone);
+    return body;
+  }
+}
+
+/// PATCH body for `/v1/businesses/{id}`. Each field is optional
+/// from the API's perspective; the owner-profile editor emits
+/// every form field every save (with `null` for cleared
+/// optionals + the trimmed value for set ones). Required fields
+/// (`categoryId`, `name`, `city`) are always set when validation
+/// passes.
+///
+/// The `null`-vs-absent distinction matters: the API treats
+/// `undefined` (absent) as "no change" and explicit `null` as
+/// "clear". `toJson` always emits each key when a corresponding
+/// argument was supplied — empty optional strings encode as
+/// `null` so the column clears.
+class PatchBusinessRequest {
+  const PatchBusinessRequest({
+    this.categoryId,
+    this.name,
+    this.descriptionEn,
+    this.clearDescription = false,
+    this.city,
+    this.addressLine,
+    this.clearAddress = false,
+    this.phone,
+    this.clearPhone = false,
+    this.telegramHandle,
+    this.clearTelegram = false,
+    this.whatsappPhone,
+    this.clearWhatsapp = false,
+  });
+
+  final String? categoryId;
+  final String? name;
+  final String? descriptionEn;
+  final bool clearDescription;
+  final String? city;
+  final String? addressLine;
+  final bool clearAddress;
+  final String? phone;
+  final bool clearPhone;
+  final String? telegramHandle;
+  final bool clearTelegram;
+  final String? whatsappPhone;
+  final bool clearWhatsapp;
+
+  Map<String, dynamic> toJson() {
+    final body = <String, dynamic>{};
+    if (categoryId != null && categoryId!.isNotEmpty) {
+      body['categoryId'] = categoryId;
+    }
+    if (name != null && name!.isNotEmpty) body['name'] = name;
+    if (clearDescription) {
+      body['description'] = null;
+    } else if (descriptionEn != null && descriptionEn!.isNotEmpty) {
+      body['description'] = <String, dynamic>{'en': descriptionEn};
+    }
+    if (city != null && city!.isNotEmpty) body['city'] = city;
+    if (clearAddress) {
+      body['addressLine'] = null;
+    } else if (addressLine != null && addressLine!.isNotEmpty) {
+      body['addressLine'] = addressLine;
+    }
+    if (clearPhone) {
+      body['phone'] = null;
+    } else if (phone != null && phone!.isNotEmpty) {
+      body['phone'] = phone;
+    }
+    if (clearTelegram) {
+      body['telegramHandle'] = null;
+    } else if (telegramHandle != null && telegramHandle!.isNotEmpty) {
+      body['telegramHandle'] = telegramHandle;
+    }
+    if (clearWhatsapp) {
+      body['whatsappPhone'] = null;
+    } else if (whatsappPhone != null && whatsappPhone!.isNotEmpty) {
+      body['whatsappPhone'] = whatsappPhone;
+    }
     return body;
   }
 }
@@ -201,6 +290,29 @@ class HttpBusinessActionsRepository implements BusinessActionsRepository {
       throw BusinessActionFailure(
         kind: BusinessActionFailureKind.malformedResponse,
         message: 'submitBusiness response was malformed: ${e.message}',
+      );
+    } on ApiException catch (e) {
+      throw BusinessActionFailure.fromApi(e);
+    }
+  }
+
+  static String _patchPath(String id) => '/v1/businesses/$id';
+
+  @override
+  Future<OwnerBusinessView> updateBusiness(
+    String businessId,
+    PatchBusinessRequest request,
+  ) async {
+    try {
+      return await _client.patchJson<OwnerBusinessView>(
+        _patchPath(businessId),
+        body: request.toJson(),
+        parse: OwnerBusinessView.fromJson,
+      );
+    } on FormatException catch (e) {
+      throw BusinessActionFailure(
+        kind: BusinessActionFailureKind.malformedResponse,
+        message: 'updateBusiness response was malformed: ${e.message}',
       );
     } on ApiException catch (e) {
       throw BusinessActionFailure.fromApi(e);

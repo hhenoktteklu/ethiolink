@@ -35,6 +35,7 @@ import 'data/owner_staff_repository.dart';
 import 'models/owner_business_view.dart';
 import 'owner_availability_screen.dart';
 import 'owner_bookings_screen.dart';
+import 'owner_profile_screen.dart';
 import 'owner_services_screen.dart';
 import 'owner_staff_screen.dart';
 
@@ -152,6 +153,8 @@ class _OwnerTabState extends State<OwnerTab> {
             return OwnerDashboard(
               business: snapshot.data!,
               actionsRepository: _actionsRepo!,
+              categoriesRepositoryOverride:
+                  widget.categoriesRepositoryOverride,
               servicesRepositoryOverride: widget.servicesRepositoryOverride,
               staffRepositoryOverride: widget.staffRepositoryOverride,
               availabilityRepositoryOverride:
@@ -388,6 +391,7 @@ class OwnerDashboard extends StatelessWidget {
     required this.business,
     required this.actionsRepository,
     required this.onChanged,
+    this.categoriesRepositoryOverride,
     this.servicesRepositoryOverride,
     this.staffRepositoryOverride,
     this.availabilityRepositoryOverride,
@@ -396,6 +400,10 @@ class OwnerDashboard extends StatelessWidget {
   });
   final OwnerBusinessView business;
   final BusinessActionsRepository actionsRepository;
+
+  /// Test seam forwarded to the `OwnerProfileScreen` we push when
+  /// the Profile card is tapped.
+  final CategoriesRepository? categoriesRepositoryOverride;
 
   /// Test seam forwarded to the `OwnerServicesScreen` we push when
   /// the Services card is tapped.
@@ -471,11 +479,23 @@ class OwnerDashboard extends StatelessWidget {
     );
   }
 
-  /// Dispatches the dashboard-card tap. Services + Staff +
-  /// Availability + Bookings have real screens; the Profile card
-  /// still SnackBar-stubs until its dedicated commit lands.
+  /// Dispatches the dashboard-card tap. All five cards have real
+  /// screens — Track 3.5 closed end-to-end.
   void _openCard(BuildContext context, String label) {
     switch (label) {
+      case 'Profile':
+        Navigator.of(context).push(
+          MaterialPageRoute<OwnerBusinessView?>(
+            builder: (_) => OwnerProfileScreen(
+              business: business,
+              actionsRepositoryOverride: actionsRepository,
+              categoriesRepositoryOverride: categoriesRepositoryOverride,
+            ),
+          ),
+        ).then((updated) {
+          if (updated != null) onChanged();
+        });
+        return;
       case 'Services':
         Navigator.of(context).push(
           MaterialPageRoute<void>(

@@ -315,4 +315,133 @@ void main() {
       }
     });
   });
+
+  group('HttpBusinessActionsRepository.updateBusiness', () {
+    test('PATCHes /v1/businesses/{id} with populated fields', () async {
+      final adapter = _RecordingAdapter([_AdapterResponse(200, _draftJson())]);
+      final repo = HttpBusinessActionsRepository(_clientFor(adapter));
+
+      await repo.updateBusiness(
+        'biz-1',
+        const PatchBusinessRequest(
+          categoryId: 'cat-1',
+          name: 'Renamed',
+          city: 'Addis Ababa',
+          descriptionEn: 'Best in town.',
+          phone: '+251911000001',
+        ),
+      );
+
+      final req = adapter.captured[0];
+      expect(req.method, 'PATCH');
+      expect(req.path, '/v1/businesses/biz-1');
+      final body = req.data as Map<String, dynamic>;
+      expect(body['categoryId'], 'cat-1');
+      expect(body['name'], 'Renamed');
+      expect(body['city'], 'Addis Ababa');
+      expect(body['description'], <String, dynamic>{'en': 'Best in town.'});
+      expect(body['phone'], '+251911000001');
+      // Untouched optional fields stay absent.
+      expect(body.containsKey('addressLine'), isFalse);
+      expect(body.containsKey('telegramHandle'), isFalse);
+      expect(body.containsKey('whatsappPhone'), isFalse);
+    });
+
+    test('clear flags encode optional fields as explicit null', () async {
+      final adapter = _RecordingAdapter([_AdapterResponse(200, _draftJson())]);
+      final repo = HttpBusinessActionsRepository(_clientFor(adapter));
+
+      await repo.updateBusiness(
+        'biz-1',
+        const PatchBusinessRequest(
+          categoryId: 'cat-1',
+          name: 'X',
+          city: 'Y',
+          clearDescription: true,
+          clearAddress: true,
+          clearPhone: true,
+          clearTelegram: true,
+          clearWhatsapp: true,
+        ),
+      );
+
+      final body = adapter.captured[0].data as Map<String, dynamic>;
+      for (final key in const [
+        'description',
+        'addressLine',
+        'phone',
+        'telegramHandle',
+        'whatsappPhone',
+      ]) {
+        expect(body.containsKey(key), isTrue, reason: '$key key missing');
+        expect(body[key], isNull, reason: '$key should be null');
+      }
+    });
+
+    test('403 → kind=forbidden', () async {
+      final adapter = _RecordingAdapter([
+        _AdapterResponse(
+          403,
+          json.encode({
+            'error': {'code': 'FORBIDDEN', 'message': 'not owner'},
+          }),
+        ),
+      ]);
+      final repo = HttpBusinessActionsRepository(_clientFor(adapter));
+
+      try {
+        await repo.updateBusiness(
+          'biz-1',
+          const PatchBusinessRequest(categoryId: 'cat-1'),
+        );
+        fail('expected BusinessActionFailure');
+      } on BusinessActionFailure catch (e) {
+        expect(e.kind, BusinessActionFailureKind.forbidden);
+      }
+    });
+
+    test('409 → kind=conflict', () async {
+      final adapter = _RecordingAdapter([
+        _AdapterResponse(
+          409,
+          json.encode({
+            'error': {'code': 'CONFLICT', 'message': 'category mismatch'},
+          }),
+        ),
+      ]);
+      final repo = HttpBusinessActionsRepository(_clientFor(adapter));
+
+      try {
+        await repo.updateBusiness(
+          'biz-1',
+          const PatchBusinessRequest(categoryId: 'cat-2'),
+        );
+        fail('expected BusinessActionFailure');
+      } on BusinessActionFailure catch (e) {
+        expect(e.kind, BusinessActionFailureKind.conflict);
+      }
+    });
+
+    test('500 → kind=serverError', () async {
+      final adapter = _RecordingAdapter([
+        _AdapterResponse(
+          500,
+          json.encode({
+            'error': {'code': 'INTERNAL_ERROR', 'message': 'boom'},
+          }),
+        ),
+      ]);
+      final repo = HttpBusinessActionsRepository(_clientFor(adapter));
+
+      try {
+        await repo.updateBusiness(
+          'biz-1',
+          const PatchBusinessRequest(categoryId: 'cat-1'),
+        );
+        fail('expected BusinessActionFailure');
+      } on BusinessActionFailure catch (e) {
+        expect(e.kind, BusinessActionFailureKind.serverError);
+      }
+    });
+  });
 }
