@@ -28,11 +28,13 @@ import '../browse/data/categories_repository.dart';
 import 'create_business_flow.dart';
 import 'data/availability_repository.dart';
 import 'data/business_actions_repository.dart';
+import 'data/owner_bookings_repository.dart';
 import 'data/owner_business_repository.dart';
 import 'data/owner_services_repository.dart';
 import 'data/owner_staff_repository.dart';
 import 'models/owner_business_view.dart';
 import 'owner_availability_screen.dart';
+import 'owner_bookings_screen.dart';
 import 'owner_services_screen.dart';
 import 'owner_staff_screen.dart';
 
@@ -44,6 +46,7 @@ class OwnerTab extends StatefulWidget {
     this.servicesRepositoryOverride,
     this.staffRepositoryOverride,
     this.availabilityRepositoryOverride,
+    this.bookingsRepositoryOverride,
     super.key,
   });
 
@@ -70,6 +73,10 @@ class OwnerTab extends StatefulWidget {
   /// Test seam for the `OwnerAvailabilityScreen` pushed when the
   /// dashboard's Availability card is tapped.
   final AvailabilityRepository? availabilityRepositoryOverride;
+
+  /// Test seam for the `OwnerBookingsScreen` pushed when the
+  /// dashboard's Bookings card is tapped.
+  final OwnerBookingsRepository? bookingsRepositoryOverride;
 
   @override
   State<OwnerTab> createState() => _OwnerTabState();
@@ -149,6 +156,7 @@ class _OwnerTabState extends State<OwnerTab> {
               staffRepositoryOverride: widget.staffRepositoryOverride,
               availabilityRepositoryOverride:
                   widget.availabilityRepositoryOverride,
+              bookingsRepositoryOverride: widget.bookingsRepositoryOverride,
               onChanged: _refresh,
             );
           },
@@ -383,6 +391,7 @@ class OwnerDashboard extends StatelessWidget {
     this.servicesRepositoryOverride,
     this.staffRepositoryOverride,
     this.availabilityRepositoryOverride,
+    this.bookingsRepositoryOverride,
     super.key,
   });
   final OwnerBusinessView business;
@@ -399,6 +408,10 @@ class OwnerDashboard extends StatelessWidget {
   /// Test seam forwarded to the `OwnerAvailabilityScreen` we push
   /// when the Availability card is tapped.
   final AvailabilityRepository? availabilityRepositoryOverride;
+
+  /// Test seam forwarded to the `OwnerBookingsScreen` we push
+  /// when the Bookings card is tapped.
+  final OwnerBookingsRepository? bookingsRepositoryOverride;
 
   /// Fired after a successful submit so the OwnerTab can refresh
   /// its loader and pick up the new status.
@@ -459,9 +472,8 @@ class OwnerDashboard extends StatelessWidget {
   }
 
   /// Dispatches the dashboard-card tap. Services + Staff +
-  /// Availability have real screens; the remaining two cards
-  /// (Profile / Bookings) still SnackBar-stub until their
-  /// dedicated commits land.
+  /// Availability + Bookings have real screens; the Profile card
+  /// still SnackBar-stubs until its dedicated commit lands.
   void _openCard(BuildContext context, String label) {
     switch (label) {
       case 'Services':
@@ -492,6 +504,16 @@ class OwnerDashboard extends StatelessWidget {
               staffRepositoryOverride: staffRepositoryOverride,
               availabilityRepositoryOverride:
                   availabilityRepositoryOverride,
+            ),
+          ),
+        );
+        return;
+      case 'Bookings':
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => OwnerBookingsScreen(
+              businessId: business.id,
+              repositoryOverride: bookingsRepositoryOverride,
             ),
           ),
         );
