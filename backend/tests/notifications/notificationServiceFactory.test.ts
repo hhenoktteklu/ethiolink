@@ -25,14 +25,21 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { GenericSmsGateway } from '../../shared/adapters/notifications/GenericSmsGateway.js';
+import { GenericTelegramGateway } from '../../shared/adapters/notifications/GenericTelegramGateway.js';
 import { MockNotificationGateway } from '../../shared/adapters/notifications/MockNotificationGateway.js';
 import type { NotificationGateway } from '../../shared/adapters/notifications/NotificationGateway.js';
-import type { AppConfig, SmsProviderConfig } from '../../shared/config/loadConfig.js';
+import type {
+    AppConfig,
+    SmsProviderConfig,
+    TelegramProviderConfig,
+} from '../../shared/config/loadConfig.js';
 import {
     buildGatewayMap,
     shouldWireSmsGateway,
+    shouldWireTelegramGateway,
 } from '../../shared/domains/notifications/notificationServiceFactory.js';
 import { FakeSmsHttpTransport } from '../_fakes/FakeSmsHttpTransport.js';
+import { FakeTelegramHttpTransport } from '../_fakes/FakeTelegramHttpTransport.js';
 
 // Lazy logger that satisfies the type without doing anything.
 function fakeLogger() {
@@ -56,11 +63,23 @@ const SAMPLE_SMS_CONFIG: SmsProviderConfig = Object.freeze({
     timeoutMs: 5000,
 });
 
+const SAMPLE_TELEGRAM_CONFIG: TelegramProviderConfig = Object.freeze({
+    botUsername: 'EthioLinkBot',
+    botToken: '123:abc',
+    botTokenSecretArn: '',
+    webhookSecret: 'whsec',
+    webhookSecretArn: '',
+    providerName: 'TELEGRAM_BOT',
+    linkCodeTtlSeconds: 600,
+    timeoutMs: 5000,
+});
+
 // Construct a minimal `AppConfig` for the factory selection. The
 // factory only reads `smsProvider` and `notificationsProvider` —
 // every other field is irrelevant to the logic under test.
 function mkConfig(overrides: {
     smsProvider?: SmsProviderConfig | null;
+    telegramProvider?: TelegramProviderConfig | null;
     notificationsProvider?: AppConfig['notificationsProvider'];
 }): AppConfig {
     return {
@@ -94,6 +113,7 @@ function mkConfig(overrides: {
             defaultTimezone: 'Africa/Addis_Ababa',
         },
         smsProvider: overrides.smsProvider ?? null,
+        telegramProvider: overrides.telegramProvider ?? null,
         notificationsProvider: overrides.notificationsProvider ?? 'mock',
     } as AppConfig;
 }
@@ -225,6 +245,142 @@ describe('buildGatewayMap — SMS wired', () => {
         assert.strictEqual(result.status, 'SENT');
         assert.strictEqual(result.providerRef, 'msg-via-factory');
         assert.strictEqual(transport.calls.length, 1);
+    });
+});
+
+describe('shouldWireTelegramGateway', () => {
+    it('returns false when telegramProvider is null', () => {
+        assert.strictEqual(
+            shouldWireTelegramGateway(
+                mkConfig({
+                    telegramProvider: null,
+                    notificationsProvider: 'telegram',
+                }),
+            ),
+            false,
+        );
+    });
+
+    it('returns false when notificationsProvider is mock', () => {
+        assert.strictEqual(
+            shouldWireTelegramGateway(
+                mkConfig({
+                    telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                    notificationsProvider: 'mock',
+                }),
+            ),
+            false,
+        );
+    });
+
+    it('returns false when notificationsProvider is sms (SMS-only opt-in)', () => {
+        assert.strictEqual(
+            shouldWireTelegramGateway(
+                mkConfig({
+                    telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                    notificationsProvider: 'sms',
+                }),
+            ),
+            false,
+        );
+    });
+
+    it('returns true when telegramProvider is set and notificationsProvider is telegram', () => {
+        assert.strictEqual(
+            shouldWireTelegramGateway(
+                mkConfig({
+                    telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                    notificationsProvider: 'telegram',
+                }),
+            ),
+            true,
+        );
+    });
+
+    it('returns true when notificationsProvider is production', () => {
+        assert.strictEqual(
+            shouldWireTelegramGateway(
+                mkConfig({
+                    telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                    notificationsProvider: 'production',
+                }),
+            ),
+            true,
+        );
+    });
+});
+
+describe('buildGatewayMap — TELEGRAM wired', () => {
+    it('wires GenericTelegramGateway when both conditions hold', () => {
+        const transport = new FakeTelegramHttpTransport();
+        const map = buildGatewayMap({
+            pool: FAKE_POOL,
+            config: mkConfig({
+                telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                notificationsProvider: 'telegram',
+            }),
+            logger: fakeLogger(),
+            telegramHttpTransport: transport,
+        });
+
+        assert.ok(map.MOCK instanceof MockNotificationGateway);
+        assert.ok(
+            map.TELEGRAM instanceof GenericTelegramGateway,
+            'expected TELEGRAM channel to be a GenericTelegramGateway instance',
+        );
+        // SMS not wired (no smsProvider config).
+        assert.strictEqual(map.SMS, undefined);
+    });
+
+    it('production wires BOTH SMS and TELEGRAM when both configs are set', () => {
+        const map = buildGatewayMap({
+            pool: FAKE_POOL,
+            config: mkConfig({
+                smsProvider: SAMPLE_SMS_CONFIG,
+                telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                notificationsProvider: 'production',
+            }),
+            logger: fakeLogger(),
+            smsHttpTransport: new FakeSmsHttpTransport(),
+            telegramHttpTransport: new FakeTelegramHttpTransport(),
+        });
+
+        assert.ok(map.MOCK instanceof MockNotificationGateway);
+        assert.ok(map.SMS instanceof GenericSmsGateway);
+        assert.ok(map.TELEGRAM instanceof GenericTelegramGateway);
+    });
+
+    it('telegram flag does NOT wire SMS even when smsProvider is set', () => {
+        const map = buildGatewayMap({
+            pool: FAKE_POOL,
+            config: mkConfig({
+                smsProvider: SAMPLE_SMS_CONFIG,
+                telegramProvider: SAMPLE_TELEGRAM_CONFIG,
+                notificationsProvider: 'telegram',
+            }),
+            logger: fakeLogger(),
+            smsHttpTransport: new FakeSmsHttpTransport(),
+            telegramHttpTransport: new FakeTelegramHttpTransport(),
+        });
+
+        assert.strictEqual(map.SMS, undefined);
+        assert.ok(map.TELEGRAM instanceof GenericTelegramGateway);
+    });
+
+    it('omits TELEGRAM when telegramProvider is null even with production flag', () => {
+        const map = buildGatewayMap({
+            pool: FAKE_POOL,
+            config: mkConfig({
+                smsProvider: SAMPLE_SMS_CONFIG,
+                telegramProvider: null,
+                notificationsProvider: 'production',
+            }),
+            logger: fakeLogger(),
+            smsHttpTransport: new FakeSmsHttpTransport(),
+        });
+
+        assert.strictEqual(map.TELEGRAM, undefined);
+        assert.ok(map.SMS instanceof GenericSmsGateway);
     });
 });
 

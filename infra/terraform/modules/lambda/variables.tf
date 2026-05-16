@@ -162,13 +162,13 @@ variable "log_retention_days" {
 # -----------------------------------------------------------------------------
 
 variable "notifications_provider" {
-  description = "Notification provider routing key. `mock` keeps `MockNotificationGateway` as the only wired gateway. `sms` (or `production`) opts in to `GenericSmsGateway` for the `SMS` channel when `sms_provider_api_base_url` etc. are also set. The factory in `notificationServiceFactory.ts` evaluates this at cold-start."
+  description = "Notification provider routing key. `mock` keeps `MockNotificationGateway` as the only wired gateway. `sms` opts in to `GenericSmsGateway` when the SMS provider config is set. `telegram` opts in to `GenericTelegramGateway` when the Telegram provider config is set. `production` opts in to BOTH SMS and Telegram (each still gated on its per-vendor config block being non-empty). The factory in `notificationServiceFactory.ts` evaluates this at cold-start."
   type        = string
   default     = "mock"
 
   validation {
-    condition     = contains(["mock", "sms", "production"], var.notifications_provider)
-    error_message = "notifications_provider must be one of: mock, sms, production."
+    condition     = contains(["mock", "sms", "telegram", "production"], var.notifications_provider)
+    error_message = "notifications_provider must be one of: mock, sms, telegram, production."
   }
 }
 

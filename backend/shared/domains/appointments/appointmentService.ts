@@ -263,6 +263,27 @@ export interface AppointmentServiceOptions {
      * (tests, future handlers) don't accidentally opt in.
      */
     readonly smsRoutingEnabled?: boolean;
+    /**
+     * Phase 9 Track 2 — enables Telegram routing for booking
+     * lifecycle notifications. When `true`, each notification
+     * fetches the recipient's `users` row and routes through
+     * `TELEGRAM` if and only if the recipient has a non-empty
+     * `telegram_chat_id`. Telegram is preferred over SMS — if the
+     * user has both a phone and a linked Telegram chat, Telegram
+     * wins. SMS remains the fallback when `smsRoutingEnabled` is
+     * also true and the user has a phone but no chat id. `MOCK`
+     * remains the floor.
+     *
+     * The handler-side derivation is
+     * `shouldWireTelegramGateway(config)` from
+     * `notificationServiceFactory.ts` — keeping the dispatcher's
+     * `TELEGRAM` mapping in lockstep with this flag avoids the
+     * "routed to a channel without a gateway" failure mode.
+     *
+     * Defaults to `false` when omitted so existing call sites
+     * keep their pre-Track-2 behaviour.
+     */
+    readonly telegramRoutingEnabled?: boolean;
 }
 
 export interface AppointmentServiceDependencies {
@@ -834,40 +855,55 @@ export class AppointmentService {
     }
 
     /**
-     * Phase 9 — channel selection for booking-lifecycle
-     * notifications. When `smsRoutingEnabled` is `true` AND the
-     * recipient has a non-empty `phone`, return `'SMS'`.
-     * Otherwise return `'MOCK'`. Email + Telegram routing is
-     * intentionally NOT modeled here yet — those channels stay
-     * on the post-Phase-9 backlog and continue to fall through
-     * to `'MOCK'`.
+     * Phase 9 Track 1 + Track 2 — channel selection for booking-
+     * lifecycle notifications. Priority order:
+     *
+     *   1. `'TELEGRAM'` when `telegramRoutingEnabled` is `true`
+     *      AND the recipient has a non-empty `telegram_chat_id`.
+     *      Telegram wins over SMS — push-style delivery is the
+     *      better customer experience when the user has linked.
+     *   2. `'SMS'` when `smsRoutingEnabled` is `true` AND the
+     *      recipient has a non-empty `phone`.
+     *   3. `'MOCK'` otherwise (no routing flags enabled, or the
+     *      recipient has neither a chat id nor a phone).
      *
      * Optimization: when `notifyBookingEvent` has already
      * fetched the customer (the `needCustomerName=true` path),
-     * and the recipient equals the customer (only true for
-     * business-side templates that happen to share the same id
-     * — never in MVP), we reuse that lookup. In every other
-     * case we issue one extra `userRepo.findById` to pick up
-     * the recipient's phone.
-     *
-     * When `smsRoutingEnabled` is `false`, this method short-
-     * circuits without any DB call — preserving the
+     * and the recipient equals the customer, we reuse that
+     * lookup. In every other case we issue one extra
+     * `userRepo.findById` — only when at least one routing flag
+     * is enabled. When BOTH flags are `false`, this method
+     * short-circuits without any DB call, preserving the
      * pre-Phase-9 wire cost for local-dev / docker-compose /
-     * unit-test paths that don't wire an SMS gateway.
+     * unit-test paths that don't wire a real gateway.
      */
     private async pickNotificationChannel(
         recipientUserId: string,
         preloadedCustomer: User | null,
     ): Promise<NotificationChannel> {
-        if (!this.deps.options.smsRoutingEnabled) {
+        const telegramOn = this.deps.options.telegramRoutingEnabled === true;
+        const smsOn = this.deps.options.smsRoutingEnabled === true;
+        if (!telegramOn && !smsOn) {
             return 'MOCK';
         }
         const recipient =
             preloadedCustomer && preloadedCustomer.id === recipientUserId
                 ? preloadedCustomer
                 : await this.deps.userRepo.findById(recipientUserId);
+        if (!recipient) return 'MOCK';
 
-        if (recipient && typeof recipient.phone === 'string' && recipient.phone.trim() !== '') {
+        if (
+            telegramOn &&
+            typeof recipient.telegramChatId === 'string' &&
+            recipient.telegramChatId.trim() !== ''
+        ) {
+            return 'TELEGRAM';
+        }
+        if (
+            smsOn &&
+            typeof recipient.phone === 'string' &&
+            recipient.phone.trim() !== ''
+        ) {
             return 'SMS';
         }
         return 'MOCK';

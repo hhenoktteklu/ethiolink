@@ -56,6 +56,7 @@ import { toAppointmentView } from '../../shared/domains/appointments/appointment
 import {
     createNotificationService,
     shouldWireSmsGateway,
+    shouldWireTelegramGateway,
 } from '../../shared/domains/notifications/notificationServiceFactory.js';
 import { PgAvailabilityRepository } from '../../shared/domains/availability/availabilityRepository.js';
 import { SlotService } from '../../shared/domains/availability/slotService.js';
@@ -122,6 +123,7 @@ const appointmentService = new AppointmentService({
         cancelCutoffMinutes: config.booking.cancelCutoffMinutes,
         timezone: config.booking.defaultTimezone,
         smsRoutingEnabled: shouldWireSmsGateway(config),
+        telegramRoutingEnabled: shouldWireTelegramGateway(config),
     },
 });
 

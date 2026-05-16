@@ -606,11 +606,18 @@ resource "aws_iam_role_policy" "lambda_sms_provider_secret" {
 # -----------------------------------------------------------------------------
 
 locals {
+  # `integrations` always reads the bot token (for the webhook
+  # confirmation reply). When Telegram is wired alongside the
+  # notification dispatcher, `appointments` + `scheduled` also
+  # need it so their cold-start `GenericTelegramGateway` can
+  # authenticate to the Bot API. Mirrors the SMS pattern.
   telegram_bot_token_consumer_areas = (
     var.telegram_bot_token_secret_arn != ""
-    ? toset(["integrations"])
+    ? toset(["integrations", "appointments", "scheduled"])
     : toset([])
   )
+  # Only the `integrations` Lambda validates the inbound webhook
+  # header; no other area needs the webhook secret.
   telegram_webhook_secret_consumer_areas = (
     var.telegram_webhook_secret_arn != ""
     ? toset(["integrations"])

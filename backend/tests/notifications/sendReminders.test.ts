@@ -95,7 +95,9 @@ interface Env {
     readonly notificationLogRepo: InMemoryNotificationLogRepository;
     readonly notificationService: NotificationService;
     readonly smsRoutingEnabled: boolean;
+    readonly telegramRoutingEnabled: boolean;
     readonly smsGateway: StubChannelGateway;
+    readonly telegramGateway: StubChannelGateway;
 }
 
 interface BuildEnvOptions {
@@ -110,6 +112,12 @@ interface BuildEnvOptions {
     readonly customerPhone?: string | null;
     /** Override the seeded business owner's phone. */
     readonly ownerPhone?: string | null;
+    /** Phase 9 Track 2 — enable Telegram routing + a stub gateway. */
+    readonly telegramRoutingEnabled?: boolean;
+    /** Phase 9 Track 2 — customer's linked Telegram chat id. */
+    readonly customerTelegramChatId?: string | null;
+    /** Phase 9 Track 2 — business owner's linked Telegram chat id. */
+    readonly ownerTelegramChatId?: string | null;
 }
 
 /**
@@ -179,8 +187,22 @@ function buildEnv(options: BuildEnvOptions = {}): Env {
         updatedAt: new Date('2026-05-13T00:00:00.000Z'),
     });
 
-    seedUserById(userRepo, CUSTOMER_ID, 'CUSTOMER', 'Henok', options.customerPhone);
-    seedUserById(userRepo, OWNER_ID, 'BUSINESS_OWNER', 'Owner', options.ownerPhone);
+    seedUserById(
+        userRepo,
+        CUSTOMER_ID,
+        'CUSTOMER',
+        'Henok',
+        options.customerPhone,
+        options.customerTelegramChatId,
+    );
+    seedUserById(
+        userRepo,
+        OWNER_ID,
+        'BUSINESS_OWNER',
+        'Owner',
+        options.ownerPhone,
+        options.ownerTelegramChatId,
+    );
 
     const logger = createLogger({
         level: 'error',
@@ -188,9 +210,12 @@ function buildEnv(options: BuildEnvOptions = {}): Env {
     });
 
     const smsGateway = new StubChannelGateway('SMS', 'STUB_SMS');
-    const gateways = options.smsRoutingEnabled
-        ? { MOCK: new MockNotificationGateway(), SMS: smsGateway }
-        : { MOCK: new MockNotificationGateway() };
+    const telegramGateway = new StubChannelGateway('TELEGRAM', 'STUB_TELEGRAM');
+    const gateways: Partial<Record<NotificationChannel, NotificationGateway>> = {
+        MOCK: new MockNotificationGateway(),
+    };
+    if (options.smsRoutingEnabled) gateways.SMS = smsGateway;
+    if (options.telegramRoutingEnabled) gateways.TELEGRAM = telegramGateway;
 
     const notificationService = new NotificationService({
         userRepository: userRepo,
@@ -207,7 +232,9 @@ function buildEnv(options: BuildEnvOptions = {}): Env {
         notificationLogRepo,
         notificationService,
         smsRoutingEnabled: options.smsRoutingEnabled ?? false,
+        telegramRoutingEnabled: options.telegramRoutingEnabled ?? false,
         smsGateway,
+        telegramGateway,
     };
 }
 
@@ -217,6 +244,7 @@ function seedUserById(
     role: 'CUSTOMER' | 'BUSINESS_OWNER' | 'ADMIN',
     displayName: string,
     phoneOverride?: string | null,
+    telegramChatIdOverride?: string | null,
 ): void {
     const internal = userRepo as unknown as {
         rowsById: Map<string, unknown>;
@@ -227,6 +255,8 @@ function seedUserById(
         phoneOverride === undefined
             ? `+25191100${id.slice(-4)}`
             : phoneOverride;
+    const telegramChatId =
+        telegramChatIdOverride === undefined ? null : telegramChatIdOverride;
     const row = Object.freeze({
         id,
         cognitoSub: `sub-${id}`,
@@ -235,6 +265,7 @@ function seedUserById(
         role,
         status: 'ACTIVE' as const,
         displayName,
+        telegramChatId,
         createdAt: now,
         updatedAt: now,
     });
@@ -260,6 +291,7 @@ async function runBatch(env: Env) {
         logger: silentLogger(),
         now: () => new Date(NOW_ISO),
         smsRoutingEnabled: env.smsRoutingEnabled,
+        telegramRoutingEnabled: env.telegramRoutingEnabled,
     });
 }
 
@@ -551,5 +583,73 @@ describe('runReminderBatch — SMS routing (Phase 9)', () => {
         assert.strictEqual(logs.length, 1);
         assert.strictEqual(logs[0]!.recipientUserId, CUSTOMER_ID);
         assert.strictEqual(logs[0]!.channel, 'SMS');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 9 Track 2 — Telegram routing priority in reminders
+// ---------------------------------------------------------------------------
+
+describe('runReminderBatch — Telegram routing (Phase 9 Track 2)', () => {
+    it('routes both reminders to TELEGRAM when both recipients are linked', async () => {
+        const env = buildEnv({
+            telegramRoutingEnabled: true,
+            customerTelegramChatId: '111',
+            ownerTelegramChatId: '222',
+        });
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const summary = await runBatch(env);
+        assert.strictEqual(summary.sent, 2);
+
+        const logs = env.notificationLogRepo.all();
+        assert.strictEqual(logs.length, 2);
+        for (const log of logs) {
+            assert.strictEqual(log.channel, 'TELEGRAM');
+        }
+        assert.strictEqual(env.telegramGateway.calls.length, 2);
+        assert.strictEqual(env.smsGateway.calls.length, 0);
+    });
+
+    it('prefers TELEGRAM over SMS per-recipient', async () => {
+        // Customer has both phone + chat id → TELEGRAM.
+        // Owner has phone only → SMS.
+        const env = buildEnv({
+            smsRoutingEnabled: true,
+            telegramRoutingEnabled: true,
+            customerTelegramChatId: '111',
+        });
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const summary = await runBatch(env);
+        assert.strictEqual(summary.sent, 2);
+
+        const logs = env.notificationLogRepo.all();
+        const customerLog = logs.find(
+            (l) => l.recipientUserId === CUSTOMER_ID,
+        )!;
+        const ownerLog = logs.find((l) => l.recipientUserId === OWNER_ID)!;
+        assert.strictEqual(customerLog.channel, 'TELEGRAM');
+        assert.strictEqual(ownerLog.channel, 'SMS');
+    });
+
+    it('falls back to MOCK when neither chat id nor phone is set', async () => {
+        const env = buildEnv({
+            smsRoutingEnabled: true,
+            telegramRoutingEnabled: true,
+            customerPhone: null,
+            ownerPhone: null,
+        });
+        env.appointmentsRepo.seedAppointment(makeAppointment());
+
+        const summary = await runBatch(env);
+        assert.strictEqual(summary.sent, 2);
+
+        const logs = env.notificationLogRepo.all();
+        for (const log of logs) {
+            assert.strictEqual(log.channel, 'MOCK');
+        }
+        assert.strictEqual(env.telegramGateway.calls.length, 0);
+        assert.strictEqual(env.smsGateway.calls.length, 0);
     });
 });

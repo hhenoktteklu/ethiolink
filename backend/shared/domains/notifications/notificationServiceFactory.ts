@@ -53,6 +53,10 @@ import {
     createGenericSmsGateway,
     type SmsHttpTransport,
 } from '../../adapters/notifications/GenericSmsGateway.js';
+import {
+    createGenericTelegramGateway,
+    type TelegramHttpTransport,
+} from '../../adapters/notifications/GenericTelegramGateway.js';
 import { MockNotificationGateway } from '../../adapters/notifications/MockNotificationGateway.js';
 import type {
     NotificationChannel,
@@ -82,6 +86,11 @@ export interface CreateNotificationServiceDeps {
      * `defaultFetchSmsHttpTransport()` internally).
      */
     readonly smsHttpTransport?: SmsHttpTransport;
+    /**
+     * Optional Telegram transport injection for tests. Production
+     * passes nothing (uses `defaultFetchTelegramHttpTransport()`).
+     */
+    readonly telegramHttpTransport?: TelegramHttpTransport;
     /**
      * Optional mock gateway override. Tests may pass a stub to
      * assert the right gateway was constructed.
@@ -119,6 +128,10 @@ export function createNotificationService(
  *   1. `MOCK` is always wired. Safe default.
  *   2. `SMS` is wired iff `smsProvider` is non-null AND
  *      `notificationsProvider` is one of `'sms'` or `'production'`.
+ *   3. `TELEGRAM` is wired iff `telegramProvider` is non-null AND
+ *      `notificationsProvider` is one of `'telegram'` or
+ *      `'production'`. Independent from SMS — operators can opt
+ *      into either, both, or neither.
  */
 export function buildGatewayMap(
     deps: CreateNotificationServiceDeps,
@@ -134,6 +147,13 @@ export function buildGatewayMap(
         );
     }
 
+    if (shouldWireTelegramGateway(deps.config)) {
+        map.TELEGRAM = createGenericTelegramGateway(
+            deps.config.telegramProvider,
+            deps.telegramHttpTransport,
+        );
+    }
+
     return map;
 }
 
@@ -146,6 +166,22 @@ export function shouldWireSmsGateway(config: AppConfig): boolean {
     if (!config.smsProvider) return false;
     return (
         config.notificationsProvider === 'sms' ||
+        config.notificationsProvider === 'production'
+    );
+}
+
+/**
+ * Returns true when the operator has opted in to the real
+ * Telegram gateway via BOTH `telegramProvider` config AND the
+ * provider flag (`'telegram'` or `'production'`). The handler-side
+ * derivation `telegramRoutingEnabled` mirrors this — see the
+ * docstrings on `AppointmentServiceOptions.telegramRoutingEnabled`
+ * and `ReminderBatchDeps.telegramRoutingEnabled`.
+ */
+export function shouldWireTelegramGateway(config: AppConfig): boolean {
+    if (!config.telegramProvider) return false;
+    return (
+        config.notificationsProvider === 'telegram' ||
         config.notificationsProvider === 'production'
     );
 }

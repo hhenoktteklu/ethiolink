@@ -29,16 +29,27 @@ export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  *                       `GenericSmsGateway` is wired under the
  *                       `SMS` channel. Other channels still fall
  *                       through to mock.
- *   * `'production'`  — same effect as `'sms'` for now; reserved
- *                       so a future Telegram / email provider can
- *                       layer on without re-naming this enum.
+ *   * `'telegram'`    — when `config.telegramProvider` is
+ *                       non-null, the `GenericTelegramGateway` is
+ *                       wired under the `TELEGRAM` channel.
+ *                       SMS remains dormant unless co-set via
+ *                       `'production'`. Useful for operators who
+ *                       want to roll out Telegram before SMS.
+ *   * `'production'`  — wires both SMS and Telegram when their
+ *                       per-vendor config blocks are present. The
+ *                       "everything that's configured goes live"
+ *                       umbrella flag.
  *
  * Unknown values throw `InvalidConfigError` at config-load time
  * (same posture as `NODE_ENV` / `LOG_LEVEL`) — a typo in the env
  * stack fails the cold start loudly rather than silently routing
- * SMS traffic through the mock.
+ * traffic through the mock.
  */
-export type NotificationsProvider = 'mock' | 'sms' | 'production';
+export type NotificationsProvider =
+    | 'mock'
+    | 'sms'
+    | 'telegram'
+    | 'production';
 
 export interface PgConfig {
     readonly host: string;
@@ -244,6 +255,7 @@ const VALID_LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error']
 const VALID_NOTIFICATIONS_PROVIDERS: readonly NotificationsProvider[] = [
     'mock',
     'sms',
+    'telegram',
     'production',
 ];
 

@@ -71,6 +71,7 @@ import type { NotificationService } from '../../shared/domains/notifications/not
 import {
     createNotificationService,
     shouldWireSmsGateway,
+    shouldWireTelegramGateway,
 } from '../../shared/domains/notifications/notificationServiceFactory.js';
 import type { BookingTemplateKey } from '../../shared/domains/notifications/templateRegistry.js';
 import type { ServiceRepository } from '../../shared/domains/services/serviceRepository.js';
@@ -147,6 +148,15 @@ export interface ReminderBatchDeps {
      * routing through `MOCK` without any change.
      */
     readonly smsRoutingEnabled?: boolean;
+    /**
+     * Phase 9 Track 2 — enables Telegram routing for reminder
+     * dispatch. Handler-side derivation is
+     * `shouldWireTelegramGateway(config)`. Telegram is preferred
+     * over SMS when both are enabled — see
+     * `AppointmentService.pickNotificationChannel` for the
+     * priority order. Defaults to `false`.
+     */
+    readonly telegramRoutingEnabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +198,7 @@ export const handler = async (
         notificationLogRepo,
         logger,
         smsRoutingEnabled: shouldWireSmsGateway(config),
+        telegramRoutingEnabled: shouldWireTelegramGateway(config),
     });
 };
 
@@ -398,38 +409,51 @@ async function dispatchOneReminder(input: DispatchOneInput): Promise<DispatchOut
 }
 
 /**
- * Phase 9 — channel selection for reminder dispatch. Mirrors
- * `AppointmentService.pickNotificationChannel`:
+ * Phase 9 Track 1 + Track 2 — channel selection for reminder
+ * dispatch. Mirrors `AppointmentService.pickNotificationChannel`
+ * priority order:
  *
- *   * When `smsRoutingEnabled` is `false` (the default), short-
- *     circuit to `'MOCK'` without any DB call.
- *   * Otherwise, resolve the recipient. The batch loop has
- *     already fetched the customer once per appointment, so we
- *     reuse it when the recipient is the customer.
- *   * Return `'SMS'` when the recipient has a non-empty trimmed
- *     `phone`; otherwise fall back to `'MOCK'`.
+ *   1. `'TELEGRAM'` when `telegramRoutingEnabled` AND recipient
+ *      has a non-empty `telegram_chat_id`.
+ *   2. `'SMS'` when `smsRoutingEnabled` AND recipient has a
+ *      non-empty `phone`.
+ *   3. `'MOCK'` otherwise.
  *
- * Keeps the lockstep contract with the
- * `notificationServiceFactory`: when SMS routing is enabled at
- * the handler boundary, the dispatcher always has an `SMS`
- * gateway wired and the fallback to `MOCK` for phone-less
- * recipients is harmless (the `MOCK` gateway stays wired).
+ * Short-circuits to `'MOCK'` without any DB call when BOTH
+ * routing flags are false — preserves the pre-Phase-9 wire cost
+ * for local-dev / unit-test paths.
+ *
+ * Lockstep contract with `notificationServiceFactory`: when the
+ * handler enables a routing flag, the dispatcher always has the
+ * corresponding gateway wired. The fallback to `MOCK` for
+ * recipients without the matching field is harmless because
+ * `MOCK` stays wired.
  */
 async function pickReminderChannel(
     deps: ReminderBatchDeps,
     recipientUserId: string,
     preloadedCustomer: User | null,
 ): Promise<NotificationChannel> {
-    if (!deps.smsRoutingEnabled) {
+    const telegramOn = deps.telegramRoutingEnabled === true;
+    const smsOn = deps.smsRoutingEnabled === true;
+    if (!telegramOn && !smsOn) {
         return 'MOCK';
     }
     const recipient =
         preloadedCustomer && preloadedCustomer.id === recipientUserId
             ? preloadedCustomer
             : await deps.userRepo.findById(recipientUserId);
+    if (!recipient) return 'MOCK';
 
     if (
-        recipient &&
+        telegramOn &&
+        typeof recipient.telegramChatId === 'string' &&
+        recipient.telegramChatId.trim() !== ''
+    ) {
+        return 'TELEGRAM';
+    }
+    if (
+        smsOn &&
         typeof recipient.phone === 'string' &&
         recipient.phone.trim() !== ''
     ) {
