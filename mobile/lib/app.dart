@@ -25,13 +25,23 @@ import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import 'core/config/app_config.dart';
 import 'core/config/app_config_scope.dart';
+import 'core/i18n/locale_preferences.dart';
 import 'core/i18n/locale_scope.dart';
 import 'features/auth/login_screen.dart';
 
 class EthioLinkApp extends StatefulWidget {
-  const EthioLinkApp({required this.config, super.key});
+  const EthioLinkApp({
+    required this.config,
+    this.localePreferencesOverride,
+    super.key,
+  });
 
   final AppConfig config;
+
+  /// Test seam — production leaves this `null` and the state
+  /// constructs a `SecureLocalePreferences`. Widget tests inject
+  /// an `InMemoryLocalePreferences` to stay platform-channel-free.
+  final LocalePreferences? localePreferencesOverride;
 
   @override
   State<EthioLinkApp> createState() => _EthioLinkAppState();
@@ -39,10 +49,29 @@ class EthioLinkApp extends StatefulWidget {
 
 class _EthioLinkAppState extends State<EthioLinkApp> {
   // Controller is owned by the root state so it survives across
-  // hot reloads + locale-picker mutations. Today the picker
-  // doesn't exist so the locale stays `en` for the app's whole
-  // lifetime.
+  // hot reloads + locale-picker mutations. Defaults to English;
+  // the secure-storage cache (when present) overrides it on boot
+  // so a returning user sees their chosen language without
+  // waiting for the network round-trip.
   final LocaleController _locale = LocaleController();
+  late final LocalePreferences _preferences;
+
+  @override
+  void initState() {
+    super.initState();
+    _preferences = widget.localePreferencesOverride ??
+        const SecureLocalePreferences();
+    // Fire-and-forget cache read. If the cache has a value we
+    // adopt it; otherwise the UI stays English until the user
+    // picks something. The read is async and may complete after
+    // the first frame; the `LocaleController` notifies listeners
+    // so the `MaterialApp` rebuilds when it lands.
+    _preferences.read().then((cached) {
+      if (cached != null && mounted) {
+        _locale.locale = cached;
+      }
+    });
+  }
 
   @override
   void dispose() {

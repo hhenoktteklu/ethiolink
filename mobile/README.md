@@ -20,13 +20,14 @@ mobile/
     app.dart               Root MaterialApp + theme + AppLocalizations + LocaleScope + initial route
     l10n/
       app_en.arb            English string bundle (source-of-truth for gen-l10n).
-                            `app_am.arb` lands alongside the locale picker.
+      app_am.arb            Amharic string bundle.
     core/
       config/
         app_config.dart         Resolved env config + bootstrap factory
         app_config_scope.dart   InheritedWidget for config access
       i18n/
-        locale_scope.dart       App-level Locale state (forward-prep for the picker)
+        locale_scope.dart       App-level Locale state (LocaleController + LocaleScope notifier)
+        locale_preferences.dart Secure-storage cache for the user's chosen locale
       api/
         api_client.dart         HTTP client placeholder (Dio adapter lands later)
       auth/
@@ -68,9 +69,10 @@ mobile/
         data/availability_repository.dart       GET/PUT /v1/.../availability + POST /v1/.../availability/override + failure-kind classifier
         data/owner_bookings_repository.dart     GET /v1/businesses/{id}/appointments + accept/reject/cancel/complete POSTs + failure-kind classifier
       profile/
-        profile_screen.dart     Profile + env display + Telegram link entry + sign out
+        profile_screen.dart     Profile + env display + Telegram link entry + locale picker + sign out
         link_telegram_screen.dart       Telegram bot linking flow (Phase 9 Track 2)
         data/telegram_link_repository.dart  POST/GET/DELETE /v1/me/[link-telegram*|telegram-status]
+        data/me_repository.dart         PATCH /v1/me { locale } + failure-kind classifier
   test/
     widget_test.dart       Boot + placeholder-render smoke test
 ```
@@ -244,7 +246,7 @@ Each item below is on the immediate Phase 9 Track 3 backlog. The scaffold leaves
 - ❌ State management (Riverpod). Adopted when the first feature with non-trivial state lands — likely the slot picker or the booking funnel.
 - ❌ Routing library (go_router). Adopted when the screen count crosses ~6.
 - ❌ Per-platform scaffolding (`android/`, `ios/`, ...). Regenerated locally; iOS Info.plist edits for the `ethiolink://` URL scheme land in a follow-up.
-- ❌ Localization beyond English. **Phase 9 Track 5 update:** the Flutter i18n scaffold has landed. `flutter_localizations` + Flutter's built-in `gen-l10n` are wired through `l10n.yaml` + `lib/l10n/app_en.arb`; `MaterialApp` resolves `AppLocalizations.localizationsDelegates` + `AppLocalizations.supportedLocales`. The visible English copy on login, the bottom-nav, the profile + bookings + owner-dashboard surfaces, and the booking-flow confirm + success steps reads from `AppLocalizations.of(context)`. The Amharic bundle (`app_am.arb`) and the in-app locale picker land in the next mobile commit; the `users.locale` PATCH endpoint that backs the picker shipped in `Phase 9: add localization foundation`.
+- ✅ **Localization — English + Amharic.** Phase 9 Track 5 closed on the mobile side. `flutter_localizations` + Flutter's built-in `gen-l10n` are wired through `l10n.yaml` + `lib/l10n/app_en.arb` + `lib/l10n/app_am.arb`; `MaterialApp` resolves `AppLocalizations.localizationsDelegates` + `AppLocalizations.supportedLocales` (`[en, am]`). The visible English copy on login, the bottom-nav, the profile + bookings + owner-dashboard surfaces, and the booking-flow confirm + success steps reads from `AppLocalizations.of(context)`. The Profile tab carries a language picker (English / አማርኛ) — tapping a row drives `PATCH /v1/me { locale }` via `HttpMeRepository`, then flips `LocaleScope` on success and persists the pick to `flutter_secure_storage` via `SecureLocalePreferences` so the next cold-start renders in the chosen language before the network round-trip. Failures surface a SnackBar with localized copy and leave the active locale untouched — the server-side `users.locale` row stays canonical.
 - ❌ Push notifications via FCM / APNs. Out of MVP scope per `docs/product/MVP_SCOPE.md`.
 - ❌ Open-date availability overrides, owner-side `no-show` action (backend not yet exposed), push notifications, business analytics, business cover photos / media polish. With the profile editor landed, every dashboard card on the My Business tab opens a real screen — Track 3.5 is closed end-to-end. The remaining deferred items are all post-MVP polish that pair with backend or infrastructure work tracked in `PHASE_9_POST_MVP.md`.
 

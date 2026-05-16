@@ -93,6 +93,21 @@
         "description": "Sign-out button on the profile screen."
     },
 
+    "profileLanguageHeading": "Language",
+    "@profileLanguageHeading": {
+        "description": "Section heading above the locale picker on the profile screen."
+    },
+
+    "profileLanguageSaving": "Saving…",
+    "@profileLanguageSaving": {
+        "description": "Loading-state copy shown next to the picked language while the PATCH /v1/me request is in flight."
+    },
+
+    "profileLanguageSaveError": "Couldn't save your language. Please try again.",
+    "@profileLanguageSaveError": {
+        "description": "SnackBar copy shown when PATCH /v1/me fails to persist the new locale. The local UI does not flip until the server accepts."
+    },
+
     "bookingsTitle": "My Bookings",
     "@bookingsTitle": {
         "description": "AppBar title on the customer's appointments-list tab."

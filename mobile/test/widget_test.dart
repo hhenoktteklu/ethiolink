@@ -133,4 +133,35 @@ void main() {
     expect(find.text(l10n.appTagline), findsOneWidget);
     expect(find.text(l10n.loginSignIn), findsOneWidget);
   });
+
+  testWidgets('Amharic AppLocalizations bundle resolves when locale=am',
+      (tester) async {
+    // Pump the LoginScreen under `Locale('am')` so the gen-l10n
+    // bundle picks the `app_am.arb` translations. Verifies the
+    // Amharic ARB is wired (Phase 9 Track 5 commit `Phase 9: add
+    // Amharic mobile locale picker`).
+    await tester.pumpWidget(
+      AppConfigScope(
+        config: _testConfig,
+        child: MaterialApp(
+          locale: const Locale('am'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: LoginScreen(authServiceOverride: FakeAuthService()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // The bundle resolved to Amharic.
+    final BuildContext context = tester.element(find.byType(LoginScreen));
+    expect(Localizations.localeOf(context).languageCode, equals('am'));
+    final AppLocalizations l10n = AppLocalizations.of(context);
+    expect(l10n.loginSignIn, equals('ይግቡ'));
+    expect(l10n.appTitle, equals('EthioLink')); // brand stays in Latin.
+
+    // The rendered button text uses the Amharic translation.
+    expect(find.text('ይግቡ'), findsOneWidget);
+    expect(find.text('Sign in'), findsNothing);
+  });
 }

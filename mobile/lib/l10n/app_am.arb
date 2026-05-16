@@ -1,0 +1,50 @@
+{
+    "@@locale": "am",
+
+    "appTitle": "EthioLink",
+    "appTagline": "በኢትዮጵያ ሰሎኖችን፣ ባርበሮችን፣ ስፓዎችን እና ውበት ባለሙያዎችን ያስይዙ።",
+
+    "loginSignIn": "ይግቡ",
+    "loginSigningIn": "በመግባት ላይ…",
+
+    "navBrowse": "አስስ",
+    "navBookings": "ቀጠሮዎች",
+    "navOwner": "የእኔ ቢዝነስ",
+    "navProfile": "መገለጫ",
+
+    "browseDiscoverTitle": "ያግኙ",
+    "browseWelcomeBack": "እንኳን ደህና መጡ፣ {email}።",
+
+    "profileTitle": "መገለጫ",
+    "profileRole": "ሚና: {role}",
+    "profileNotificationsHeading": "ማሳወቂያዎች",
+    "profileTelegramTitle": "ቴሌግራም",
+    "profileTelegramSubtitle": "ለቅጽበታዊ የቀጠሮ ማሳወቂያዎች የቴሌግራም መለያዎን ያያይዙ።",
+    "profileSignOut": "ይውጡ",
+
+    "profileLanguageHeading": "ቋንቋ",
+    "profileLanguageSaving": "በማስቀመጥ ላይ…",
+    "profileLanguageSaveError": "ቋንቋዎን ማስቀመጥ አልተቻለም። እባክዎ እንደገና ይሞክሩ።",
+
+    "bookingsTitle": "የእኔ ቀጠሮዎች",
+
+    "bookingFlowConfirmTitle": "ቀጠሮዎን ያረጋግጡ",
+    "bookingFlowConfirmAction": "ይህን ሰዓት ይያዙ",
+    "bookingFlowBookingInProgress": "በመያዝ ላይ…",
+    "bookingFlowSuccessTitle": "ቀጠሮ ተጠይቋል!",
+    "bookingFlowDone": "ተጠናቋል",
+    "bookingFlowPickAnotherSlot": "ሌላ ሰዓት ይምረጡ",
+
+    "ownerNoBusinessTitle": "እስካሁን ቢዝነስ የለም",
+    "ownerNoBusinessBody": "ቀጠሮዎችን መቀበል ለመጀመር የቢዝነስ መገለጫ ይፍጠሩ።",
+    "ownerCreateBusinessAction": "ቢዝነስዎን ይፍጠሩ",
+    "ownerRefreshAction": "አድስ",
+    "ownerAccessDeniedTitle": "መዳረሻ ተከልክሏል",
+    "ownerCardProfile": "መገለጫ",
+    "ownerCardServices": "አገልግሎቶች",
+    "ownerCardStaff": "ሰራተኞች",
+    "ownerCardAvailability": "ሰሌዳ",
+    "ownerCardBookings": "ቀጠሮዎች",
+
+    "commonTryAgain": "እንደገና ይሞክሩ"
+}
