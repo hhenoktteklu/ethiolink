@@ -27,10 +27,16 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
 
 import {
+    type AdminCancelFeaturingInput,
+    type AdminCompFeaturingInput,
     ApiError,
     approveBusiness,
     type BusinessOwnerView,
+    cancelAdminFeaturing,
+    compAdminFeaturing,
     featureBusiness,
+    type FeaturingSubscriptionView,
+    getAdminFeaturingHistory,
     listAdminBusinesses,
     rejectBusiness,
     suspendBusiness,
@@ -179,6 +185,12 @@ function ActionsPanel({
                     businessId={business.id}
                     featuredUntil={business.featuredUntil}
                     onSuccess={onMutated}
+                />
+            )}
+            {business.status === 'APPROVED' && (
+                <FeaturingHistoryPanel
+                    businessId={business.id}
+                    onMutated={onMutated}
                 />
             )}
             {(business.status === 'DRAFT' ||
@@ -452,6 +464,382 @@ function MutationStatus({ mutation }: { mutation: { error: unknown; isSuccess: b
     }
     return null;
 }
+
+// ---------------------------------------------------------------------------
+// Featuring history panel — Phase 9 Track 6 paid featuring
+// ---------------------------------------------------------------------------
+//
+// Mounted alongside the manual `FeatureCard` for APPROVED
+// businesses. Two halves:
+//
+//   * History table — every `FeaturingSubscription` newest-first
+//     pulled from `GET /v1/admin/businesses/{id}/featuring/history`.
+//     Columns: status, source, packageCode, price (ETB), startsAt,
+//     endsAt, paymentIntentId (currently "—" — the wire schema
+//     doesn't carry the FK), cancelledReason.
+//
+//   * Admin actions:
+//       - Comp featuring (durationDays, reason) — creates an
+//         ADMIN_COMP subscription that goes ACTIVE immediately.
+//       - Cancel active (reason) — flips the currently-ACTIVE row
+//         to CANCELLED and recomputes featured_until.
+//
+// The panel maintains its own query (`['adminFeaturingHistory',
+// businessId]`) so mutations refresh only this panel; the parent
+// page's `['adminBusinesses']` query is also invalidated via
+// `onMutated` so the `featured_until` chip in `BusinessMetadata`
+// re-renders.
+//
+// The existing manual `FeatureCard` is intentionally NOT removed
+// — it remains the operator escape hatch for cases where a
+// subscription row isn't desired (e.g. dev / staging smoke tests).
+
+function FeaturingHistoryPanel({
+    businessId,
+    onMutated,
+}: {
+    businessId: string;
+    onMutated: () => void;
+}) {
+    const queryClient = useQueryClient();
+
+    const query = useQuery({
+        queryKey: ['adminFeaturingHistory', businessId],
+        queryFn: () => getAdminFeaturingHistory(businessId, { limit: 50 }),
+    });
+
+    const refresh = () => {
+        queryClient.invalidateQueries({
+            queryKey: ['adminFeaturingHistory', businessId],
+        });
+        // Bubble up so the parent re-pulls business metadata too —
+        // a comp / cancel changes the `featured_until` chip.
+        onMutated();
+    };
+
+    return (
+        <Card title="Paid featuring history">
+            <p style={{ marginTop: 0, color: '#555', fontSize: '0.9rem' }}>
+                Subscription history backing the paid-featuring flow.
+                Distinct from the manual feature card above — that
+                writes <code>featured_until</code> as an audit-only
+                action without creating a subscription row.
+            </p>
+            <FeaturingActions
+                businessId={businessId}
+                hasActive={
+                    query.data?.items.some((s) => s.status === 'ACTIVE') ?? false
+                }
+                onMutated={refresh}
+            />
+            <div style={{ marginTop: '1rem' }}>
+                <FeaturingHistoryTable
+                    isLoading={query.isLoading}
+                    error={query.error}
+                    rows={query.data?.items ?? []}
+                    onRetry={() => query.refetch()}
+                />
+            </div>
+        </Card>
+    );
+}
+
+function FeaturingActions({
+    businessId,
+    hasActive,
+    onMutated,
+}: {
+    businessId: string;
+    hasActive: boolean;
+    onMutated: () => void;
+}) {
+    return (
+        <div
+            style={{
+                display: 'grid',
+                gap: '1rem',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            }}
+        >
+            <CompFeaturingForm businessId={businessId} onSuccess={onMutated} />
+            <CancelFeaturingForm
+                businessId={businessId}
+                disabled={!hasActive}
+                onSuccess={onMutated}
+            />
+        </div>
+    );
+}
+
+function CompFeaturingForm({
+    businessId,
+    onSuccess,
+}: {
+    businessId: string;
+    onSuccess: () => void;
+}) {
+    const [durationDays, setDurationDays] = useState('7');
+    const [reason, setReason] = useState('');
+
+    const mutation = useMutation({
+        mutationFn: () => {
+            const days = Number.parseInt(durationDays, 10);
+            if (!Number.isInteger(days) || days < 1 || days > 365) {
+                throw new Error('Duration must be a whole number 1–365.');
+            }
+            if (!reason.trim()) {
+                throw new Error('Reason is required.');
+            }
+            const input: AdminCompFeaturingInput = {
+                durationDays: days,
+                reason: reason.trim(),
+            };
+            return compAdminFeaturing(businessId, input);
+        },
+        onSuccess: () => {
+            setReason('');
+            onSuccess();
+        },
+    });
+
+    return (
+        <fieldset
+            style={{
+                border: '1px solid #ddd',
+                borderRadius: 6,
+                padding: '0.75rem 1rem',
+            }}
+        >
+            <legend style={{ padding: '0 0.5rem', fontSize: '0.9rem' }}>
+                Comp featuring
+            </legend>
+            <p style={{ marginTop: 0, color: '#555', fontSize: '0.85rem' }}>
+                Creates an ACTIVE <code>ADMIN_COMP</code> subscription
+                (price 0). Refused when another ACTIVE subscription
+                already exists.
+            </p>
+            <label style={{ display: 'block', marginBottom: '0.5rem' }}>
+                <span style={{ display: 'block', fontSize: '0.85rem', color: '#555' }}>
+                    Duration (days, 1–365)
+                </span>
+                <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    step={1}
+                    value={durationDays}
+                    onChange={(e) => setDurationDays(e.target.value)}
+                    style={{ padding: '0.25rem 0.5rem', width: '6rem' }}
+                />
+            </label>
+            <NotesField label="Reason (required)" value={reason} onChange={setReason} />
+            <MutationButton
+                label="Create comp"
+                pending={mutation.isPending}
+                onClick={() => mutation.mutate()}
+            />
+            <MutationStatus mutation={mutation} />
+        </fieldset>
+    );
+}
+
+function CancelFeaturingForm({
+    businessId,
+    disabled,
+    onSuccess,
+}: {
+    businessId: string;
+    disabled: boolean;
+    onSuccess: () => void;
+}) {
+    const [reason, setReason] = useState('');
+
+    const mutation = useMutation({
+        mutationFn: () => {
+            if (!reason.trim()) {
+                throw new Error('Reason is required.');
+            }
+            const input: AdminCancelFeaturingInput = { reason: reason.trim() };
+            return cancelAdminFeaturing(businessId, input);
+        },
+        onSuccess: () => {
+            setReason('');
+            onSuccess();
+        },
+    });
+
+    return (
+        <fieldset
+            style={{
+                border: `1px solid ${disabled ? '#eee' : '#fcd34d'}`,
+                borderRadius: 6,
+                padding: '0.75rem 1rem',
+                opacity: disabled ? 0.6 : 1,
+            }}
+        >
+            <legend style={{ padding: '0 0.5rem', fontSize: '0.9rem' }}>
+                Cancel active subscription
+            </legend>
+            <p style={{ marginTop: 0, color: '#555', fontSize: '0.85rem' }}>
+                {disabled
+                    ? 'No ACTIVE subscription to cancel.'
+                    : 'Flips the ACTIVE subscription to CANCELLED and recomputes featured_until. Refunds (if any) are handled out-of-band.'}
+            </p>
+            <NotesField
+                label="Reason (required)"
+                value={reason}
+                onChange={setReason}
+            />
+            <button
+                type="button"
+                disabled={disabled || mutation.isPending}
+                onClick={() => mutation.mutate()}
+                style={{
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.95rem',
+                    cursor:
+                        disabled || mutation.isPending ? 'not-allowed' : 'pointer',
+                }}
+            >
+                {mutation.isPending ? 'Cancelling…' : 'Cancel subscription'}
+            </button>
+            <MutationStatus mutation={mutation} />
+        </fieldset>
+    );
+}
+
+function FeaturingHistoryTable({
+    isLoading,
+    error,
+    rows,
+    onRetry,
+}: {
+    isLoading: boolean;
+    error: unknown;
+    rows: readonly FeaturingSubscriptionView[];
+    onRetry: () => void;
+}) {
+    if (isLoading) {
+        return <p style={{ color: '#555' }}>Loading history…</p>;
+    }
+    if (error) {
+        return (
+            <p style={{ color: 'crimson' }}>
+                Failed to load history:{' '}
+                {error instanceof ApiError
+                    ? `${error.code ?? 'ERROR'} — ${error.message}`
+                    : error instanceof Error
+                      ? error.message
+                      : String(error)}
+                {' '}
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    style={{ marginLeft: '0.5rem' }}
+                >
+                    Try again
+                </button>
+            </p>
+        );
+    }
+    if (rows.length === 0) {
+        return (
+            <p style={{ color: '#666' }}>
+                No featuring subscriptions for this business yet.
+            </p>
+        );
+    }
+    return (
+        <div style={{ overflowX: 'auto' }}>
+            <table
+                style={{
+                    borderCollapse: 'collapse',
+                    width: '100%',
+                    fontSize: '0.9rem',
+                }}
+            >
+                <thead>
+                    <tr style={{ textAlign: 'left', background: '#f3f4f6' }}>
+                        <th style={th}>Status</th>
+                        <th style={th}>Source</th>
+                        <th style={th}>Package</th>
+                        <th style={th}>Price (ETB)</th>
+                        <th style={th}>Starts</th>
+                        <th style={th}>Ends</th>
+                        <th style={th}>Payment intent</th>
+                        <th style={th}>Cancelled reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((row) => (
+                        <tr key={row.id} style={{ borderTop: '1px solid #eee' }}>
+                            <td style={td}>
+                                <StatusBadge status={row.status} />
+                            </td>
+                            <td style={td}>{row.source}</td>
+                            <td style={td}>
+                                <code>{row.packageCode}</code>
+                            </td>
+                            <td style={td}>{row.priceEtb.toFixed(0)}</td>
+                            <td style={td}>
+                                {new Date(row.startsAt).toLocaleString()}
+                            </td>
+                            <td style={td}>
+                                {new Date(row.endsAt).toLocaleString()}
+                            </td>
+                            <td style={td}>—</td>
+                            <td style={td}>{row.cancelledReason ?? '—'}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function StatusBadge({ status }: { status: FeaturingSubscriptionView['status'] }) {
+    const color = (() => {
+        switch (status) {
+            case 'ACTIVE':
+                return { bg: '#dcfce7', fg: '#166534' };
+            case 'PENDING_PAYMENT':
+                return { bg: '#fef9c3', fg: '#854d0e' };
+            case 'EXPIRED':
+                return { bg: '#e5e7eb', fg: '#374151' };
+            case 'CANCELLED':
+            case 'REFUNDED':
+                return { bg: '#fee2e2', fg: '#991b1b' };
+        }
+    })();
+    return (
+        <span
+            style={{
+                background: color.bg,
+                color: color.fg,
+                padding: '0.1rem 0.5rem',
+                borderRadius: 4,
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                letterSpacing: 0.3,
+            }}
+        >
+            {status}
+        </span>
+    );
+}
+
+const th: React.CSSProperties = {
+    padding: '0.4rem 0.6rem',
+    fontWeight: 600,
+    color: '#374151',
+    fontSize: '0.85rem',
+    whiteSpace: 'nowrap',
+};
+const td: React.CSSProperties = {
+    padding: '0.4rem 0.6rem',
+    verticalAlign: 'top',
+    whiteSpace: 'nowrap',
+};
 
 function defaultFeatureUntil(): string {
     // Default to "two weeks from now" rendered for `datetime-local`

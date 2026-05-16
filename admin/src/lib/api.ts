@@ -214,6 +214,126 @@ export function unfeatureBusiness(
 }
 
 // ---------------------------------------------------------------------------
+// Admin featuring (Phase 9 Track 6 paid featuring)
+// ---------------------------------------------------------------------------
+//
+// Three admin-side endpoints sit alongside the existing manual
+// `feature` / `unfeature` audit-only path:
+//
+//   * `GET    /v1/admin/businesses/{id}/featuring/history` — every
+//     featuring subscription for the business newest-first.
+//   * `POST   /v1/admin/businesses/{id}/featuring/comp`     — create
+//     an ADMIN_COMP subscription (zero price, ACTIVE on landing).
+//     Refuses with 409 when another ACTIVE subscription already
+//     exists.
+//   * `POST   /v1/admin/businesses/{id}/featuring/cancel`   — flip
+//     the currently-ACTIVE subscription to CANCELLED and recompute
+//     `business_profiles.featured_until`. Refunds are out-of-band.
+//
+// The existing manual `featureBusiness` / `unfeatureBusiness`
+// admin-action path stays — it writes a `featured_until` stamp
+// without creating a subscription row. The two paths coexist:
+// manual feature is the legacy operator escape hatch (no
+// audit-history visibility), while the comp path is the canonical
+// "give a business N days for free" workflow.
+
+export type FeaturingPackageCode = 'FEATURING_7D' | 'FEATURING_30D';
+
+export type FeaturingSubscriptionStatus =
+    | 'PENDING_PAYMENT'
+    | 'ACTIVE'
+    | 'EXPIRED'
+    | 'CANCELLED'
+    | 'REFUNDED';
+
+export type FeaturingSubscriptionSource = 'OWNER_PURCHASE' | 'ADMIN_COMP';
+
+/**
+ * Mirrors the OpenAPI `FeaturingSubscription` schema. The
+ * `paymentIntentId` field is NOT carried on the wire today — the
+ * backend stores the FK internally so future refund tooling can
+ * resolve the gateway transaction, but the public view stays
+ * minimal. The admin panel surfaces "—" for now and the column
+ * lights up once the read schema widens.
+ */
+export interface FeaturingSubscriptionView {
+    readonly id: string;
+    readonly businessId: string;
+    readonly packageCode: FeaturingPackageCode;
+    readonly priceEtb: number;
+    readonly startsAt: string;
+    readonly endsAt: string;
+    readonly status: FeaturingSubscriptionStatus;
+    readonly source: FeaturingSubscriptionSource;
+    readonly cancelledAt: string | null;
+    readonly cancelledReason: string | null;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+}
+
+export interface FeaturingSubscriptionListResponse {
+    readonly items: readonly FeaturingSubscriptionView[];
+}
+
+export function getAdminFeaturingHistory(
+    businessId: string,
+    params: { limit?: number } = {},
+): Promise<FeaturingSubscriptionListResponse> {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<FeaturingSubscriptionListResponse>(
+        'GET',
+        `/v1/admin/businesses/${encodeURIComponent(businessId)}/featuring/history${query ? `?${query}` : ''}`,
+    );
+}
+
+export interface AdminCompFeaturingInput {
+    readonly durationDays: number;
+    readonly reason: string;
+}
+
+/**
+ * Create an ADMIN_COMP featuring subscription. The server writes
+ * the row with `source = ADMIN_COMP`, `price_etb = 0`, and
+ * `status = ACTIVE`; `endsAt` is computed as
+ * `now() + durationDays * 24h`. Refuses with 409 CONFLICT when
+ * another ACTIVE subscription already exists.
+ */
+export function compAdminFeaturing(
+    businessId: string,
+    input: AdminCompFeaturingInput,
+): Promise<FeaturingSubscriptionView> {
+    return request<FeaturingSubscriptionView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(businessId)}/featuring/comp`,
+        input,
+    );
+}
+
+export interface AdminCancelFeaturingInput {
+    readonly reason: string;
+}
+
+/**
+ * Force-cancel the currently-ACTIVE featuring subscription. The
+ * server flips `status` to `CANCELLED`, records `cancelledReason`,
+ * and recomputes `business_profiles.featured_until`. Refunds (if
+ * any) are out-of-band. Refuses with 409 CONFLICT when no ACTIVE
+ * subscription exists.
+ */
+export function cancelAdminFeaturing(
+    businessId: string,
+    input: AdminCancelFeaturingInput,
+): Promise<FeaturingSubscriptionView> {
+    return request<FeaturingSubscriptionView>(
+        'POST',
+        `/v1/admin/businesses/${encodeURIComponent(businessId)}/featuring/cancel`,
+        input,
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Admin categories
 // ---------------------------------------------------------------------------
 
