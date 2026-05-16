@@ -139,7 +139,7 @@ function anonymousEvent(
     return eventWithClaims('unused', {
         ...overrides,
         requestContext: {
-            ...(eventWithClaims('x').requestContext as Record<string, unknown>),
+            ...(eventWithClaims('x').requestContext as unknown as Record<string, unknown>),
             authorizer: undefined,
         } as never,
     });

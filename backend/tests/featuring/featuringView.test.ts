@@ -69,7 +69,7 @@ describe('toFeaturingSubscriptionView', () => {
     });
 
     it('does not leak createdByUserId or the redirectUrl field', () => {
-        const view = toFeaturingSubscriptionView(SAMPLE_SUB) as Record<
+        const view = toFeaturingSubscriptionView(SAMPLE_SUB) as unknown as Record<
             string,
             unknown
         >;
@@ -120,7 +120,7 @@ describe('toSubscribeFeaturingResponse — Phase 10 wire wrapper', () => {
         const response = toSubscribeFeaturingResponse(
             SAMPLE_SUB,
             CHAPA_PENDING_AUTH,
-        ) as { payment: Record<string, unknown> };
+        ) as unknown as { payment: Record<string, unknown> };
         assert.strictEqual(response.payment.rawResponse, undefined);
         assert.strictEqual(response.payment.authorizedAt, undefined);
     });

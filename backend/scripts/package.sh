@@ -104,9 +104,17 @@ cp package.json package-lock.json "${DIST_DIR}/"
     npm ci --omit=dev --no-audit --no-fund --ignore-scripts
 )
 
-# package.json + lock are no longer needed once the install is
-# done — strip them to keep the zip lean.
+# The original package.json + lockfile pulled in dev metadata we
+# don't want bloating the zip. Strip them, then write back a
+# minimal `{"type":"module"}` manifest so the Lambda runtime
+# (Node 20) treats the compiled handlers as ES modules — top-
+# level `await` in the source TypeScript compiles to top-level
+# `await` in the emitted .js, which Node ONLY accepts under an
+# ESM manifest. Without this file the runtime falls back to CJS
+# and every cold-start `await loadSecretsThenConfig()` would
+# throw `SyntaxError: Unexpected reserved word`.
 rm -f "${DIST_DIR}/package.json" "${DIST_DIR}/package-lock.json"
+printf '{"type":"module"}\n' > "${DIST_DIR}/package.json"
 
 # -----------------------------------------------------------------------------
 # 3b. Copy db/ into dist/ for the migration Lambda.
@@ -131,7 +139,12 @@ echo "==> Building zip"
     # `-X` strips extra file attributes (timestamps, UIDs) so the
     # zip's content hash is stable across machines that build the
     # same source tree. `-r` recurses; `-q` is quiet.
-    zip -Xrq "${ZIP_PATH}" lambdas shared node_modules
+    #
+    # `package.json` (the minimal `{"type":"module"}` manifest
+    # written above) must be in the zip — without it Node treats
+    # the bundle as CJS and the ESM-emitted handlers fail to
+    # parse.
+    zip -Xrq "${ZIP_PATH}" package.json lambdas shared node_modules
 )
 
 # -----------------------------------------------------------------------------

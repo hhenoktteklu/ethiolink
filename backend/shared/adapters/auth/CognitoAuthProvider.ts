@@ -29,11 +29,16 @@ import {
     TokenInvalidError,
 } from './AuthProvider.js';
 
-/** Concrete type of the verifier returned by `CognitoJwtVerifier.create`. */
+/**
+ * Concrete type of the verifier returned by `CognitoJwtVerifier.create`.
+ * The library types `clientId` as `string | string[]` (mutable); we
+ * keep our internal alias mutable to match so the generic parameter
+ * stays assignable to `CognitoVerifyProperties`.
+ */
 type Verifier = ReturnType<typeof CognitoJwtVerifier.create<{
     userPoolId: string;
     tokenUse: 'id';
-    clientId: readonly string[];
+    clientId: string[];
 }>>;
 
 export class CognitoAuthProvider implements AuthProvider {

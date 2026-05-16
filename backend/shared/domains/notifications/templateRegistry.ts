@@ -174,14 +174,14 @@ const RENDERERS: Readonly<
     Record<BookingTemplateKey, Readonly<Partial<Record<UserLocale, Renderer>>>>
 > = Object.freeze({
     'booking.requested.business': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `${customerLabel(p, 'en')} just booked ${p.serviceName} on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}. Open the EthioLink app to accept or reject.`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `${customerLabel(p, 'am')} ለ${p.serviceName} ቀጠሮ ቦታ ይዘዋል፣ ${formatStartsAt(
                     p.startsAtUtc,
@@ -191,14 +191,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.accepted.customer': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `${p.businessName} accepted your ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}. See you then!`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `${p.businessName} የ${p.serviceName} ቀጠሮዎን ተቀብለዋል፣ ${formatStartsAt(
                     p.startsAtUtc,
@@ -208,14 +208,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.rejected.customer': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `${p.businessName} couldn't accept your ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}. Please pick another time or another business.`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `${p.businessName} የ${p.serviceName} ቀጠሮዎን በ${formatStartsAt(
                     p.startsAtUtc,
@@ -225,14 +225,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.cancelled.business': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `${customerLabel(p, 'en')} cancelled their ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}${reasonSuffix(p.cancelReason, 'en')}.`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `${customerLabel(p, 'am')} የ${p.serviceName} ቀጠሯቸውን በ${formatStartsAt(
                     p.startsAtUtc,
@@ -242,14 +242,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.cancelled.customer': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `${p.businessName} cancelled your ${p.serviceName} booking on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}${reasonSuffix(p.cancelReason, 'en')}. We're sorry for the inconvenience.`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `${p.businessName} የ${p.serviceName} ቀጠሮዎን በ${formatStartsAt(
                     p.startsAtUtc,
@@ -259,14 +259,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.rescheduled.business': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `${customerLabel(p, 'en')} rescheduled their ${p.serviceName} booking to ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}${notesSuffix(p.rescheduleNotes, 'en')}.`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `${customerLabel(p, 'am')} የ${p.serviceName} ቀጠሯቸውን ወደ ${formatStartsAt(
                     p.startsAtUtc,
@@ -276,14 +276,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.reminder.customer': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `Reminder: your ${p.serviceName} appointment with ${p.businessName} is on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}. See you soon!`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `ማስታወሻ: የ${p.serviceName} ቀጠሮዎ ከ${p.businessName} ጋር በ${formatStartsAt(
                     p.startsAtUtc,
@@ -293,14 +293,14 @@ const RENDERERS: Readonly<
     }),
 
     'booking.reminder.business': Object.freeze({
-        en: (p) =>
+        en: (p: BookingTemplatePayload) =>
             plain(
                 `Reminder: ${customerLabel(p, 'en')} has a ${p.serviceName} appointment with you on ${formatStartsAt(
                     p.startsAtUtc,
                     'en',
                 )}.`,
             ),
-        am: (p) =>
+        am: (p: BookingTemplatePayload) =>
             plain(
                 `ማስታወሻ: ${customerLabel(p, 'am')} ከእርስዎ ጋር የ${p.serviceName} ቀጠሮ አላቸው፣ ${formatStartsAt(
                     p.startsAtUtc,

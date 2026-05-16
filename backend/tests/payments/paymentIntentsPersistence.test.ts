@@ -114,6 +114,7 @@ function recordingLogger(records: LogRecord[]): Logger {
             records.push({ level, message, meta });
         };
     const logger: Logger = {
+        level: 'debug',
         debug: make('debug'),
         info: make('info'),
         warn: make('warn'),

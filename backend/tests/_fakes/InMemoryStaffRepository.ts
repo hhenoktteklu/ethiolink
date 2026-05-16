@@ -60,7 +60,10 @@ export class InMemoryStaffRepository implements StaffRepository {
             return existing;
         }
 
-        const next: { [K in keyof StaffMember]: StaffMember[K] } = { ...existing };
+        // `-readonly` strips the readonly modifier so we can assign
+        // to `updatedAt` below; the row is frozen again before being
+        // stored.
+        const next: { -readonly [K in keyof StaffMember]: StaffMember[K] } = { ...existing };
         for (const key of PATCH_KEYS) {
             const v = patch[key];
             if (v !== undefined) {

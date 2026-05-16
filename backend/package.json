@@ -2,6 +2,7 @@
   "name": "@ethiolink/backend",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "description": "EthioLink backend: AWS Lambda handlers, shared domain services, and database migrations.",
   "main": "dist/index.js",
   "scripts": {
@@ -27,6 +28,7 @@
     "@types/luxon": "^3.4.2",
     "@types/node": "^20.12.7",
     "@types/pg": "^8.11.5",
-    "tsx": "^4.7.2"
+    "tsx": "^4.7.2",
+    "typescript": "^5.9.3"
   }
 }

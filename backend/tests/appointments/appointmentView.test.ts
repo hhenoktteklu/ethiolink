@@ -87,7 +87,7 @@ describe('toAppointmentView', () => {
     });
 
     it('does not leak deletedAt or the redirectUrl field', () => {
-        const view = toAppointmentView(SAMPLE_APPOINTMENT) as Record<
+        const view = toAppointmentView(SAMPLE_APPOINTMENT) as unknown as Record<
             string,
             unknown
         >;
@@ -146,7 +146,7 @@ describe('toCreateAppointmentResponse — Phase 10 wire wrapper', () => {
         const response = toCreateAppointmentResponse(
             SAMPLE_APPOINTMENT,
             CHAPA_PENDING_AUTH,
-        ) as { payment: Record<string, unknown> };
+        ) as unknown as { payment: Record<string, unknown> };
         assert.strictEqual(response.payment.rawResponse, undefined);
         assert.strictEqual(response.payment.authorizedAt, undefined);
     });

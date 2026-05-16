@@ -237,8 +237,6 @@ export class ChapaDeclinedError extends PaymentGatewayError {
 // Default fetch-based transport
 // ---------------------------------------------------------------------------
 
-const DEFAULT_TIMEOUT_MS = 12000;
-
 /**
  * Production transport. Uses Node 20's global `fetch` with an
  * `AbortController`-driven timeout. Parses the response body as

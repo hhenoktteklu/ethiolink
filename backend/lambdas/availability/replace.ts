@@ -191,7 +191,10 @@ function parseReplaceBody(rawBody: string | null): ReplaceWeeklyInput {
                 { field: `days[${i}].windows` },
             );
         }
-        const windows: WeeklyDaySchedule['windows'] = [];
+        // Local mutable buffer; assigned into the `readonly windows`
+        // field of the final `WeeklyDaySchedule` below. The readonly
+        // shape protects consumers — the parser itself owns the build.
+        const windows: { startTime: string; endTime: string }[] = [];
         for (let j = 0; j < rawWindows.length; j++) {
             const rawWindow = rawWindows[j];
             if (

@@ -61,6 +61,10 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
         ratingCount: 0,
         createdAt: now,
         updatedAt: now,
+        // Phase 9 Track 6 added `searchRank` as a required `number |
+        // null` field on `Business`; default to `null` here so the
+        // factory stays compatible.
+        searchRank: null,
         ...overrides,
     });
 }

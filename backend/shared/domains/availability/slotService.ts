@@ -22,7 +22,7 @@ import type { ServiceRepository } from '../services/serviceRepository.js';
 import type { StaffRepository } from '../staff/staffRepository.js';
 
 import type { AvailabilityRepository } from './availabilityRepository.js';
-import { computeSlots, SlotInvalidRangeError, SlotInvalidTimezoneError, type Slot } from './slotComputer.js';
+import { computeSlots, SlotInvalidRangeError, type Slot } from './slotComputer.js';
 
 export { SlotInvalidRangeError, SlotInvalidTimezoneError } from './slotComputer.js';
 export type { Slot } from './slotComputer.js';

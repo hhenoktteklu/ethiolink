@@ -67,6 +67,10 @@ export const handler = async (
         recomputedCount: result.recomputedBusinessIds.length,
     });
 
-    logger.info('Featuring sweep complete.', summary);
+    // `logger.info` accepts `Record<string, unknown>` — the frozen
+    // `FeaturingSweepSummary` shape doesn't carry an index signature,
+    // so widen it at the call site rather than weakening the type
+    // itself.
+    logger.info('Featuring sweep complete.', { ...summary });
     return summary;
 };

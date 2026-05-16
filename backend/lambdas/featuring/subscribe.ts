@@ -48,6 +48,7 @@ import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
 import { UserService } from '../../shared/domains/users/userService.js';
 import {
     conflict,
+    type ApiErrorCode,
     errorResponse,
     internalError,
     ok,
@@ -154,14 +155,22 @@ export const handler = async (
                 return conflict(err.message);
             }
             if (err instanceof PaymentFailedError) {
+                // `errorCode` on the gateway-side authorization is an
+                // opaque provider string. We tighten to `ApiErrorCode`
+                // at the boundary; unknown values fall through to the
+                // documented `PAYMENT_REQUIRED` default.
                 return errorResponse(
                     402,
-                    err.authorization.errorCode ?? 'PAYMENT_REQUIRED',
+                    (err.authorization.errorCode as ApiErrorCode | undefined) ??
+                        'PAYMENT_REQUIRED',
                     err.message,
                 );
             }
             if (err instanceof OnlinePaymentsUnavailableError) {
-                return errorResponse(503, err.code, err.message);
+                // `err.code` is a free-form gateway string — cast at
+                // the boundary; the response will still surface a
+                // documented `ApiErrorCode` to the client.
+                return errorResponse(503, err.code as ApiErrorCode, err.message);
             }
             if (err instanceof PaymentGatewayError) {
                 logger.error('featuring.subscribe.gatewayFailure', {

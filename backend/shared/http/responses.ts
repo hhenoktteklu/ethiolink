@@ -21,7 +21,13 @@ export type ApiErrorCode =
     | 'CONFLICT'
     | 'SLOT_UNAVAILABLE'
     | 'RATE_LIMITED'
-    | 'INTERNAL_ERROR';
+    | 'INTERNAL_ERROR'
+    // Phase 9 Track 6 — paid featuring surface. `FEATURING_DISABLED`
+    // is the kill-switch response when `featuring.enabled = false` on
+    // the config. `PAYMENT_REQUIRED` covers the gateway-side declines
+    // raised inside `FeaturingService.subscribe`.
+    | 'FEATURING_DISABLED'
+    | 'PAYMENT_REQUIRED';
 
 const JSON_HEADERS = {
     'Content-Type': 'application/json',

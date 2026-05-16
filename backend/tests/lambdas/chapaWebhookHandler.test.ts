@@ -132,6 +132,7 @@ class FakeAppointmentService {
 }
 
 const NOOP_LOGGER: Logger = {
+    level: 'error',
     debug: () => undefined,
     info: () => undefined,
     warn: () => undefined,
@@ -554,7 +555,11 @@ describe('chapaWebhook — replay idempotency', () => {
     });
 
     it('replayed FAILED webhook against SUCCEEDED row does not downgrade', async () => {
-        const { deps, repo } = buildDeps();
+        // The initial `deps` from this call is only used to materialize
+        // the SUCCEEDED row; the actual webhook is dispatched against
+        // `failDeps` below, so destructuring `deps` here would just
+        // leave it unused.
+        const { repo } = buildDeps();
         await repo.insertOrFindByProviderRef({
             appointmentId: null,
             featuringSubscriptionId: 'sub-protect',

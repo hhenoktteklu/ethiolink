@@ -49,7 +49,6 @@ import { randomBytes } from 'node:crypto';
 import type { Logger } from '../../logging/logger.js';
 
 import type {
-    TelegramLinkCode,
     TelegramLinkCodeRepository,
 } from './telegramLinkCodeRepository.js';
 import type { User, UserRepository } from './userRepository.js';

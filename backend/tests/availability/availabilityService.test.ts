@@ -37,7 +37,10 @@ import { InMemoryStaffRepository } from '../_fakes/InMemoryStaffRepository.js';
 const OWNER_A = '11111111-1111-1111-1111-111111111111';
 const OWNER_B = '22222222-2222-2222-2222-222222222222';
 const BIZ_A = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-const STAFF_A = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+// `STAFF_A` lived here when the suite seeded staff via the deleted
+// `makeStaff(...)` factory. Today `seedStaff(...)` lets the repo
+// generate the id, so we keep only `STAFF_UNKNOWN` for negative
+// lookups.
 const STAFF_UNKNOWN = '99999999-9999-9999-9999-999999999999';
 
 function caller(userId: string, role: CallerContext['role'] = 'BUSINESS_OWNER'): CallerContext {
@@ -70,19 +73,9 @@ function makeBusiness(overrides: Partial<Business> = {}): Business {
     });
 }
 
-function makeStaff(overrides: Partial<StaffMember> = {}): StaffMember {
-    const now = new Date('2026-05-14T12:00:00.000Z');
-    return Object.freeze({
-        id: STAFF_A,
-        businessId: BIZ_A,
-        displayName: 'Helen',
-        role: 'Stylist',
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-        ...overrides,
-    });
-}
+// `makeStaff(...)` used to live here, but the build switched to
+// seeding staff via the in-memory staff repo's helper. The factory
+// was left behind and `noUnusedLocals` flagged it.
 
 /** All seven weekdays present, mostly empty. Use as a baseline. */
 function fullEmptyWeek(): readonly WeeklyDaySchedule[] {

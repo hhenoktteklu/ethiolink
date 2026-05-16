@@ -30,7 +30,6 @@ import type { StaffRepository } from '../staff/staffRepository.js';
 import type {
     AvailabilityRepository,
     AvailabilityWindow,
-    InsertOverrideInput,
     WeeklyWindowInput,
 } from './availabilityRepository.js';
 
