@@ -529,6 +529,89 @@ resource "aws_iam_role_policy" "lambda_media_s3" {
 }
 
 # -----------------------------------------------------------------------------
+# Phase 9 Track 4 — per-domain CMK grants.
+#
+# Two conditional policies, gated on the env stack having actually
+# wired the matching CMK ARN through. Each policy is attached only
+# when its key is set; when `null`, the existing AWS-managed-key
+# posture continues to work without any KMS grant.
+#
+#   * `lambda_kms_secrets`     — `kms:Decrypt` on the secrets CMK,
+#                                attached to EVERY per-domain role
+#                                (every domain's cold-start path
+#                                resolves the RDS master secret).
+#   * `lambda_kms_media`       — `kms:Decrypt` +
+#                                `kms:GenerateDataKey*` on the
+#                                media-bucket CMK, attached ONLY
+#                                to the `media` role.
+# -----------------------------------------------------------------------------
+
+data "aws_iam_policy_document" "lambda_kms_secrets" {
+  count = var.secrets_kms_key_arn == null ? 0 : 1
+
+  statement {
+    sid    = "DecryptRdsMasterSecretCmk"
+    effect = "Allow"
+
+    actions = ["kms:Decrypt"]
+
+    resources = [var.secrets_kms_key_arn]
+
+    # `kms:ViaService` matches the `kms` module's key policy
+    # condition — the grant only applies when the call comes
+    # through Secrets Manager, not a direct STS-assumed-role
+    # invocation pretending to be Lambda.
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.${var.region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_kms_secrets" {
+  for_each = var.secrets_kms_key_arn == null ? toset([]) : local.lambda_areas
+
+  name   = "${local.base_name}-lambda-kms-secrets-${each.key}"
+  role   = aws_iam_role.lambda_exec[each.key].id
+  policy = data.aws_iam_policy_document.lambda_kms_secrets[0].json
+}
+
+data "aws_iam_policy_document" "lambda_kms_media" {
+  count = var.s3_media_kms_key_arn == null ? 0 : 1
+
+  statement {
+    sid    = "DecryptMediaBucketCmk"
+    effect = "Allow"
+
+    # `Decrypt` covers GetObject; `GenerateDataKey*` covers
+    # PutObject (S3 asks KMS for a fresh data key per object
+    # write, or per bucket-key window when `bucket_key_enabled`).
+    actions = [
+      "kms:Decrypt",
+      "kms:GenerateDataKey",
+      "kms:GenerateDataKey*",
+    ]
+
+    resources = [var.s3_media_kms_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["s3.${var.region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "lambda_kms_media" {
+  count = var.s3_media_kms_key_arn == null ? 0 : 1
+
+  name   = "${local.base_name}-lambda-kms-media"
+  role   = aws_iam_role.lambda_exec["media"].id
+  policy = data.aws_iam_policy_document.lambda_kms_media[0].json
+}
+
+# -----------------------------------------------------------------------------
 # Phase 9 — SMS provider secret read.
 #
 # Attached ONLY to the `appointments` + `scheduled` roles — those
@@ -723,6 +806,14 @@ resource "aws_lambda_function" "function" {
     security_group_ids = [var.lambda_security_group_id]
   }
 
+  # Phase 9 Track 4 — `null` keeps the AWS-managed `aws/lambda`
+  # key (existing behavior). A non-null value re-encrypts the
+  # env-var blob in place under the customer-managed CMK on the
+  # next apply; new invocations decrypt under the CMK
+  # transparently because the `kms` module's key policy already
+  # grants `lambda.amazonaws.com` use of the key.
+  kms_key_arn = var.env_kms_key_arn
+
   # Phase 8: enable AWS X-Ray tracing on every function. Sets the
   # `AWS_XRAY_DAEMON_ADDRESS` env var the runtime + the
   # `shared/observability/tracing.ts` helper detect; the IAM
@@ -763,5 +854,11 @@ resource "aws_lambda_function" "function" {
     aws_iam_role_policy.lambda_baseline,
     aws_iam_role_policy.lambda_media_s3,
     aws_iam_role_policy_attachment.lambda_vpc_access,
+    # Phase 9 Track 4 — when the secrets / media CMKs are wired,
+    # the policies must be in place before the function first
+    # invokes (otherwise the cold-start `loadSecretsThenConfig`
+    # path races the policy propagation and 403s on KMS).
+    aws_iam_role_policy.lambda_kms_secrets,
+    aws_iam_role_policy.lambda_kms_media,
   ]
 }

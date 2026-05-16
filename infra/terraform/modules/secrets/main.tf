@@ -142,3 +142,53 @@ resource "aws_secretsmanager_secret_rotation" "rds" {
   # works before the next 30-day window. Subsequent rotations
   # run every `rotation_days` from the previous rotation.
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — CMK grant for the SAR-deployed rotation Lambda.
+#
+# When `var.secrets_kms_key_arn` is non-null (= the operator has
+# wired the secrets CMK on the secret), the rotation Lambda needs
+# `kms:Decrypt` on that key to read the current secret value
+# before rotating. The SAR template doesn't grant any KMS
+# permission by default, so we attach an inline policy to the
+# Lambda's execution role.
+#
+# Role lookup: the SAR template names the role after the function;
+# the data-source for the function gives us its role ARN, from
+# which we extract the role name.
+# -----------------------------------------------------------------------------
+
+locals {
+  # `arn:aws:iam::123456789012:role/<name>` → `<name>`.
+  rotation_role_name = (var.enabled && var.secrets_kms_key_arn != null) ? element(
+    split("/", data.aws_lambda_function.rotation[0].role),
+    1,
+  ) : ""
+}
+
+data "aws_iam_policy_document" "rotation_kms" {
+  count = (var.enabled && var.secrets_kms_key_arn != null) ? 1 : 0
+
+  statement {
+    sid    = "DecryptRdsMasterSecretCmk"
+    effect = "Allow"
+
+    actions = ["kms:Decrypt"]
+
+    resources = [var.secrets_kms_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["secretsmanager.${var.region}.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role_policy" "rotation_kms" {
+  count = (var.enabled && var.secrets_kms_key_arn != null) ? 1 : 0
+
+  name   = "${local.rotation_lambda_name}-kms-decrypt"
+  role   = local.rotation_role_name
+  policy = data.aws_iam_policy_document.rotation_kms[0].json
+}

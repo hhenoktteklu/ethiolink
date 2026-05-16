@@ -369,3 +369,71 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS inputs.
+#
+# Five nullable CMK ARNs threaded down from the `kms` module via
+# the env stack. Each defaults to `null` so the existing
+# AWS-managed-encryption posture survives without any change. When
+# set:
+#
+#   * `env_kms_key_arn`        — every `aws_lambda_function` in
+#                                this module gets
+#                                `kms_key_arn = <arn>`. Lambda
+#                                re-encrypts env-var blobs in
+#                                place on the next apply (no
+#                                cold-start downtime). The
+#                                `lambda.amazonaws.com` service
+#                                principal already has use of the
+#                                key via the `kms` module's key
+#                                policy.
+#   * `secrets_kms_key_arn`    — every per-domain Lambda role
+#                                gains a scoped `kms:Decrypt`
+#                                grant on this key. Required so
+#                                the cold-start `loadSecretsThenConfig`
+#                                shim can decrypt the RDS master
+#                                secret when it lives under the
+#                                CMK.
+#   * `s3_media_kms_key_arn`   — the `media` Lambda role gains
+#                                scoped `kms:Decrypt` +
+#                                `kms:GenerateDataKey*` on the
+#                                media-bucket CMK. PutObject /
+#                                GetObject paths against the
+#                                CMK-encrypted media buckets need
+#                                both actions.
+#   * `rds_kms_key_arn`        — present for completeness /
+#                                documentation; the application
+#                                Lambdas never call KMS for RDS
+#                                directly (RDS decrypts storage
+#                                internally), so no IAM grant is
+#                                added today. Recorded here so a
+#                                future feature requiring direct
+#                                RDS-snapshot access has the
+#                                wiring already.
+#   * `sms_provider_kms_key_arn` /
+#     `telegram_kms_key_arn`   — placeholders for the future
+#                                third-party API-key secrets. Not
+#                                used today (the existing
+#                                secrets-ARN grants don't need
+#                                KMS perms until those secrets
+#                                actually live under a CMK).
+# -----------------------------------------------------------------------------
+
+variable "env_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key used to encrypt every Lambda function's environment-variable blob at rest. `null` (the default) keeps the AWS-managed `aws/lambda` key. The change is applied immediately on the next `aws_lambda_function` update — Lambda re-encrypts env vars in place without a cold-start hit."
+  type        = string
+  default     = null
+}
+
+variable "secrets_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key used by the RDS master secret + future third-party API-key secrets. When set, every per-domain Lambda role gains a scoped `kms:Decrypt` grant on this key so `loadSecretsThenConfig` can read the RDS master secret. `null` keeps the AWS-managed `aws/secretsmanager` posture and adds no grant."
+  type        = string
+  default     = null
+}
+
+variable "s3_media_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key used to encrypt the media buckets. When set, the `media` Lambda role gains scoped `kms:Decrypt` + `kms:GenerateDataKey*` on this key — both actions are required for PutObject / GetObject against SSE-KMS buckets. `null` keeps the SSE-S3 posture and adds no grant."
+  type        = string
+  default     = null
+}

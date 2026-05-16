@@ -529,16 +529,28 @@ The module exposes:
 
 Both env stacks (`environments/dev/main.tf`, `environments/prod/main.tf`) construct the module and re-export `kms_key_arns` + `kms_alias_names`. The outputs stand by unused — the consumer modules don't read them yet — by design: the first apply in each environment provisions the keys without disturbing any existing data, so the operator can review a clean Terraform plan before any data moves.
 
-### What this commit does NOT do
+### What the module commit did NOT do (historical context)
 
-- Does not flip `aws_db_instance.this.kms_key_id` on the RDS module.
-- Does not flip `sse_algorithm` from `AES256` to `aws:kms` on any S3 bucket.
-- Does not flip `kms_key_id` on `aws_secretsmanager_secret.*` resources.
-- Does not flip `kms_key_arn` on `aws_lambda_function.*` resources.
-- Does not add `kms:Decrypt` / `kms:GenerateDataKey*` IAM grants to any Lambda execution role.
-- Does not move any existing data at rest from the AWS-managed key to a CMK.
+The first Track 4 commit (`Phase 9: add KMS module`) deliberately landed the keys with no consumer wiring. That commit's plan was zero `Modify` / `Replace` actions on existing resources — six new keys + six new aliases only. The wiring commit below picks up from there.
 
-All five wiring steps land in the follow-up `Phase 9: wire CMKs through consumer modules` commit, gated behind a `kms_key_*` input on each consumer module that defaults to `null` (= AWS-managed; no behavior change when unset). The data-move step lands in `Phase 9: add KMS migration runbook` alongside `docs/operations/runbooks/kms-migration.md`.
+### Wiring (`Phase 9: wire CMKs through consumers`)
+
+Each consumer module now accepts a nullable KMS input that defaults to `null` (preserves AWS-managed encryption — no behavior change when unset). The env stacks pass `module.kms.<service>_key_arn` to each input. The shape per consumer:
+
+| Module                                 | Inputs added                                                                                     | Behavior when set                                                                                                                                                                                  |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infra/terraform/modules/rds`          | `kms_key_id`, `secrets_kms_key_id`                                                               | `aws_db_instance.this.kms_key_id` + `aws_secretsmanager_secret.master.kms_key_id` flip to the CMK. The DB-instance change cannot in-place re-encrypt — Terraform reports drift; the snapshot+restore runbook is the data-move path. The secret's next version write encrypts under the CMK. |
+| `infra/terraform/modules/s3`           | `media_kms_key_arn`, `logs_kms_key_arn`                                                          | The `media-public`, `media-private`, and `logs` buckets' default SSE flips from `AES256` to `aws:kms` with `kms_master_key_id` + `bucket_key_enabled = true`. Existing objects keep prior encryption; new writes use the CMK. |
+| `infra/terraform/modules/admin-frontend` | `kms_key_arn`                                                                                  | The admin SPA bucket flips to SSE-KMS. CloudFront OAC reads continue to work because the `s3_admin_frontend` CMK policy grants `cloudfront.amazonaws.com` `kms:Decrypt` fenced by `aws:SourceAccount`. |
+| `infra/terraform/modules/secrets`      | `secrets_kms_key_arn`                                                                            | An inline `kms:Decrypt` policy is attached to the SAR-deployed rotation Lambda's execution role (looked up by name extracted from the function's `role` ARN) so rotations continue after the secret flips to the CMK. |
+| `infra/terraform/modules/lambda`       | `env_kms_key_arn`, `secrets_kms_key_arn`, `s3_media_kms_key_arn`                                 | Every `aws_lambda_function.function` gets `kms_key_arn = env_kms_key_arn` (env-var blob re-encrypts in place on the next apply). Every per-domain role gets `kms:Decrypt` on the secrets CMK so cold-start `loadSecretsThenConfig` can resolve the RDS master secret. The `media` role gets `kms:Decrypt` + `kms:GenerateDataKey*` on the media-bucket CMK so PutObject / GetObject paths against SSE-KMS buckets keep working. |
+
+The new IAM policies all use a `kms:ViaService` condition (`secretsmanager.${region}.amazonaws.com` or `s3.${region}.amazonaws.com`) so the grant only applies when the call comes through the named service — matching the `kms:ViaService` fence on the corresponding `kms` module key policy.
+
+### What the wiring commit does NOT do
+
+- Does not move any existing data at rest from the AWS-managed key to a CMK. The RDS instance flags drift but does not in-place re-encrypt; S3 objects already in the buckets keep their previous encryption; the existing version of each Secrets Manager secret remains under the old key until the next rotation.
+- Does not document or perform the maintenance-window data move — that lands in the next commit (`Phase 9: add KMS migration runbook`) alongside `docs/operations/runbooks/kms-migration.md`.
 
 ## Disaster recovery
 

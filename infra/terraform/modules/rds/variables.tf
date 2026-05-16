@@ -124,3 +124,35 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS inputs.
+#
+# Both default to `null`, in which case the resources keep their
+# AWS-managed encryption (`aws/rds` for the DB instance,
+# `aws/secretsmanager` for the master secret). When set, the
+# resources encrypt under the customer-managed KMS keys from the
+# `kms` module. The env stack pipes `module.kms.rds_key_arn` +
+# `module.kms.secrets_key_arn` here.
+#
+# **Important**: for an EXISTING instance, AWS does not support an
+# in-place `kms_key_id` swap on `aws_db_instance`. Terraform reports
+# the change as a "drift" but `terraform apply` will not move data
+# — the operator must run the re-encryption runbook (snapshot copy
+# with the new CMK, restore-from-snapshot, cutover) for existing
+# data to actually re-encrypt. Setting `kms_key_id` here is
+# sufficient for FRESH instances to launch under the CMK from day
+# one.
+# -----------------------------------------------------------------------------
+
+variable "kms_key_id" {
+  description = "ARN (or key id) of the customer-managed KMS key used to encrypt the DB instance's storage. `null` (the default) preserves AWS-managed `aws/rds` encryption. When set on a fresh instance the storage encrypts under the CMK on first launch; on an existing instance Terraform reports drift but cannot in-place re-encrypt — the re-encryption runbook (snapshot copy + restore) is the supported migration path."
+  type        = string
+  default     = null
+}
+
+variable "secrets_kms_key_id" {
+  description = "ARN (or key id) of the customer-managed KMS key used to encrypt the `ethiolink/${env}/rds/master` Secrets Manager secret. `null` (the default) preserves AWS-managed `aws/secretsmanager` encryption. Unlike RDS, Secrets Manager re-encrypts the secret value in place on the next version write — the runbook describes triggering one rotation post-CMK-flip to cycle existing versions onto the CMK."
+  type        = string
+  default     = null
+}

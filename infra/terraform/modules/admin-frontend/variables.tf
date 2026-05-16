@@ -112,3 +112,20 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS input.
+#
+# `null` (the default) preserves SSE-S3 (`AES256`); a non-null
+# value flips the admin-frontend bucket to SSE-KMS with
+# `bucket_key_enabled = true`. The matching key policy on the
+# `s3_admin_frontend` CMK already grants `cloudfront.amazonaws.com`
+# the `kms:Decrypt` it needs for OAC reads (with an
+# `aws:SourceAccount` fence).
+# -----------------------------------------------------------------------------
+
+variable "kms_key_arn" {
+  description = "ARN of the customer-managed KMS key used to encrypt the admin-frontend bucket. `null` (the default) preserves SSE-S3 (`AES256`); a non-null value flips to SSE-KMS. CloudFront OAC reads work transparently because the matching key policy grants the CloudFront service principal `kms:Decrypt` in the same account."
+  type        = string
+  default     = null
+}

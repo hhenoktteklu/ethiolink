@@ -178,6 +178,13 @@ module "s3" {
 
   # No public-bucket versioning today; an explicit audit-replay
   # need would flip this to `true`.
+
+  # Phase 9 Track 4 — flip the bucket SSE to SSE-KMS under the
+  # customer-managed CMKs. Existing objects keep their previous
+  # encryption until the re-encryption runbook runs in a
+  # scheduled maintenance window.
+  media_kms_key_arn = module.kms.s3_media_key_arn
+  logs_kms_key_arn  = module.kms.s3_logs_key_arn
 }
 
 output "s3_media_public_bucket" {
@@ -224,6 +231,14 @@ module "rds" {
 
   enable_rds_proxy              = true
   rds_proxy_idle_client_timeout = 600
+
+  # Phase 9 Track 4 — record the intended CMK. AWS does not
+  # support in-place key swap on an existing instance; the
+  # re-encryption runbook (snapshot copy + restore) is the
+  # supported migration path. New automated snapshots taken
+  # after the runbook completes encrypt under the CMK.
+  kms_key_id         = module.kms.rds_key_arn
+  secrets_kms_key_id = module.kms.secrets_key_arn
 }
 
 output "rds_endpoint" {
@@ -303,6 +318,15 @@ module "lambda" {
   log_retention_days = 90
   log_level          = "info"
   node_env           = "production"
+
+  # Phase 9 Track 4 — wire the CMKs. Same wiring as dev: Lambda
+  # env-vars re-encrypt under the customer-managed key; per-domain
+  # roles gain scoped `kms:Decrypt` on the secrets CMK and
+  # `kms:Decrypt` + `kms:GenerateDataKey*` on the media-bucket
+  # CMK (media role only).
+  env_kms_key_arn      = module.kms.lambda_env_key_arn
+  secrets_kms_key_arn  = module.kms.secrets_key_arn
+  s3_media_kms_key_arn = module.kms.s3_media_key_arn
 
   # CRITICAL prod difference: the migration runner targets the
   # direct RDS endpoint instead of the proxy. RDS Proxy's
@@ -439,6 +463,12 @@ module "admin_frontend" {
   api_gateway_origin  = module.api_gateway.invoke_url
   cognito_origin      = "https://${module.cognito.hosted_ui_domain}.auth.${var.region}.amazoncognito.com"
   media_public_origin = "https://${module.s3.media_public_bucket_name}.s3.${var.region}.amazonaws.com"
+
+  # Phase 9 Track 4 — flip the bucket SSE to SSE-KMS. CloudFront
+  # OAC reads continue to work; the `s3_admin_frontend` CMK
+  # policy grants the CloudFront service principal `kms:Decrypt`
+  # fenced by `aws:SourceAccount`.
+  kms_key_arn = module.kms.s3_admin_frontend_key_arn
 }
 
 output "admin_frontend_url" {
@@ -551,6 +581,11 @@ module "secrets_rotation" {
 
   rotation_days = 30
   enabled       = true
+
+  # Phase 9 Track 4 — grant the SAR-deployed rotation Lambda
+  # `kms:Decrypt` on the secrets CMK so rotations continue to
+  # work after the RDS master secret flips to the CMK.
+  secrets_kms_key_arn = module.kms.secrets_key_arn
 }
 
 output "secrets_rotation_enabled" {

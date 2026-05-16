@@ -123,6 +123,14 @@ resource "aws_secretsmanager_secret" "master" {
   # rolled back with `aws secretsmanager restore-secret`.
   recovery_window_in_days = 7
 
+  # Phase 9 Track 4 — `null` keeps the AWS-managed
+  # `aws/secretsmanager` key (the existing behavior); a non-null
+  # value flips to the customer-managed CMK from the `kms` module.
+  # New secret VERSIONS are immediately encrypted under the new
+  # key; the existing version remains under the old key until the
+  # next rotation cycles a fresh value.
+  kms_key_id = var.secrets_kms_key_id
+
   tags = local.common_tags
 
   lifecycle {
@@ -162,6 +170,17 @@ resource "aws_db_instance" "this" {
   max_allocated_storage       = var.max_allocated_storage > var.allocated_storage ? var.max_allocated_storage : 0
   storage_type                = "gp3"
   storage_encrypted           = true
+
+  # Phase 9 Track 4 — `null` keeps the AWS-managed `aws/rds` key
+  # (existing behavior); a non-null value tells RDS to launch fresh
+  # instances + provision automated snapshots under the customer-
+  # managed CMK from the `kms` module. AWS rejects an in-place key
+  # swap on an existing instance — for already-launched instances
+  # this argument just records the intended key; the re-encryption
+  # runbook (snapshot copy + restore) is the supported migration
+  # path. New automated snapshots taken after the instance is on
+  # the CMK are encrypted under it.
+  kms_key_id = var.kms_key_id
 
   db_name  = var.db_name
   username = var.master_username

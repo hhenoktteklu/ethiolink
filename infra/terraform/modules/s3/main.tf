@@ -109,10 +109,16 @@ resource "aws_s3_bucket_public_access_block" "logs" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
   bucket = aws_s3_bucket.logs.id
 
+  # Phase 9 Track 4 — flips between SSE-S3 and SSE-KMS depending on
+  # whether the caller passes a CMK ARN. `bucket_key_enabled` is
+  # only meaningful under SSE-KMS (it amortizes KMS calls per
+  # bucket-key window) so it's gated on the same condition.
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = var.logs_kms_key_arn == null ? "AES256" : "aws:kms"
+      kms_master_key_id = var.logs_kms_key_arn
     }
+    bucket_key_enabled = var.logs_kms_key_arn != null
   }
 }
 
@@ -249,10 +255,16 @@ resource "aws_s3_bucket_public_access_block" "media_public" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "media_public" {
   bucket = aws_s3_bucket.media_public.id
 
+  # Phase 9 Track 4 — SSE-S3 by default; SSE-KMS when the caller
+  # passes `media_kms_key_arn`. `bucket_key_enabled = true` under
+  # SSE-KMS keeps per-object KMS calls amortized to ~one
+  # GenerateDataKey per 5-minute window per bucket.
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = var.media_kms_key_arn == null ? "AES256" : "aws:kms"
+      kms_master_key_id = var.media_kms_key_arn
     }
+    bucket_key_enabled = var.media_kms_key_arn != null
   }
 }
 
@@ -384,10 +396,17 @@ resource "aws_s3_bucket_public_access_block" "media_private" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "media_private" {
   bucket = aws_s3_bucket.media_private.id
 
+  # Phase 9 Track 4 — same conditional shape as the public media
+  # bucket. Both media buckets share the `media_kms_key_arn` input
+  # because they're operationally one tier (the public/private
+  # split is a read-access boundary, not a data-classification one
+  # that would warrant a separate key).
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = var.media_kms_key_arn == null ? "AES256" : "aws:kms"
+      kms_master_key_id = var.media_kms_key_arn
     }
+    bucket_key_enabled = var.media_kms_key_arn != null
   }
 }
 

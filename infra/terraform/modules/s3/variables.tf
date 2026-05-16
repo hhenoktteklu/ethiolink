@@ -71,3 +71,35 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS inputs.
+#
+# Per-bucket nullable CMK ARNs. `null` (the default) keeps the
+# existing SSE-S3 (`AES256`) encryption — no behavior change. When
+# set, the bucket's default SSE flips to `aws:kms` with
+# `kms_master_key_id = <arn>` and `bucket_key_enabled = true`.
+# The bucket-key flag amortizes per-object KMS calls into one
+# key-rotation-cycle GenerateDataKey per ~5 minutes per bucket,
+# which keeps SSE-KMS cost from blowing up under media-heavy
+# workloads.
+#
+# **Existing objects are NOT re-encrypted by this change.** S3
+# applies the new default to subsequent writes only; the re-
+# encryption runbook (`aws s3 cp s3://b s3://b --recursive
+# --metadata-directive REPLACE --sse aws:kms --sse-kms-key-id
+# <arn>`) is the supported migration path for objects already in
+# the bucket.
+# -----------------------------------------------------------------------------
+
+variable "media_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key used to encrypt the public + private media buckets. `null` (the default) preserves SSE-S3 (`AES256`); a non-null value flips both media buckets to SSE-KMS with `bucket_key_enabled = true`. Existing objects keep their previous encryption until the re-encryption runbook re-puts them."
+  type        = string
+  default     = null
+}
+
+variable "logs_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key used to encrypt the server-access-logs bucket. Kept separate from `media_kms_key_arn` so an audit-side log-reader grant doesn't widen access to customer-facing media. `null` (the default) preserves SSE-S3."
+  type        = string
+  default     = null
+}

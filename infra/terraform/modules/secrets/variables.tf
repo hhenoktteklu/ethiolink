@@ -65,3 +65,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Phase 9 Track 4 — KMS input.
+#
+# When the RDS master secret lives under a customer-managed CMK
+# (the `secrets` key from the `kms` module), the SAR-deployed
+# rotation Lambda needs `kms:Decrypt` on that key to read the
+# current secret value during its four-step rotation. The SAR
+# template doesn't grant any KMS permission by default — we
+# attach an inline policy to the SAR-created role from this
+# module when the input is non-null.
+# -----------------------------------------------------------------------------
+
+variable "secrets_kms_key_arn" {
+  description = "ARN of the customer-managed KMS key encrypting the RDS master secret. `null` (the default) means the secret still uses AWS-managed `aws/secretsmanager` — no extra rotation-Lambda grant needed. A non-null value attaches a scoped `kms:Decrypt` inline policy to the SAR-deployed rotation Lambda's execution role so rotations continue to work after the secret flips to the CMK."
+  type        = string
+  default     = null
+}

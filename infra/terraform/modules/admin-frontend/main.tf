@@ -185,10 +185,16 @@ resource "aws_s3_bucket_public_access_block" "this" {
 resource "aws_s3_bucket_server_side_encryption_configuration" "this" {
   bucket = aws_s3_bucket.this.id
 
+  # Phase 9 Track 4 — SSE-S3 by default; SSE-KMS when the caller
+  # passes `kms_key_arn`. CloudFront OAC reads are unaffected: the
+  # `s3_admin_frontend` CMK policy allows the CloudFront service
+  # principal `kms:Decrypt` with an `aws:SourceAccount` fence.
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
+      sse_algorithm     = var.kms_key_arn == null ? "AES256" : "aws:kms"
+      kms_master_key_id = var.kms_key_arn
     }
+    bucket_key_enabled = var.kms_key_arn != null
   }
 }
 
