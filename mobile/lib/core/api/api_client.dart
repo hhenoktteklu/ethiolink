@@ -161,6 +161,40 @@ class ApiClient {
       throw ApiException.fromDio(e);
     }
   }
+
+  /// Convenience PATCH. Mirrors `postJson` — the API returns the
+  /// updated resource in the response body, so the caller passes
+  /// a `parse` callback. Body is optional (an empty patch is a
+  /// valid no-op for several endpoints).
+  Future<T> patchJson<T>(
+    String path, {
+    Object? body,
+    required T Function(dynamic body) parse,
+  }) async {
+    try {
+      final response = await dio.patch<dynamic>(path, data: body);
+      return parse(response.data);
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
+
+  /// Convenience DELETE. Many EthioLink "delete" endpoints are
+  /// soft-deletes that return the deactivated resource (e.g.
+  /// services + staff). The caller passes `parse` to decode the
+  /// response body just like `getJson`. Endpoints with empty
+  /// bodies can pass a no-op parser.
+  Future<T> deleteJson<T>(
+    String path, {
+    required T Function(dynamic body) parse,
+  }) async {
+    try {
+      final response = await dio.delete<dynamic>(path);
+      return parse(response.data);
+    } on DioException catch (e) {
+      throw ApiException.fromDio(e);
+    }
+  }
 }
 
 /// Dio interceptor that attaches the Cognito id token to every

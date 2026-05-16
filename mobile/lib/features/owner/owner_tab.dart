@@ -28,13 +28,16 @@ import '../browse/data/categories_repository.dart';
 import 'create_business_flow.dart';
 import 'data/business_actions_repository.dart';
 import 'data/owner_business_repository.dart';
+import 'data/owner_services_repository.dart';
 import 'models/owner_business_view.dart';
+import 'owner_services_screen.dart';
 
 class OwnerTab extends StatefulWidget {
   const OwnerTab({
     this.repositoryOverride,
     this.actionsRepositoryOverride,
     this.categoriesRepositoryOverride,
+    this.servicesRepositoryOverride,
     super.key,
   });
 
@@ -49,6 +52,10 @@ class OwnerTab extends StatefulWidget {
   /// Test seam for the categories dropdown inside the
   /// `CreateBusinessFlow` we push from the 404 CTA.
   final CategoriesRepository? categoriesRepositoryOverride;
+
+  /// Test seam for the `OwnerServicesScreen` pushed when the
+  /// dashboard's Services card is tapped.
+  final OwnerServicesRepository? servicesRepositoryOverride;
 
   @override
   State<OwnerTab> createState() => _OwnerTabState();
@@ -124,6 +131,7 @@ class _OwnerTabState extends State<OwnerTab> {
             return OwnerDashboard(
               business: snapshot.data!,
               actionsRepository: _actionsRepo!,
+              servicesRepositoryOverride: widget.servicesRepositoryOverride,
               onChanged: _refresh,
             );
           },
@@ -355,10 +363,15 @@ class OwnerDashboard extends StatelessWidget {
     required this.business,
     required this.actionsRepository,
     required this.onChanged,
+    this.servicesRepositoryOverride,
     super.key,
   });
   final OwnerBusinessView business;
   final BusinessActionsRepository actionsRepository;
+
+  /// Test seam forwarded to the `OwnerServicesScreen` we push when
+  /// the Services card is tapped.
+  final OwnerServicesRepository? servicesRepositoryOverride;
 
   /// Fired after a successful submit so the OwnerTab can refresh
   /// its loader and pick up the new status.
@@ -408,11 +421,41 @@ class OwnerDashboard extends StatelessWidget {
           ),
         const SizedBox(height: 16),
         for (final spec in _cards) ...[
-          _DashboardCard(spec: spec),
+          _DashboardCard(
+            spec: spec,
+            onTap: () => _openCard(context, spec.label),
+          ),
           const SizedBox(height: 8),
         ],
       ],
     );
+  }
+
+  /// Dispatches the dashboard-card tap. Services has its own
+  /// real screen (Phase 9 Track 3.5 third commit); the remaining
+  /// cards still SnackBar-stub until their dedicated commits land.
+  void _openCard(BuildContext context, String label) {
+    switch (label) {
+      case 'Services':
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => OwnerServicesScreen(
+              businessId: business.id,
+              repositoryOverride: servicesRepositoryOverride,
+            ),
+          ),
+        );
+        return;
+      default:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '$label — coming soon in the next owner-flow commit.',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+    }
   }
 }
 
@@ -652,8 +695,9 @@ class _DashboardCardSpec {
 }
 
 class _DashboardCard extends StatelessWidget {
-  const _DashboardCard({required this.spec});
+  const _DashboardCard({required this.spec, required this.onTap});
   final _DashboardCardSpec spec;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -663,18 +707,7 @@ class _DashboardCard extends StatelessWidget {
       color: colors.surfaceContainerHighest,
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          // Each card is a placeholder. The follow-up commits
-          // replace these SnackBars with real screens.
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${spec.label} — coming soon in the next owner-flow commit.',
-              ),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        },
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
