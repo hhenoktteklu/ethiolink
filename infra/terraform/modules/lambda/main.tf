@@ -116,6 +116,19 @@ locals {
       area    = "integrations"
       handler = "lambdas/integrations/chapaWebhook.handler"
     }
+    # Phase 10 commit 6 — admin reconciliation reads over the
+    # `payment_intents` table. No writes; refund / void are
+    # deferred to a Phase 10.5 follow-up alongside the refund
+    # policy. Both functions sit under the existing `admin`
+    # Lambda area + IAM role.
+    "admin-payments-list-for-business" = {
+      area    = "admin"
+      handler = "lambdas/admin/payments/listForBusiness.handler"
+    }
+    "admin-payments-list" = {
+      area    = "admin"
+      handler = "lambdas/admin/payments/list.handler"
+    }
     "categories-list" = {
       area    = "categories"
       handler = "lambdas/categories/list.handler"

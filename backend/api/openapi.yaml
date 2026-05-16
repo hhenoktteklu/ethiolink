@@ -2167,6 +2167,111 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalError'
+  /admin/businesses/{id}/payment-intents:
+    get:
+      tags: [admin]
+      operationId: adminListPaymentIntentsForBusiness
+      summary: List payment_intents rows attached to a business.
+      description: |
+        Phase 10 commit 6. Authenticated, ADMIN-only. Returns every
+        `payment_intents` row attached either directly via an
+        appointment owned by the business OR via a featuring
+        subscription. Newest first.
+
+        Used by the admin SPA's `BusinessDetailPage` "Payments"
+        panel for per-business reconciliation against Chapa's
+        payout statements.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        '200':
+          description: Per-business payment-intents listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntentList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /admin/payment-intents:
+    get:
+      tags: [admin]
+      operationId: adminListPaymentIntents
+      summary: Cross-business payment_intents listing.
+      description: |
+        Phase 10 commit 6. Authenticated, ADMIN-only. Read-only
+        view across every `payment_intents` row in the system.
+        Filters: `from` (inclusive lower bound on `created_at`),
+        `to` (exclusive upper bound), `provider`, `status`. All
+        optional. Newest first. Used by the admin reconciliation
+        page to match payouts from Chapa against our recorded
+        intents.
+      parameters:
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: provider
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [CASH, MOCK, TELEBIRR, CHAPA, CBE_BIRR]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [PENDING, SUCCEEDED, FAILED, CANCELLED]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        '200':
+          description: Cross-business payment-intents listing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentIntentList'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /admin/appointments:
     get:
       tags: [admin]
@@ -3858,6 +3963,71 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/NotificationLogView'
+    PaymentIntentView:
+      type: object
+      description: |
+        Phase 10 commit 6 — admin-only reconciliation view of a
+        single `payment_intents` row. The `purpose` field is a
+        derived discriminator (APPOINTMENT vs FEATURING) — the
+        XOR `CHECK` constraint guarantees exactly one of
+        `appointmentId` / `featuringSubscriptionId` is non-null.
+        `rawResponse` is the verbatim provider verify payload;
+        the admin SPA renders it collapsed by default.
+      required:
+        - id
+        - appointmentId
+        - featuringSubscriptionId
+        - purpose
+        - provider
+        - amountEtb
+        - currency
+        - status
+        - providerRef
+        - rawResponse
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        appointmentId:
+          type: [string, 'null']
+          format: uuid
+        featuringSubscriptionId:
+          type: [string, 'null']
+          format: uuid
+        purpose:
+          type: string
+          enum: [APPOINTMENT, FEATURING]
+        provider:
+          type: string
+          enum: [CASH, MOCK, TELEBIRR, CHAPA, CBE_BIRR]
+        amountEtb:
+          type: number
+        currency:
+          type: string
+          enum: [ETB]
+        status:
+          type: string
+          enum: [PENDING, SUCCEEDED, FAILED, CANCELLED]
+        providerRef:
+          type: [string, 'null']
+        rawResponse:
+          description: Verbatim provider payload; shape varies per provider.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    PaymentIntentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PaymentIntentView'
     RejectAppointmentRequest:
       type: object
       properties:

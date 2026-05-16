@@ -38,6 +38,8 @@ import {
     type FeaturingSubscriptionView,
     getAdminFeaturingHistory,
     listAdminBusinesses,
+    listAdminPaymentIntentsForBusiness,
+    type PaymentIntentView,
     rejectBusiness,
     suspendBusiness,
     unfeatureBusiness,
@@ -193,6 +195,11 @@ function ActionsPanel({
                     onMutated={onMutated}
                 />
             )}
+            {/* Phase 10 commit 6 — reconciliation surface. Visible on
+                every business regardless of status so admins can
+                audit historical payment intents on suspended /
+                rejected businesses too. */}
+            <PaymentIntentsPanel businessId={business.id} />
             {(business.status === 'DRAFT' ||
                 business.status === 'REJECTED' ||
                 business.status === 'SUSPENDED') && (
@@ -840,6 +847,171 @@ const td: React.CSSProperties = {
     verticalAlign: 'top',
     whiteSpace: 'nowrap',
 };
+
+// ---------------------------------------------------------------------------
+// Payment intents panel — Phase 10 commit 6 reconciliation surface
+// ---------------------------------------------------------------------------
+//
+// Read-only table of every `payment_intents` row attached to the
+// business — either via an appointment OR via a featuring
+// subscription. Useful when matching Chapa's payout statement
+// against our recorded intents. Refunds + voids are deliberately
+// out of scope; the reconciliation surface is a read-only audit
+// tool.
+//
+// The endpoint is unpaginated under the MVP cap (200 rows). When
+// businesses cross that threshold the page grows date-range
+// filters; for now the default newest-first listing is fine.
+
+function PaymentIntentsPanel({ businessId }: { businessId: string }) {
+    const query = useQuery({
+        queryKey: ['adminPaymentIntents', businessId],
+        queryFn: () =>
+            listAdminPaymentIntentsForBusiness(businessId, { limit: 200 }),
+    });
+
+    return (
+        <Card title="Payments">
+            <p style={{ marginTop: 0, color: '#555', fontSize: '0.9rem' }}>
+                Every <code>payment_intents</code> row tied to this
+                business — appointments (when the booking went through
+                an online provider) and featuring subscriptions. Newest
+                first. Use for reconciliation against the provider's
+                payout statements.
+            </p>
+            <PaymentIntentsTable
+                isLoading={query.isLoading}
+                error={query.error}
+                rows={query.data?.items ?? []}
+                onRetry={() => query.refetch()}
+            />
+        </Card>
+    );
+}
+
+function PaymentIntentsTable({
+    isLoading,
+    error,
+    rows,
+    onRetry,
+}: {
+    isLoading: boolean;
+    error: unknown;
+    rows: readonly PaymentIntentView[];
+    onRetry: () => void;
+}) {
+    if (isLoading) {
+        return <p style={{ color: '#555' }}>Loading payments…</p>;
+    }
+    if (error) {
+        return (
+            <p style={{ color: 'crimson' }}>
+                Failed to load:{' '}
+                {error instanceof ApiError
+                    ? `${error.code ?? 'ERROR'} — ${error.message}`
+                    : error instanceof Error
+                      ? error.message
+                      : String(error)}
+                {' '}
+                <button
+                    type="button"
+                    onClick={onRetry}
+                    style={{ marginLeft: '0.5rem' }}
+                >
+                    Try again
+                </button>
+            </p>
+        );
+    }
+    if (rows.length === 0) {
+        return (
+            <p style={{ color: '#666' }}>
+                No payment intents recorded for this business yet.
+                Cash bookings do not create rows; online bookings +
+                featuring purchases do.
+            </p>
+        );
+    }
+    return (
+        <div style={{ overflowX: 'auto' }}>
+            <table
+                style={{
+                    borderCollapse: 'collapse',
+                    width: '100%',
+                    fontSize: '0.9rem',
+                }}
+            >
+                <thead>
+                    <tr style={{ textAlign: 'left', background: '#f3f4f6' }}>
+                        <th style={th}>Purpose</th>
+                        <th style={th}>Provider</th>
+                        <th style={th}>Status</th>
+                        <th style={th}>Amount</th>
+                        <th style={th}>Currency</th>
+                        <th style={th}>Provider ref</th>
+                        <th style={th}>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows.map((row) => (
+                        <tr key={row.id} style={{ borderTop: '1px solid #eee' }}>
+                            <td style={td}>{row.purpose}</td>
+                            <td style={td}>{row.provider}</td>
+                            <td style={td}>
+                                <PaymentIntentStatusBadge status={row.status} />
+                            </td>
+                            <td style={td}>{row.amountEtb.toFixed(2)}</td>
+                            <td style={td}>{row.currency}</td>
+                            <td style={td}>
+                                {row.providerRef ? (
+                                    <code>{row.providerRef}</code>
+                                ) : (
+                                    '—'
+                                )}
+                            </td>
+                            <td style={td}>
+                                {new Date(row.createdAt).toLocaleString()}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+function PaymentIntentStatusBadge({
+    status,
+}: {
+    status: PaymentIntentView['status'];
+}) {
+    const color = (() => {
+        switch (status) {
+            case 'SUCCEEDED':
+                return { bg: '#dcfce7', fg: '#166534' };
+            case 'PENDING':
+                return { bg: '#fef9c3', fg: '#854d0e' };
+            case 'FAILED':
+            case 'CANCELLED':
+                return { bg: '#fee2e2', fg: '#991b1b' };
+        }
+    })();
+    return (
+        <span
+            style={{
+                background: color.bg,
+                color: color.fg,
+                padding: '0.1rem 0.5rem',
+                borderRadius: 4,
+                fontSize: '0.8rem',
+                fontWeight: 600,
+                letterSpacing: 0.3,
+            }}
+        >
+            {status}
+        </span>
+    );
+}
 
 function defaultFeatureUntil(): string {
     // Default to "two weeks from now" rendered for `datetime-local`

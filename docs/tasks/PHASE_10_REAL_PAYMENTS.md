@@ -75,7 +75,27 @@ Recommended first provider: **Chapa** (https://chapa.co). Aggregator: under one 
 - [x] Tests: `CreateAppointmentResponse` + `SubscribeFeaturingResult` parser cases pinning the wrapped wire shape; existing repository tests updated to wrap the response JSON + assert through the new layer; booking flow happy path unchanged on cash + 4 new online-path cases (PENDING opens redirect + polls + succeeds, launcher returns false → failed, poll budget exhausted → timed-out, history returns CANCELLED → failed); owner promote 1 new online-path case + 1 launcher-failure case + 1 wire-shape parse case.
 - [x] `mobile/README.md` — new "Phase 10 — Chapa hosted-checkout deep link" subsection documents the `ethiolink://payments/return` deep link, the launcher-based flow, and the screen-level polling contract. The existing Cognito-side intent filter + `CFBundleURLSchemes` entries already cover the `ethiolink://` scheme; no new native scaffolding required.
 
-### Commit 6 — admin reconciliation surface
+### Commit 6 — admin reconciliation surface (landed: this commit)
+
+- [x] `PaymentIntentsRepository` extended with `listForBusiness(businessId, limit)` and `listAll({ from, to, provider, status }, limit)`. Postgres impl uses a `UNION ALL` across the appointment + featuring FK paths for the per-business read; the cross-business read builds a dynamic WHERE clause matching the notification-logs pattern. In-memory impl gets a `seed(row, businessId?)` overload + an `insertOrFindWithBusiness` test helper that records the owning business in a side table. Renamed the existing test-only `listAll()` (no-arg helper) to `listAllRaw()` to free the `listAll` name for the production filter API.
+- [x] New view module `backend/shared/domains/payments/paymentIntentView.ts` exposes `PaymentIntentView` + `PaymentIntentList` + `toPaymentIntentView` + `toPaymentIntentList`. Derives the `purpose` discriminator (APPOINTMENT vs FEATURING) from the XOR FK columns. Includes the verbatim `rawResponse` payload for operator inspection; the admin SPA renders it collapsed by default.
+- [x] Two new admin Lambdas:
+    - `backend/lambdas/admin/payments/listForBusiness.ts` — `GET /v1/admin/businesses/{id}/payment-intents`. Path-param UUID validation + optional `limit` (1..200, default 100).
+    - `backend/lambdas/admin/payments/list.ts` — `GET /v1/admin/payment-intents`. Optional `from` / `to` / `provider` / `status` / `limit` filters. Mirrors the notification-logs listing shape.
+- [x] Terraform: two new functions under the `admin` Lambda area (`admin-payments-list-for-business` + `admin-payments-list`); two new API Gateway resource paths + COGNITO-gated routes.
+- [x] OpenAPI gains both endpoints + the `PaymentIntentView` / `PaymentIntentList` component schemas.
+- [x] Admin SPA: `admin/src/lib/api.ts` gains `listAdminPaymentIntentsForBusiness` + `listAdminPaymentIntents` helpers and the `PaymentProvider` / `PaymentIntentStatus` / `PaymentIntentPurpose` / `PaymentIntentView` / `PaymentIntentListResponse` types. `BusinessDetailPage` mounts a new `PaymentIntentsPanel` below the manual-feature card with columns for purpose / provider / status (colour-coded badge: SUCCEEDED green / PENDING amber / FAILED / CANCELLED red) / amount / currency / provider ref / created-at. Visible on every business regardless of status so admins can audit historical intents on suspended businesses too. TanStack Query-backed; loading / empty / error states wired through the same `ApiError` formatter as the rest of the page.
+- [x] Tests: 8 new cases in `backend/tests/payments/paymentIntentsAdminReconciliation.test.ts` covering `listForBusiness` (business filter, newest-first ordering, limit, empty), `listAll` (provider / status filters, inclusive-from / exclusive-to date window, no-filter newest-first, limit), and view mapping (ISO-8601 timestamps + full field set, FEATURING discriminator, list-envelope wrapping). The existing repo + persistence tests are unchanged except for the `listAll()` → `listAllRaw()` rename.
+
+**How to QA**
+
+1. `cd admin && npm run dev` against a dev API with Chapa wired (`payments_provider = "chapa"`). Sign in as an ADMIN.
+2. Navigate to the Businesses page → pick an APPROVED business → confirm the new "Payments" card sits below the feature card. With no online bookings or featuring purchases yet, expect the empty-state copy ("No payment intents recorded for this business yet.").
+3. As a customer (mobile / curl), book an `ONLINE_PENDING` appointment OR a featuring subscription. After the Chapa webhook lands, refresh the BusinessDetailPage — the Payments card should show one row with status SUCCEEDED, the correct purpose, amountEtb, and providerRef = the Chapa `tx_ref`.
+4. Force a payment-intents-row failure (use a Chapa sandbox failure card) — confirm the row appears with status FAILED + red badge.
+5. (Backend-only QA for the cross-business endpoint) `curl` `GET /v1/admin/payment-intents?from=<24h-ago>&status=SUCCEEDED` as an admin; expect the same wire shape with every recent SUCCEEDED row across all businesses.
+
+### Commit 7 — operator runbook
 
 - [ ] Booking flow on the Flutter customer app — toggle `paymentMethod` between cash / online; on online confirm, open `data.payment.redirectUrl` via `url_launcher`; transition to `PaymentWaitingScreen` polling `GET /v1/me/appointments/{id}` every 3s up to 90s.
 - [ ] Owner featuring screen — same dance on the Promote screen. After return, poll `GET /v1/businesses/{id}/featuring/active`.

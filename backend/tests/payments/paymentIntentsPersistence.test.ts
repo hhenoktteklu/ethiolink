@@ -191,7 +191,7 @@ describe('FeaturingService.subscribe — payment_intents persistence', () => {
             callerUserId: OWNER_ID,
         });
 
-        const rows = repo.listAll();
+        const rows = repo.listAllRaw();
         assert.strictEqual(rows.length, 1);
         const row = rows[0]!;
         assert.strictEqual(row.featuringSubscriptionId, subscription.id);
@@ -215,7 +215,7 @@ describe('FeaturingService.subscribe — payment_intents persistence', () => {
         });
         assert.strictEqual(subscription.status, 'ACTIVE');
         // No row written — cash never touches payment_intents.
-        assert.deepStrictEqual(repo.listAll(), []);
+        assert.deepStrictEqual(repo.listAllRaw(), []);
     });
 
     it('duplicate providerRef across retries → idempotent (single row)', async () => {
@@ -252,7 +252,7 @@ describe('FeaturingService.subscribe — payment_intents persistence', () => {
             callerUserId: OWNER_ID,
         });
 
-        assert.strictEqual(repo.listAll().length, 1);
+        assert.strictEqual(repo.listAllRaw().length, 1);
     });
 
     it('PENDING gateway + missing repo → logs warning, does NOT throw', async () => {
@@ -318,7 +318,7 @@ describe('FeaturingService.subscribe — payment_intents persistence', () => {
             packageCode: 'FEATURING_7D',
             callerUserId: OWNER_ID,
         });
-        assert.deepStrictEqual(repo.listAll(), []);
+        assert.deepStrictEqual(repo.listAllRaw(), []);
         const missingLog = logs.find((l) =>
             l.message.endsWith('repo_missing'),
         );

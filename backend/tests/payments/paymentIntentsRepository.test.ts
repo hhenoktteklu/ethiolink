@@ -59,7 +59,7 @@ describe('InMemoryPaymentIntentsRepository — insertOrFindByProviderRef', () =>
             providerRef: 'apt-1-bbbb',
         });
         assert.strictEqual(second.id, first.id);
-        assert.strictEqual(repo.listAll().length, 1);
+        assert.strictEqual(repo.listAllRaw().length, 1);
     });
 });
 

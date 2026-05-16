@@ -188,6 +188,9 @@ locals {
     { path = "v1/admin/categories/{id}", parent = "v1/admin/categories" },
     { path = "v1/admin/appointments", parent = "v1/admin" },
     { path = "v1/admin/notifications", parent = "v1/admin" },
+    # Phase 10 commit 6 — admin payment reconciliation surface.
+    { path = "v1/admin/businesses/{id}/payment-intents", parent = "v1/admin/businesses/{id}" },
+    { path = "v1/admin/payment-intents", parent = "v1/admin" },
   ]
 
   resource_paths_map = { for r in local.resource_paths : r.path => r }
@@ -394,6 +397,13 @@ locals {
     }
     "GET_v1_admin_notifications" = {
       path = "v1/admin/notifications", method = "GET", function = "admin-notifications-list", auth = "COGNITO"
+    }
+    # Phase 10 commit 6 — admin payment reconciliation reads.
+    "GET_v1_admin_businesses_id_payment_intents" = {
+      path = "v1/admin/businesses/{id}/payment-intents", method = "GET", function = "admin-payments-list-for-business", auth = "COGNITO"
+    }
+    "GET_v1_admin_payment_intents" = {
+      path = "v1/admin/payment-intents", method = "GET", function = "admin-payments-list", auth = "COGNITO"
     }
   }
 

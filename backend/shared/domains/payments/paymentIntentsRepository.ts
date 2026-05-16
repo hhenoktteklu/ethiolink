@@ -84,6 +84,18 @@ export interface InsertPaymentIntentInput {
     readonly rawResponse?: unknown | null;
 }
 
+/** Phase 10 commit 6 — filters accepted by `listAll`. */
+export interface ListPaymentIntentsFilters {
+    /** Inclusive lower bound on `created_at`. */
+    readonly fromUtc?: Date;
+    /** Exclusive upper bound on `created_at`. */
+    readonly toUtc?: Date;
+    /** Restrict to a specific provider. */
+    readonly provider?: PaymentProvider;
+    /** Restrict to a specific status. */
+    readonly status?: PaymentIntentStatus;
+}
+
 export interface PaymentIntentsRepository {
     /**
      * Look up a row by its upstream `tx_ref`. Returns null when no
@@ -92,6 +104,28 @@ export interface PaymentIntentsRepository {
      * Chapa stops retrying.
      */
     findByProviderRef(providerRef: string): Promise<PaymentIntent | null>;
+
+    /**
+     * Phase 10 commit 6 — per-business reconciliation read. Returns
+     * every `payment_intents` row attached to the business
+     * directly (`appointment.business_id`) OR via a featuring
+     * subscription. Newest first.
+     */
+    listForBusiness(
+        businessId: string,
+        limit: number,
+    ): Promise<readonly PaymentIntent[]>;
+
+    /**
+     * Phase 10 commit 6 — admin cross-business reconciliation read.
+     * Filters on `created_at` window, `provider`, and `status`;
+     * orders newest first. Used by the admin reconciliation page
+     * + (future) CSV export.
+     */
+    listAll(
+        filters: ListPaymentIntentsFilters,
+        limit: number,
+    ): Promise<readonly PaymentIntent[]>;
 
     /**
      * Insert a PENDING row keyed by `providerRef`. If a row with the
@@ -206,6 +240,64 @@ export class PgPaymentIntentsRepository implements PaymentIntentsRepository {
         if (rows.length === 0) return null;
         return rowToDomain(rows[0]!);
     }
+
+    async listForBusiness(
+        businessId: string,
+        limit: number,
+    ): Promise<readonly PaymentIntent[]> {
+        // Two-arm UNION: appointment-attached intents joined
+        // through `appointments.business_id`, plus featuring
+        // intents attached to subscriptions owned by the business.
+        // ORDER BY created_at DESC across the union; LIMIT applies
+        // post-union.
+        const { rows } = await this.pool.query<DbRow>(
+            SELECT_FOR_BUSINESS,
+            [businessId, limit],
+        );
+        return rows.map(rowToDomain);
+    }
+
+    async listAll(
+        filters: ListPaymentIntentsFilters,
+        limit: number,
+    ): Promise<readonly PaymentIntent[]> {
+        // Hand-built dynamic WHERE — same pattern as the
+        // notification-logs admin listing. `from` / `to` use
+        // inclusive / exclusive bounds respectively (matches the
+        // admin notification API contract).
+        const clauses: string[] = [];
+        const params: unknown[] = [];
+        let i = 1;
+        if (filters.fromUtc) {
+            clauses.push(`created_at >= $${i++}`);
+            params.push(filters.fromUtc);
+        }
+        if (filters.toUtc) {
+            clauses.push(`created_at < $${i++}`);
+            params.push(filters.toUtc);
+        }
+        if (filters.provider) {
+            clauses.push(`provider = $${i++}`);
+            params.push(filters.provider);
+        }
+        if (filters.status) {
+            clauses.push(`status = $${i++}`);
+            params.push(filters.status);
+        }
+        const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+        params.push(limit);
+        const sql = `
+            SELECT id, appointment_id, featuring_subscription_id, provider,
+                   amount_etb, status, provider_ref, raw_response,
+                   created_at, updated_at
+            FROM   payment_intents
+            ${where}
+            ORDER  BY created_at DESC, id DESC
+            LIMIT  $${i}
+        `;
+        const { rows } = await this.pool.query<DbRow>(sql, params);
+        return rows.map(rowToDomain);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -216,18 +308,42 @@ export class InMemoryPaymentIntentsRepository
     implements PaymentIntentsRepository
 {
     private readonly rows = new Map<string, PaymentIntent>();
+    /**
+     * Side-table mapping `payment_intents.id` → owning business id.
+     * The Postgres impl resolves this via JOINs through
+     * `appointments` / `featuring_subscriptions`; the in-memory
+     * impl can't, so the test seeder + the test-only
+     * `insertOrFindByProviderRefWithBusiness` helper populate
+     * this directly.
+     */
+    private readonly businessByIntent = new Map<string, string>();
     private autoId = 1;
 
-    /** Test helper — seed an arbitrary row. */
-    seed(row: PaymentIntent): void {
+    /** Test helper — seed an arbitrary row, optionally with the owning business. */
+    seed(row: PaymentIntent, businessId?: string): void {
         this.rows.set(row.id, row);
+        if (businessId) this.businessByIntent.set(row.id, businessId);
     }
 
-    /** Test helper — read every row newest-first. */
-    listAll(): readonly PaymentIntent[] {
+    /** Test helper — read every row newest-first (no filters). */
+    listAllRaw(): readonly PaymentIntent[] {
         return [...this.rows.values()].sort(
             (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
         );
+    }
+
+    /**
+     * Test helper — upsert + record the owning business so the
+     * `listForBusiness` path returns the row. The production
+     * Postgres impl derives the business via FK JOINs and doesn't
+     * need this seam; the in-memory variant does.
+     */
+    async insertOrFindWithBusiness(
+        input: InsertPaymentIntentInput & { readonly businessId: string },
+    ): Promise<PaymentIntent> {
+        const row = await this.insertOrFindByProviderRef(input);
+        this.businessByIntent.set(row.id, input.businessId);
+        return row;
     }
 
     async findByProviderRef(
@@ -300,6 +416,36 @@ export class InMemoryPaymentIntentsRepository
         this.rows.set(id, next);
         return next;
     }
+
+    async listForBusiness(
+        businessId: string,
+        limit: number,
+    ): Promise<readonly PaymentIntent[]> {
+        const matches: PaymentIntent[] = [];
+        for (const [intentId, ownerBusinessId] of this.businessByIntent) {
+            if (ownerBusinessId === businessId) {
+                const row = this.rows.get(intentId);
+                if (row) matches.push(row);
+            }
+        }
+        matches.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return matches.slice(0, limit);
+    }
+
+    async listAll(
+        filters: ListPaymentIntentsFilters,
+        limit: number,
+    ): Promise<readonly PaymentIntent[]> {
+        const rows = [...this.rows.values()].filter((r) => {
+            if (filters.fromUtc && r.createdAt < filters.fromUtc) return false;
+            if (filters.toUtc && r.createdAt >= filters.toUtc) return false;
+            if (filters.provider && r.provider !== filters.provider) return false;
+            if (filters.status && r.status !== filters.status) return false;
+            return true;
+        });
+        rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return rows.slice(0, limit);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +481,30 @@ SELECT id, appointment_id, featuring_subscription_id, provider,
 FROM   payment_intents
 WHERE  id = $1
 LIMIT  1
+`;
+
+// Phase 10 commit 6 — per-business reconciliation listing.
+// Joins appointment-attached intents through
+// `appointments.business_id` and featuring intents through
+// `featuring_subscriptions.business_id`. ORDER BY + LIMIT apply
+// post-union.
+const SELECT_FOR_BUSINESS = `
+SELECT pi.id, pi.appointment_id, pi.featuring_subscription_id,
+       pi.provider, pi.amount_etb, pi.status, pi.provider_ref,
+       pi.raw_response, pi.created_at, pi.updated_at
+FROM   payment_intents pi
+JOIN   appointments a ON a.id = pi.appointment_id
+WHERE  a.business_id = $1
+UNION ALL
+SELECT pi.id, pi.appointment_id, pi.featuring_subscription_id,
+       pi.provider, pi.amount_etb, pi.status, pi.provider_ref,
+       pi.raw_response, pi.created_at, pi.updated_at
+FROM   payment_intents pi
+JOIN   featuring_subscriptions fs
+       ON fs.id = pi.featuring_subscription_id
+WHERE  fs.business_id = $1
+ORDER  BY created_at DESC, id DESC
+LIMIT  $2
 `;
 
 const INSERT_PENDING_ON_CONFLICT = `

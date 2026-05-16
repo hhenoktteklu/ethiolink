@@ -655,3 +655,90 @@ export function listAdminNotifications(
         `/v1/admin/notifications${query ? `?${query}` : ''}`,
     );
 }
+
+// ---------------------------------------------------------------------------
+// Admin payment intents (Phase 10 commit 6 reconciliation surface)
+// ---------------------------------------------------------------------------
+
+export type PaymentProvider =
+    | 'CASH'
+    | 'MOCK'
+    | 'TELEBIRR'
+    | 'CHAPA'
+    | 'CBE_BIRR';
+
+export type PaymentIntentStatus =
+    | 'PENDING'
+    | 'SUCCEEDED'
+    | 'FAILED'
+    | 'CANCELLED';
+
+export type PaymentIntentPurpose = 'APPOINTMENT' | 'FEATURING';
+
+export interface PaymentIntentView {
+    readonly id: string;
+    readonly appointmentId: string | null;
+    readonly featuringSubscriptionId: string | null;
+    readonly purpose: PaymentIntentPurpose;
+    readonly provider: PaymentProvider;
+    readonly amountEtb: number;
+    readonly currency: 'ETB';
+    readonly status: PaymentIntentStatus;
+    readonly providerRef: string | null;
+    readonly rawResponse: unknown | null;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+}
+
+export interface PaymentIntentListResponse {
+    readonly items: readonly PaymentIntentView[];
+}
+
+/**
+ * Per-business payment-intents listing. Joins appointment + featuring
+ * subscriptions to the parent business; orders newest-first. Used
+ * by `BusinessDetailPage` Payments panel.
+ */
+export function listAdminPaymentIntentsForBusiness(
+    businessId: string,
+    params: { limit?: number } = {},
+): Promise<PaymentIntentListResponse> {
+    const search = new URLSearchParams();
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<PaymentIntentListResponse>(
+        'GET',
+        `/v1/admin/businesses/${encodeURIComponent(businessId)}/payment-intents${query ? `?${query}` : ''}`,
+    );
+}
+
+/**
+ * Cross-business payment-intents listing — used by the admin
+ * reconciliation page (future commit). Mirrors the
+ * `listAdminNotifications` filter shape.
+ */
+export function listAdminPaymentIntents(
+    params: {
+        fromUtc?: Date | string;
+        toUtc?: Date | string;
+        provider?: PaymentProvider;
+        status?: PaymentIntentStatus;
+        limit?: number;
+    } = {},
+): Promise<PaymentIntentListResponse> {
+    const search = new URLSearchParams();
+    if (params.fromUtc !== undefined) {
+        search.set('from', toIsoString(params.fromUtc));
+    }
+    if (params.toUtc !== undefined) {
+        search.set('to', toIsoString(params.toUtc));
+    }
+    if (params.provider !== undefined) search.set('provider', params.provider);
+    if (params.status !== undefined) search.set('status', params.status);
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    const query = search.toString();
+    return request<PaymentIntentListResponse>(
+        'GET',
+        `/v1/admin/payment-intents${query ? `?${query}` : ''}`,
+    );
+}
