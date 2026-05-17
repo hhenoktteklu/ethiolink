@@ -197,7 +197,7 @@ Provisioned by `infra/terraform/modules/rds/`. One PostgreSQL 15 instance per en
 | Property                | Dev                              | Prod                              |
 | ----------------------- | -------------------------------- | --------------------------------- |
 | Instance class          | `db.t4g.small` (ARM, burstable)  | `db.m6g.large` (ARM, steady)      |
-| Engine version          | `15.6`                           | `15.6`                            |
+| Engine version          | `15.18`                          | `15.18`                           |
 | Multi-AZ                | no                               | yes                               |
 | Allocated storage       | 20 GiB (autoscale to 100)        | 100 GiB (autoscale to 1000)       |
 | Storage type            | gp3                              | gp3                               |

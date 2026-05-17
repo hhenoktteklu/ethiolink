@@ -49,9 +49,9 @@ variable "instance_class" {
 }
 
 variable "engine_version" {
-  description = "PostgreSQL engine version. Pinned at the major.minor.patch level so a new patch from AWS doesn't roll out without a deliberate Terraform change. Matches the docker-compose local Postgres so migrations behave identically dev / prod / laptop."
+  description = "PostgreSQL engine version. Pinned at the major.minor.patch level so a new patch from AWS doesn't roll out without a deliberate Terraform change. Matches the docker-compose local Postgres so migrations behave identically dev / prod / laptop. Bumped from 15.6 to 15.18 in May 2026 after AWS retired the older 15.x patches in eu-west-1 (CreateDBInstance: \"Cannot find version 15.6 for postgres\")."
   type        = string
-  default     = "15.6"
+  default     = "15.18"
 }
 
 variable "multi_az" {

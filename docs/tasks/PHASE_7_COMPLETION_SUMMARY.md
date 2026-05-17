@@ -31,7 +31,7 @@ Every module lives under `infra/terraform/modules/<name>/` with the standard `ma
 - Server access logging from media buckets to the logs bucket under per-bucket prefixes.
 
 **`rds`**
-- Postgres 15.6 in private subnets. `db.t4g.small` single-AZ in dev; `db.m6g.large` Multi-AZ in prod.
+- Postgres 15.18 in private subnets (bumped from 15.6 in May 2026 — see `infra/terraform/modules/rds/variables.tf`). `db.t4g.small` single-AZ in dev; `db.m6g.large` Multi-AZ in prod.
 - Encrypted gp3 storage (autoscale 20→100 GiB dev, 100→1000 GiB prod). 7-day backups dev / 35-day prod.
 - Master credentials live in Secrets Manager at the stable name `ethiolink/${env}/rds/master` with the AWS-rotation-compatible JSON shape.
 - `deletion_protection = true` + `prevent_destroy = true` + `final_snapshot_identifier`. Performance Insights on (7-day retention).
