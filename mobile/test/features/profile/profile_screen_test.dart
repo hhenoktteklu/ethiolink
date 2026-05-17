@@ -57,6 +57,19 @@ Future<void> _pumpProfile(
   required MeRepository meRepo,
   LocalePreferences? prefs,
 }) async {
+  // The profile screen renders the session card + per-env config
+  // rows + Telegram link row + the locale picker + Sign-out button
+  // in a `ListView`. The default test viewport (800×600) on
+  // Flutter 3.41 is too short for the `SliverList` to instantiate
+  // the locale options + Sign-out row, so `find.text('አማርኛ')` /
+  // `find.byKey(localeOption.am)` / `find.text('Sign out')` were
+  // missing them. A taller viewport keeps every row mounted in the
+  // Element tree.
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,

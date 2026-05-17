@@ -26,14 +26,35 @@ const _testConfig = AppConfig(
 // ---------------------------------------------------------------------------
 
 class FakeBusinessDetailRepo implements BusinessDetailRepository {
-  FakeBusinessDetailRepo(this._completer);
+  FakeBusinessDetailRepo._(this._completer, this._error);
   factory FakeBusinessDetailRepo.value(BusinessDetail b) =>
-      FakeBusinessDetailRepo(Completer<BusinessDetail>()..complete(b));
+      FakeBusinessDetailRepo._(
+        Completer<BusinessDetail>()..complete(b),
+        null,
+      );
+
+  /// Defer the throw to the microtask queue (same pattern as
+  /// `FakeCategoriesRepository.error` in the browse-screen tests):
+  /// a pre-errored future constructed at fixture-setup time
+  /// reaches the test zone's uncaught-error handler before
+  /// `FutureBuilder` subscribes, surfacing as a test failure even
+  /// though the inline error UI would otherwise render correctly.
   factory FakeBusinessDetailRepo.error(Object e) =>
-      FakeBusinessDetailRepo(Completer<BusinessDetail>()..completeError(e));
-  final Completer<BusinessDetail> _completer;
+      FakeBusinessDetailRepo._(null, e);
+
+  final Completer<BusinessDetail>? _completer;
+  final Object? _error;
+
   @override
-  Future<BusinessDetail> getById(String id) => _completer.future;
+  Future<BusinessDetail> getById(String id) {
+    final err = _error;
+    if (err != null) {
+      return Future<BusinessDetail>.microtask(() {
+        throw err;
+      });
+    }
+    return _completer!.future;
+  }
 }
 
 class FakeServicesRepo implements ServicesRepository {
@@ -120,6 +141,16 @@ Future<void> _pump(
   WidgetTester tester, {
   required BusinessDetailRepositories repos,
 }) async {
+  // The detail page renders header + contact + services + staff +
+  // reviews sections vertically; on the 800×600 default test
+  // viewport, the reviews row was scrolling out of the laid-out
+  // region so `find.textContaining('★★★★★')` couldn't see it. Tall
+  // viewport keeps every section in the rendered Element tree.
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,

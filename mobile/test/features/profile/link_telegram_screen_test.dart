@@ -195,12 +195,19 @@ void main() {
       repo: repo,
       launcher: launcher.launch,
       // Big interval so the periodic timer doesn't fire during the
-      // test — we drive the check via the manual button.
-      pollInterval: const Duration(seconds: 30),
+      // test — we drive the check via the manual button. (The
+      // `pumpAndSettle` window used to be tight enough that a
+      // 30-second interval still got chewed through 10 polls;
+      // pinning to days dodges that entirely.)
+      pollInterval: const Duration(days: 365),
     );
 
     await tester.tap(find.widgetWithText(FilledButton, 'Link Telegram'));
-    await tester.pumpAndSettle();
+    // The polling-phase spinner never settles, so use bounded
+    // pumps instead of `pumpAndSettle()`.
+    for (var i = 0; i < 6; i++) {
+      await tester.pump();
+    }
 
     // Mid-poll: server now reports linked.
     repo.afterStartStatus = const TelegramLinkStatus(
@@ -208,10 +215,19 @@ void main() {
       linkedAt: '2026-05-15T10:00:00.000Z',
     );
 
-    await tester.tap(
-      find.widgetWithText(FilledButton, 'I linked it — check now'),
-    );
-    await tester.pumpAndSettle();
+    // The button is built via `FilledButton.tonalIcon(...)` which
+    // emits an `_FilledButtonWithIcon` (a private subtype of
+    // `FilledButton`). `find.widgetWithText(FilledButton, ...)`
+    // uses `runtimeType == FilledButton` and won't match the
+    // subtype, so we tap the unique label text directly.
+    await tester.tap(find.text('I linked it — check now'));
+    // _manualCheck → getStatus → setState(linked) replaces the
+    // polling spinner with the linked branch. A handful of bounded
+    // pumps flush the async transition without waiting on the
+    // (now-disposed) spinner animation.
+    for (var i = 0; i < 4; i++) {
+      await tester.pump();
+    }
 
     expect(find.text('Telegram is linked'), findsOneWidget);
   });
@@ -231,12 +247,24 @@ void main() {
     );
 
     await tester.tap(find.widgetWithText(FilledButton, 'Link Telegram'));
-    await tester.pumpAndSettle();
+    // The polling-phase body renders a `CircularProgressIndicator`
+    // whose internal animation controller never settles, so
+    // `pumpAndSettle()` would time out. Drive the tree with a few
+    // bounded `pump()` calls to flush the `_startLink` /
+    // `_beginPolling` microtasks instead.
+    for (var i = 0; i < 6; i++) {
+      await tester.pump();
+    }
 
     expect(find.text('Waiting for Telegram confirmation…'), findsOneWidget);
 
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
-    await tester.pumpAndSettle();
+    // Same rationale — bounded pumps instead of `pumpAndSettle`
+    // because the polling-phase spinner is still on screen when
+    // Cancel is tapped.
+    for (var i = 0; i < 4; i++) {
+      await tester.pump();
+    }
 
     expect(find.text('Link Telegram'), findsOneWidget);
   });

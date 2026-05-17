@@ -63,14 +63,41 @@ OwnerBusinessView _sampleBusiness({String status = 'APPROVED'}) {
 /// `Future.microtask` defers the throw to the microtask queue,
 /// guaranteeing the `FutureBuilder` has subscribed first.
 class _FakeRepo implements OwnerBusinessRepository {
-  _FakeRepo.value(OwnerBusinessView v) : _resolver = (() async => v);
+  _FakeRepo.value(OwnerBusinessView v)
+      : _resolver = (() async => v),
+        _controlled = null;
   _FakeRepo.error(Object e)
       : _resolver = (() => Future<OwnerBusinessView>.microtask(() {
               throw e;
-            }));
-  _FakeRepo.pending() : _resolver = (() => Completer<OwnerBusinessView>().future);
+            })),
+        _controlled = null;
+
+  /// Returns a future that stays pending until the test calls
+  /// [complete] / [completeError]. The previous form exposed the
+  /// raw `Completer` so the test could resolve it; the new factory
+  /// keeps the resolver-function contract while still letting the
+  /// loading test drive the completion timing explicitly.
+  factory _FakeRepo.pending() {
+    final controlled = Completer<OwnerBusinessView>();
+    return _FakeRepo._controlledImpl(controlled);
+  }
+
+  _FakeRepo._controlledImpl(this._controlled)
+      : _resolver = (() => _controlled!.future);
 
   final Future<OwnerBusinessView> Function() _resolver;
+  final Completer<OwnerBusinessView>? _controlled;
+
+  /// Resolves a `_FakeRepo.pending()` instance. No-op (with a clear
+  /// assertion error) for `.value` / `.error` constructions.
+  void complete(OwnerBusinessView v) {
+    final c = _controlled;
+    if (c == null || c.isCompleted) {
+      throw StateError(
+          '_FakeRepo.complete called on a non-pending or already-completed instance.');
+    }
+    c.complete(v);
+  }
 
   @override
   Future<OwnerBusinessView> getMine() => _resolver();
@@ -182,9 +209,9 @@ void main() {
     await _pump(tester, repo: repo);
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    // Settle the pending future cleanly.
-    // ignore: invalid_use_of_protected_member
-    repo._completer.complete(_sampleBusiness());
+    // Resolve the pending future via the fake's public seam so the
+    // tree settles cleanly before the test ends.
+    repo.complete(_sampleBusiness());
     await tester.pumpAndSettle();
   });
 

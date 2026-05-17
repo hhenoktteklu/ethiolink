@@ -61,16 +61,33 @@ class _PendingOwnerRepo implements OwnerBusinessRepository {
 /// configures either a delayed completer (loading), a value
 /// (success / empty), or a throw (error).
 class FakeCategoriesRepository implements CategoriesRepository {
-  FakeCategoriesRepository.completer(this._completer);
+  FakeCategoriesRepository.completer(this._completer) : _error = null;
   FakeCategoriesRepository.value(List<Category> value)
-      : _completer = (Completer<List<Category>>()..complete(value));
-  FakeCategoriesRepository.error(Object error)
-      : _completer = (Completer<List<Category>>()..completeError(error));
+      : _completer = (Completer<List<Category>>()..complete(value)),
+        _error = null;
 
-  final Completer<List<Category>> _completer;
+  /// Defer the throw to the microtask queue. A pre-errored future
+  /// constructed at fixture-setup time reaches the test zone's
+  /// uncaught-error handler before `FutureBuilder` has a chance to
+  /// subscribe, which fails the test even though the screen would
+  /// otherwise render the inline error UI correctly.
+  FakeCategoriesRepository.error(Object error)
+      : _completer = null,
+        _error = error;
+
+  final Completer<List<Category>>? _completer;
+  final Object? _error;
 
   @override
-  Future<List<Category>> list() => _completer.future;
+  Future<List<Category>> list() {
+    final err = _error;
+    if (err != null) {
+      return Future<List<Category>>.microtask(() {
+        throw err;
+      });
+    }
+    return _completer!.future;
+  }
 }
 
 /// Minimal fake for the navigation test. Only needs to swallow
