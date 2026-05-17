@@ -22,7 +22,11 @@ void main() {
         'sub': '11111111-1111-1111-1111-111111111111',
         'email': 'test@example.com',
         'cognito:groups': ['CUSTOMER'],
-        'exp': 1_800_000_000,
+        // Digit-separator literals (1_800_000_000) require Dart 3.6+;
+        // analyzer pinned to the older language version flagged them
+        // as syntax errors. Plain integers compile under every
+        // supported toolchain.
+        'exp': 1800000000,
       });
       final claims = decodeIdTokenClaims(token);
       expect(claims.sub, '11111111-1111-1111-1111-111111111111');
@@ -34,7 +38,7 @@ void main() {
     test('treats missing email as empty', () {
       final token = makeIdToken({
         'sub': 'sub-x',
-        'exp': 1_700_000_000,
+        'exp': 1700000000,
       });
       final claims = decodeIdTokenClaims(token);
       expect(claims.email, '');

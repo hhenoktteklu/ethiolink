@@ -3,7 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:ethiolink/generated/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/config/app_config.dart';
@@ -84,6 +84,17 @@ class _StubActionsRepo implements BusinessActionsRepository {
     if (submitError != null) throw submitError!;
     return submitResult!;
   }
+
+  @override
+  // Phase 9 Track 3.5 polish — interface added `updateBusiness` for
+  // the owner profile editor. This suite covers the submit + create
+  // CTA paths only, so the fake throws if it ever gets called.
+  Future<OwnerBusinessView> updateBusiness(
+    String businessId,
+    PatchBusinessRequest request,
+  ) async {
+    throw UnimplementedError('updateBusiness not exercised in this test');
+  }
 }
 
 class _FakeCategoriesRepo implements CategoriesRepository {
@@ -98,7 +109,11 @@ class _StubFeaturingRepo implements FeaturingRepository {
   Future<List<FeaturingPackage>> listPackages(String businessId) async =>
       const <FeaturingPackage>[];
   @override
-  Future<FeaturingSubscription> subscribe(
+  // Phase 10 — interface now returns `SubscribeFeaturingResult`
+  // (subscription + payment summary). The owner-tab suite never
+  // hits the subscribe path, so an `UnimplementedError` is still
+  // the correct stand-in; only the return type needs to match.
+  Future<SubscribeFeaturingResult> subscribe(
     String businessId,
     String packageCode,
   ) async =>

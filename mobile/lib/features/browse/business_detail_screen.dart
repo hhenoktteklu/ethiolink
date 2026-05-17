@@ -102,16 +102,29 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
     // Cache snapshots once each fetch completes — used by the
     // Book button to construct `BookingFlowScreen` without
     // re-awaiting the futures.
-    _staffFuture!.then((staff) {
-      if (!mounted) return;
-      setState(() => _staff = staff);
-    }).catchError((_) {
-      // Swallowed — the section error path renders for the user.
-    });
-    _businessFuture!.then((b) {
-      if (!mounted) return;
-      setState(() => _businessName = b.name ?? widget.initialName);
-    }).catchError((_) {});
+    //
+    // Use the `then(..., onError: ...)` form rather than chaining
+    // `.catchError((_) {})`. With Dart 3's stricter generics,
+    // `Future<T>.catchError`'s callback MUST return `FutureOr<T>`;
+    // an empty block returns `Null`, which trips a type error.
+    // `then`'s `onError` is plain `Function?` and doesn't carry
+    // that constraint.
+    _staffFuture!.then(
+      (staff) {
+        if (!mounted) return;
+        setState(() => _staff = staff);
+      },
+      onError: (Object _) {
+        // Swallowed — the section error path renders for the user.
+      },
+    );
+    _businessFuture!.then(
+      (b) {
+        if (!mounted) return;
+        setState(() => _businessName = b.name ?? widget.initialName);
+      },
+      onError: (Object _) {},
+    );
   }
 
   void _onBookTapped(Service service) {
@@ -154,11 +167,18 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
 
   Future<void> _refresh() async {
     _fetchAll();
-    await Future.wait<Object?>([
-      _businessFuture!.catchError((_) => null as Object?),
-      _servicesFuture!.catchError((_) => null as Object?),
-      _staffFuture!.catchError((_) => null as Object?),
-      _reviewsFuture!.catchError((_) => null as Object?),
+    // `Future.wait` fails fast on the first error; we want to wait
+    // for ALL four sections to settle so the UI stops the pull-to-
+    // refresh spinner regardless of which sections errored. Each
+    // future is widened to `dynamic` via `then` so the success and
+    // error paths share a return type — the strict-generics
+    // `catchError((_) => null as Object?)` pattern doesn't compile
+    // under Dart 3.
+    await Future.wait<dynamic>([
+      _businessFuture!.then<dynamic>((v) => v, onError: (Object _) => null),
+      _servicesFuture!.then<dynamic>((v) => v, onError: (Object _) => null),
+      _staffFuture!.then<dynamic>((v) => v, onError: (Object _) => null),
+      _reviewsFuture!.then<dynamic>((v) => v, onError: (Object _) => null),
     ]);
   }
 

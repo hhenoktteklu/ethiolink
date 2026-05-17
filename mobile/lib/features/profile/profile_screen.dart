@@ -21,7 +21,7 @@
 // land later if the count grows past 3-4.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:ethiolink/generated/l10n/app_localizations.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/auth/auth_service.dart';

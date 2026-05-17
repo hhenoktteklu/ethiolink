@@ -31,7 +31,7 @@ dependencies:
   # localization track. The `intl` package is the standard
   # foundation Flutter uses for formatted output and is bundled
   # via flutter_localizations.
-  intl: ^0.19.0
+  intl: ^0.20.2
 
   # Phase 9 — Cognito PKCE auth. `flutter_appauth` is the standard
   # AppAuth wrapper covering authorize + token-exchange + refresh
@@ -70,11 +70,11 @@ flutter:
   uses-material-design: true
   # Phase 9 Track 5 — enable Flutter's `gen-l10n` codegen. The
   # generator reads `lib/l10n/app_*.arb` (driven by the
-  # sibling `l10n.yaml`) and emits the synthetic
-  # `package:flutter_gen/gen_l10n/app_localizations.dart`
-  # import every `flutter pub get` run. English is the only
-  # locale shipped today; `app_am.arb` lands in the locale-
-  # picker commit.
+  # sibling `l10n.yaml`) and emits
+  # `package:ethiolink/generated/l10n/app_localizations.dart`
+  # every `flutter pub get` run (Flutter 3.41+ removed the older
+  # synthetic-package mode). English is the only locale shipped
+  # today; `app_am.arb` lands in the locale-picker commit.
   generate: true
   # Asset declarations land here once the design pass adds
   # images. Empty today.

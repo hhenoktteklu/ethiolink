@@ -65,7 +65,12 @@ class _FakeRepo implements FeaturingRepository {
   @override
   Future<FeaturingSubscription?> getActive(String businessId) async => null;
   @override
-  Future<FeaturingSubscription> subscribe(
+  // Phase 10 widened `subscribe()` to return the wrapped
+  // `SubscribeFeaturingResult` (subscription + payment summary +
+  // optional redirect URL). The history test never exercises the
+  // subscribe path; an `UnimplementedError` is still the right
+  // stand-in.
+  Future<SubscribeFeaturingResult> subscribe(
     String businessId,
     String packageCode,
   ) async =>

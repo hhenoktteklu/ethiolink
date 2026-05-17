@@ -3,7 +3,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:ethiolink/generated/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/auth/auth_service.dart';
@@ -79,7 +79,13 @@ class FakeAppointmentsRepo implements AppointmentsRepository {
   bool cancelCalled = false;
 
   @override
-  Future<Appointment> create({
+  // Phase 10 widened `create()` to return a wrapped
+  // `CreateAppointmentResponse` (appointment + payment summary +
+  // optional redirect URL). The fake never builds appointments —
+  // every test in this file exercises cancel/review — so an
+  // `UnimplementedError` is still the correct stand-in; only the
+  // return type needs to match the interface.
+  Future<CreateAppointmentResponse> create({
     required String staffId,
     required String serviceId,
     required String startsAtIso,

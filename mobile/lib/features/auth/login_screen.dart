@@ -14,7 +14,7 @@
 // later commit.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:ethiolink/generated/l10n/app_localizations.dart';
 
 import '../../core/auth/auth_service.dart';
 import '../../core/auth/cognito_auth_service.dart';

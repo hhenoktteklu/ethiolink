@@ -13,7 +13,7 @@
 // are threaded through so widget tests stay network-free.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:ethiolink/generated/l10n/app_localizations.dart';
 
 import '../../core/api/api_client.dart';
 import '../../core/auth/auth_service.dart';

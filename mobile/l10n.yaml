@@ -2,9 +2,12 @@
 #
 # Phase 9 Track 5 i18n scaffold. Flutter's built-in `gen-l10n` tool
 # reads this config + `lib/l10n/app_*.arb` and generates the
-# `AppLocalizations` class at build time. The output is the
-# synthetic `package:flutter_gen/gen_l10n/app_localizations.dart`
-# import — not checked in; regenerated on every `flutter pub get`.
+# `AppLocalizations` class at build time. Flutter 3.41 removed the
+# synthetic `package:flutter_gen/...` mode, so the generated file
+# now lives in the app's own package at
+# `package:ethiolink/generated/l10n/app_localizations.dart` — see
+# the `output-dir` setting below. Generated files are NOT
+# committed; regenerated on every `flutter pub get`.
 #
 # `app_en.arb` is the template (source-of-truth English copy).
 # `app_am.arb` (Amharic) lands in a follow-up commit alongside the
@@ -15,11 +18,9 @@ template-arb-file: app_en.arb
 output-localization-file: app_localizations.dart
 output-class: AppLocalizations
 
-# Use Flutter's synthetic-package mode so the generated
-# `AppLocalizations` class is reachable as
-# `package:flutter_gen/gen_l10n/app_localizations.dart` from any
-# file in the package. Cleaner than a per-file relative import.
-synthetic-package: true
+# Flutter removed synthetic-package mode. Generated localizations now live
+# under the app package at `lib/generated/l10n/app_localizations.dart`.
+output-dir: lib/generated/l10n
 
 # We hand-check ARB keys; the generator's `nullable-getter: false`
 # means `AppLocalizations.of(context)` returns non-null when the

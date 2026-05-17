@@ -8,7 +8,7 @@
 // the active locale.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:ethiolink/generated/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/auth/auth_service.dart';
@@ -26,13 +26,15 @@ const _testConfig = AppConfig(
   redirectUri: 'ethiolink://auth/callback',
 );
 
+// `AuthSession` is the minimal { userId, email, role, expiresAt }
+// shape today — the id / access / refresh tokens live on the auth
+// service's secure-storage layer, not on this DTO. Earlier drafts
+// of this test fixture inlined those tokens here; updating to the
+// current model keeps the rest of the suite compiling.
 final _testSession = AuthSession(
   userId: 'user-1',
   email: 'henok@example.com',
   role: 'CUSTOMER',
-  idToken: 'id.token',
-  accessToken: 'access.token',
-  refreshToken: 'refresh.token',
   expiresAt: DateTime.utc(2030, 1, 1),
 );
 

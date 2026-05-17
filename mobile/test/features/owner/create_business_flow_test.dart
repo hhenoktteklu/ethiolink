@@ -95,6 +95,18 @@ class _FakeActionsRepo implements BusinessActionsRepository {
     if (submitError != null) throw submitError!;
     return submitResult!;
   }
+
+  @override
+  // The Phase 9 Track 3.5 polish commit added `updateBusiness` to
+  // the interface. This suite covers the create + submit flow only,
+  // so the fake throws if a future widget grows a profile-edit
+  // dependency that runs through here.
+  Future<OwnerBusinessView> updateBusiness(
+    String businessId,
+    PatchBusinessRequest request,
+  ) async {
+    throw UnimplementedError('updateBusiness not exercised in this test');
+  }
 }
 
 Category _cat(String id, String name) {

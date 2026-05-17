@@ -42,6 +42,14 @@ env/prod.json
 # lockfile on every commit during the scaffold phase.
 pubspec.lock
 
+# `flutter gen-l10n` codegen output. Phase 9 Track 5 moved
+# generated localizations from the synthetic `package:flutter_gen/...`
+# layer (removed in Flutter 3.41) to the app's own
+# `lib/generated/l10n/` directory. The files are derived from
+# `lib/l10n/app_*.arb` and regenerated on every `flutter pub get`,
+# so they don't belong in version control.
+lib/generated/
+
 # Coverage / test reports.
 coverage/
 test/.test_coverage.dart
