@@ -148,9 +148,9 @@ void main() {
 
   group('WeeklyDayInput / WeeklyWindowInput.toJson', () {
     test('encodes a populated day', () {
-      final day = WeeklyDayInput(
+      final day = const WeeklyDayInput(
         weekday: 1,
-        windows: const [
+        windows: [
           WeeklyWindowInput(startTime: '09:00', endTime: '12:00'),
           WeeklyWindowInput(startTime: '14:00', endTime: '18:00'),
         ],

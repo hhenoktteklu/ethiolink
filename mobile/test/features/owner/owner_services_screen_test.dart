@@ -42,13 +42,13 @@ Service _svc({
 class _FakeRepo implements OwnerServicesRepository {
   _FakeRepo({
     List<Service>? initial,
-    this.listError,
-    this.createError,
-    this.updateError,
-    this.deactivateError,
   }) : _items = [...?initial];
 
   final List<Service> _items;
+  // Each `*Error` is mutated via cascade assignment in the
+  // matching failure-path test (`..listError = ...`, etc.). The
+  // fields stay public; the constructor parameters were unused
+  // (no test sets them through the constructor) so we drop them.
   Object? listError;
   Object? createError;
   Object? updateError;

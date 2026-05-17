@@ -65,12 +65,11 @@ class _FakeRepo implements OwnerBusinessRepository {
 /// or the create-business CTA. Tests that don't care just leave
 /// it null and `_pump` constructs a no-op stub on the fly.
 class _StubActionsRepo implements BusinessActionsRepository {
-  _StubActionsRepo({this.submitResult, this.submitError});
+  _StubActionsRepo({this.submitResult});
 
   String? lastSubmitId;
   CreateBusinessRequest? lastCreateRequest;
   OwnerBusinessView? submitResult;
-  Object? submitError;
 
   @override
   Future<OwnerBusinessView> createBusiness(CreateBusinessRequest req) async {
@@ -81,7 +80,6 @@ class _StubActionsRepo implements BusinessActionsRepository {
   @override
   Future<OwnerBusinessView> submitBusiness(String id) async {
     lastSubmitId = id;
-    if (submitError != null) throw submitError!;
     return submitResult!;
   }
 

@@ -229,12 +229,12 @@ class _Results extends StatelessWidget {
       physics: const AlwaysScrollableScrollPhysics(),
       children: [
         if (upcoming.isNotEmpty) ...[
-          _SectionHeader(label: 'Upcoming'),
+          const _SectionHeader(label: 'Upcoming'),
           for (final a in upcoming)
             _AppointmentRow(appointment: a, onTap: onTap),
         ],
         if (past.isNotEmpty) ...[
-          _SectionHeader(label: 'Past'),
+          const _SectionHeader(label: 'Past'),
           for (final a in past) _AppointmentRow(appointment: a, onTap: onTap),
         ],
         const SizedBox(height: 16),

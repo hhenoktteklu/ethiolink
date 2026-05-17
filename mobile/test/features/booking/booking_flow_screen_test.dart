@@ -21,7 +21,7 @@ const _testConfig = AppConfig(
   redirectUri: 'ethiolink://auth/callback',
 );
 
-final _service = Service(
+final _service = const Service(
   id: 'srv-1',
   businessId: 'biz-1',
   nameEn: 'Haircut',
@@ -32,7 +32,7 @@ final _service = Service(
 );
 
 final _onlyStaff = [
-  Staff(
+  const Staff(
     id: 'stf-1',
     businessId: 'biz-1',
     displayName: 'Hana',
@@ -251,14 +251,14 @@ void main() {
 
   testWidgets('multi-staff: shows the staff step', (tester) async {
     final multi = <Staff>[
-      Staff(
+      const Staff(
         id: 'a',
         businessId: 'biz-1',
         displayName: 'Alice',
         role: 'Stylist',
         isActive: true,
       ),
-      Staff(
+      const Staff(
         id: 'b',
         businessId: 'biz-1',
         displayName: 'Bob',

@@ -96,7 +96,7 @@ class AppConfig {
       throw MissingConfigError(missing);
     }
 
-    return AppConfig(
+    return const AppConfig(
       apiBaseUrl: apiBaseUrl,
       cognitoDomain: cognitoDomain,
       cognitoClientId: cognitoClientId,

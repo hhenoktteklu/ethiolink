@@ -1075,7 +1075,7 @@ class _EmptyStateBody extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.event_busy, size: 48),
+          const Icon(Icons.event_busy, size: 48),
           const SizedBox(height: 8),
           Text(title, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),

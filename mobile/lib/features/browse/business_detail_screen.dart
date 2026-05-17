@@ -212,14 +212,14 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
                 _HeaderSection(business: business),
                 if (business.hasAnyContact)
                   _ContactSection(business: business),
-                _SectionDivider(),
+                const _SectionDivider(),
                 _ServicesSection(
                   future: _servicesFuture!,
                   onBookTapped: _onBookTapped,
                 ),
-                _SectionDivider(),
+                const _SectionDivider(),
                 _StaffSection(future: _staffFuture!),
-                _SectionDivider(),
+                const _SectionDivider(),
                 _ReviewsSection(future: _reviewsFuture!),
                 const SizedBox(height: 24),
               ],

@@ -66,7 +66,6 @@ class _FakeFeaturingRepo implements FeaturingRepository {
   _FakeFeaturingRepo({
     this.packages = const <FeaturingPackage>[],
     this.active,
-    this.listError,
     this.activeError,
     this.subscribeError,
     this.subscribeResult,
@@ -74,6 +73,9 @@ class _FakeFeaturingRepo implements FeaturingRepository {
 
   List<FeaturingPackage> packages;
   FeaturingSubscription? active;
+  // `listError` is mutated via cascade assignment in the listing-
+  // failure test below; keep the field, drop the constructor
+  // parameter (which no test set).
   Object? listError;
   Object? activeError;
   Object? subscribeError;

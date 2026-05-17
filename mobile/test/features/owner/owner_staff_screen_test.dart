@@ -38,13 +38,13 @@ Staff _staff({
 class _FakeRepo implements OwnerStaffRepository {
   _FakeRepo({
     List<Staff>? initial,
-    this.listError,
-    this.createError,
-    this.updateError,
-    this.deactivateError,
   }) : _items = [...?initial];
 
   final List<Staff> _items;
+  // Same pattern as the services-screen fake: the `*Error` fields
+  // are mutated via cascade assignment in the failure-path tests,
+  // so the public fields stay; the constructor parameters were
+  // never set by any test.
   Object? listError;
   Object? createError;
   Object? updateError;

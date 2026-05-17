@@ -47,9 +47,12 @@ Appointment _appt({
 }
 
 class _FakeRepo implements OwnerBookingsRepository {
-  _FakeRepo({List<Appointment>? initial, this.listError}) : _items = [...?initial];
+  _FakeRepo({List<Appointment>? initial}) : _items = [...?initial];
 
   final List<Appointment> _items;
+  // `listError` is mutated via cascade assignment in the "list fails"
+  // test below (`..listError = OwnerBookingsFailure(...)`), so it
+  // stays as a public field but isn't a constructor parameter.
   Object? listError;
   Object? acceptError;
   Object? rejectError;

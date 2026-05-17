@@ -73,14 +73,10 @@ AvailabilityWindow _closedOverride(String date) {
 }
 
 class _FakeStaffRepo implements OwnerStaffRepository {
-  _FakeStaffRepo(this.items, {this.error});
+  _FakeStaffRepo(this.items);
   final List<Staff> items;
-  Object? error;
   @override
-  Future<List<Staff>> listStaff(String businessId) async {
-    if (error != null) throw error!;
-    return items;
-  }
+  Future<List<Staff>> listStaff(String businessId) async => items;
 
   @override
   Future<Staff> createStaff(String b, CreateStaffRequest r) async =>

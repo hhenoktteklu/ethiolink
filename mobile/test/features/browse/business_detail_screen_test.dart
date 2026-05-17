@@ -66,7 +66,7 @@ class FakeReviewsRepo implements ReviewsRepository {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-final _sampleBusiness = BusinessDetail(
+final _sampleBusiness = const BusinessDetail(
   id: 'biz-1',
   categoryId: 'cat-1',
   name: 'Sunset Salon',

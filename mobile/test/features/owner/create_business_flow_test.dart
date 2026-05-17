@@ -70,7 +70,6 @@ class _FakeActionsRepo implements BusinessActionsRepository {
     this.createResult,
     this.createError,
     this.submitResult,
-    this.submitError,
   });
 
   CreateBusinessRequest? lastCreateRequest;
@@ -79,7 +78,6 @@ class _FakeActionsRepo implements BusinessActionsRepository {
   OwnerBusinessView? createResult;
   Object? createError;
   OwnerBusinessView? submitResult;
-  Object? submitError;
 
   @override
   Future<OwnerBusinessView> createBusiness(CreateBusinessRequest req) async {
@@ -91,7 +89,6 @@ class _FakeActionsRepo implements BusinessActionsRepository {
   @override
   Future<OwnerBusinessView> submitBusiness(String id) async {
     lastSubmitId = id;
-    if (submitError != null) throw submitError!;
     return submitResult!;
   }
 
