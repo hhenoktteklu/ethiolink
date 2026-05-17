@@ -21,7 +21,7 @@ const _testConfig = AppConfig(
   redirectUri: 'ethiolink://auth/callback',
 );
 
-final _service = const Service(
+const _service = Service(
   id: 'srv-1',
   businessId: 'biz-1',
   nameEn: 'Haircut',

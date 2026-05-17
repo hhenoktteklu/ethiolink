@@ -75,8 +75,19 @@ AvailabilityWindow _closedOverride(String date) {
 class _FakeStaffRepo implements OwnerStaffRepository {
   _FakeStaffRepo(this.items);
   final List<Staff> items;
+
+  /// The staff-load failure test sets this via cascade assignment
+  /// (`_FakeStaffRepo([])..error = ...`). Kept as a public field
+  /// rather than a constructor parameter — the constructor form
+  /// was flagged as `unused_element_parameter` because no test
+  /// passed it through the kwarg path.
+  Object? error;
+
   @override
-  Future<List<Staff>> listStaff(String businessId) async => items;
+  Future<List<Staff>> listStaff(String businessId) async {
+    if (error != null) throw error!;
+    return items;
+  }
 
   @override
   Future<Staff> createStaff(String b, CreateStaffRequest r) async =>
