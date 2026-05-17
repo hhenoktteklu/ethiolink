@@ -20,6 +20,13 @@
 // supported locale. A bottom-sheet / dropdown affordance can
 // land later if the count grows past 3-4.
 
+// `RadioListTile.groupValue` / `.onChanged` are deprecated under
+// Flutter 3.41 in favour of a `RadioGroup` ancestor. Migrating
+// the locale picker would expand the widget tree without a UX
+// change; the file-level ignore keeps `flutter analyze` clean
+// until the API graduates from deprecated to removed.
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:ethiolink/generated/l10n/app_localizations.dart';
 
@@ -219,21 +226,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 24),
           _SectionHeader(text: l10n.profileLanguageHeading),
-          // Flutter 3.41 deprecated `RadioListTile.groupValue` /
-          // `.onChanged` in favour of the new `RadioGroup` ancestor.
-          // Migrating the locale picker would expand the widget tree
-          // without a UX change, so we silence the warning at the
-          // call site and revisit when the API graduates to
-          // removed-by.
           for (final entry in SupportedLocale.values)
-            // ignore: deprecated_member_use
             RadioListTile<SupportedLocale>(
               key: ValueKey('localeOption.${entry.languageCode}'),
               contentPadding: EdgeInsets.zero,
               value: entry,
-              // ignore: deprecated_member_use
               groupValue: activeLocale,
-              // ignore: deprecated_member_use
               onChanged: _savingLocale
                   ? null
                   : (picked) {

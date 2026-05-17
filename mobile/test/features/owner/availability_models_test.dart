@@ -136,7 +136,7 @@ void main() {
             'isClosed': false,
           },
         ],
-        'overrides': [],
+        'overrides': <dynamic>[],
       });
       final grouped = s.weeklyByDay();
       expect(grouped, hasLength(7));

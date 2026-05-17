@@ -94,7 +94,7 @@ void main() {
     test('issues GET /v1/businesses with no params when filters are null',
         () async {
       final adapter = _RecordingAdapter([
-        _AdapterResponse(200, json.encode({'items': [], 'nextCursor': null})),
+        _AdapterResponse(200, json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null})),
       ]);
       final repo = HttpBusinessesRepository(_clientFor(adapter));
 
@@ -110,7 +110,7 @@ void main() {
 
     test('passes category, cursor, and limit when provided', () async {
       final adapter = _RecordingAdapter([
-        _AdapterResponse(200, json.encode({'items': [], 'nextCursor': null})),
+        _AdapterResponse(200, json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null})),
       ]);
       final repo = HttpBusinessesRepository(_clientFor(adapter));
 
@@ -124,7 +124,7 @@ void main() {
 
     test('drops empty-string category and cursor', () async {
       final adapter = _RecordingAdapter([
-        _AdapterResponse(200, json.encode({'items': [], 'nextCursor': null})),
+        _AdapterResponse(200, json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null})),
       ]);
       final repo = HttpBusinessesRepository(_clientFor(adapter));
 
@@ -173,7 +173,7 @@ void main() {
       final adapter = _RecordingAdapter([
         _AdapterResponse(
           200,
-          json.encode({'items': [], 'nextCursor': null}),
+          json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null}),
         ),
       ]);
       final repo = HttpBusinessesRepository(_clientFor(adapter));
@@ -199,7 +199,7 @@ void main() {
       final adapter = _RecordingAdapter([
         _AdapterResponse(
           200,
-          json.encode({'items': [], 'nextCursor': null}),
+          json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null}),
         ),
       ]);
       final repo = HttpBusinessesRepository(_clientFor(adapter));
@@ -216,7 +216,7 @@ void main() {
       final adapter = _RecordingAdapter([
         _AdapterResponse(
           200,
-          json.encode({'items': [], 'nextCursor': null}),
+          json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null}),
         ),
       ]);
       final repo = HttpBusinessesRepository(_clientFor(adapter));
@@ -238,7 +238,7 @@ void main() {
         final adapter = _RecordingAdapter([
           _AdapterResponse(
             200,
-            json.encode({'items': [], 'nextCursor': null}),
+            json.encode(<String, dynamic>{'items': <dynamic>[], 'nextCursor': null}),
           ),
         ]);
         final repo = HttpBusinessesRepository(_clientFor(adapter));

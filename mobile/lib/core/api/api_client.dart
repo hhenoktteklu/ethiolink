@@ -105,30 +105,40 @@ class ApiClient {
     TokenProvider? tokenProvider,
     Dio? dio,
   })  : _tokenProvider = tokenProvider ?? const SecureStorageTokenProvider(),
-        dio = dio ??
-            Dio(
-              BaseOptions(
-                baseUrl: config.apiBaseUrl,
-                connectTimeout: const Duration(seconds: 10),
-                receiveTimeout: const Duration(seconds: 15),
-                responseType: ResponseType.json,
-                headers: <String, String>{
-                  'Accept': 'application/json',
-                  'Content-Type': 'application/json',
-                },
-              ),
-            ) {
-    // Reference the field (non-null) rather than the constructor
-    // parameter (`Dio?`). The analyzer flags `dio!` as an
-    // unnecessary non-null assertion because the field has already
-    // been assigned in the initializer list above.
-    this.dio.interceptors.add(
-      AuthTokenInterceptor(_tokenProvider, dio: this.dio),
-    );
+        dio = _resolveDio(dio, config) {
+    // After the initializer list runs, the parameter `dio` is no
+    // longer in scope here (we deliberately moved interceptor
+    // wiring into a separate method to avoid the
+    // parameter-shadows-field analyzer warnings — `dio!` would be
+    // an "unnecessary_non_null_assertion" because the field is
+    // already non-null; bare `dio` would resolve to the nullable
+    // parameter and demand the assertion. Calling the helper
+    // sidesteps the dance entirely).
+    _wireInterceptors();
   }
 
   final Dio dio;
   final TokenProvider _tokenProvider;
+
+  static Dio _resolveDio(Dio? override, AppConfig config) {
+    return override ??
+        Dio(
+          BaseOptions(
+            baseUrl: config.apiBaseUrl,
+            connectTimeout: const Duration(seconds: 10),
+            receiveTimeout: const Duration(seconds: 15),
+            responseType: ResponseType.json,
+            headers: <String, String>{
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+            },
+          ),
+        );
+  }
+
+  void _wireInterceptors() {
+    dio.interceptors.add(AuthTokenInterceptor(_tokenProvider, dio: dio));
+  }
 
   /// Convenience GET that decodes the JSON body via the supplied
   /// `parse` callback. Throws `ApiException` on non-2xx responses
