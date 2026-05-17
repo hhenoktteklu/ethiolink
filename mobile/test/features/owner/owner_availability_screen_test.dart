@@ -178,6 +178,19 @@ Future<void> _pump(
   required OwnerStaffRepository staffRepo,
   required AvailabilityRepository availRepo,
 }) async {
+  // The screen renders 7 weekday cards in a `ListView` plus a
+  // Save button below them. Flutter's default test viewport
+  // (800×600) is too short to lay all of them out at once;
+  // `find.text('Thursday')` / `'Friday'` / `'Saturday'` / the
+  // Save button were missing the rendered Element tree because
+  // `SliverList` only instantiates children inside the viewport.
+  // A taller viewport keeps every card on-screen so the test
+  // expectations don't have to scroll into view explicitly.
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,

@@ -51,14 +51,29 @@ OwnerBusinessView _sampleBusiness({String status = 'APPROVED'}) {
   );
 }
 
+/// Test fake. Each constructor configures the next `getMine()`
+/// call to either resolve, error, or stay pending.
+///
+/// `getMine()` builds a fresh Future on every invocation rather
+/// than returning a pre-resolved `Completer.future`. Pre-resolving
+/// the Future at constructor time leaves the error unhandled until
+/// `FutureBuilder` subscribes — under the widget-test zone that's
+/// enough for the runner to report the error as a test failure
+/// before the inline error UI gets a chance to render. Using
+/// `Future.microtask` defers the throw to the microtask queue,
+/// guaranteeing the `FutureBuilder` has subscribed first.
 class _FakeRepo implements OwnerBusinessRepository {
-  _FakeRepo.value(OwnerBusinessView v) : _completer = (Completer<OwnerBusinessView>()..complete(v));
-  _FakeRepo.error(Object e) : _completer = (Completer<OwnerBusinessView>()..completeError(e));
-  _FakeRepo.pending() : _completer = Completer<OwnerBusinessView>();
-  final Completer<OwnerBusinessView> _completer;
+  _FakeRepo.value(OwnerBusinessView v) : _resolver = (() async => v);
+  _FakeRepo.error(Object e)
+      : _resolver = (() => Future<OwnerBusinessView>.microtask(() {
+              throw e;
+            }));
+  _FakeRepo.pending() : _resolver = (() => Completer<OwnerBusinessView>().future);
+
+  final Future<OwnerBusinessView> Function() _resolver;
 
   @override
-  Future<OwnerBusinessView> getMine() => _completer.future;
+  Future<OwnerBusinessView> getMine() => _resolver();
 }
 
 /// Stub action repository for tests that exercise the submit path
@@ -133,6 +148,16 @@ Future<void> _pump(
   CategoriesRepository? categoriesRepo,
   FeaturingRepository? featuringRepo,
 }) async {
+  // The owner tab renders the business card + status banner +
+  // promote panel + bookings inbox in a scrollable column. A taller
+  // viewport keeps everything in the laid-out region so
+  // `find.text(...)` doesn't miss rows that landed below the 600px
+  // default test viewport.
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,

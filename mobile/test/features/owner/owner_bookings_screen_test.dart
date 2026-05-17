@@ -121,6 +121,15 @@ Future<void> _pump(
   WidgetTester tester, {
   required OwnerBookingsRepository repo,
 }) async {
+  // Bookings list + per-row action buttons + reject dialog all live
+  // inside scrollable surfaces. A taller viewport keeps the rows +
+  // dialog content inside the laid-out region so `find.text(...)`
+  // resolves them without an explicit scroll.
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,

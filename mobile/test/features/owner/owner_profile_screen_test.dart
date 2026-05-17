@@ -112,6 +112,22 @@ Future<void> _pump(
   required BusinessActionsRepository actionsRepo,
   required CategoriesRepository categoriesRepo,
 }) async {
+  // The profile editor lives in a `ListView` with 7 `TextFormField`s
+  // (name, city, address, phone, telegram handle, whatsapp,
+  // description) plus a category picker and Save button. Flutter's
+  // default test viewport (800×600) was too short for the
+  // underlying `SliverList` to instantiate all of them, which
+  // dropped the whatsapp + description fields from the rendered
+  // Element tree (the assertion `expect(values.length, 7)` was
+  // seeing only 5). A taller viewport keeps every form row
+  // mounted so `find.byType(TextFormField).at(N)` resolves the
+  // expected indexes, and `ensureVisible(saveBtn)` doesn't have
+  // to scroll past unbuilt slivers.
+  tester.view.physicalSize = const Size(800, 2400);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     AppConfigScope(
       config: _testConfig,

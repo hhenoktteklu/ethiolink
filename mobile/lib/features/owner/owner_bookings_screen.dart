@@ -486,37 +486,18 @@ class _OwnerAppointmentDetailScreenState
     }
   }
 
-  Future<String?> _promptReason({required String title}) async {
-    final ctrl = TextEditingController();
-    final out = await showDialog<String?>(
+  Future<String?> _promptReason({required String title}) {
+    // Delegate to a `StatefulWidget` so the `TextEditingController`
+    // lifecycle is tied to the dialog widget's mount/unmount cycle,
+    // not to the outer `await showDialog(...)` future. The previous
+    // form disposed the controller after `showDialog` returned, but
+    // Flutter still needed the controller during the dialog route's
+    // pop animation — assertions in framework code surfaced as
+    // "TextEditingController used after dispose" in widget tests.
+    return showDialog<String?>(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Text(title),
-          content: TextField(
-            controller: ctrl,
-            maxLines: 3,
-            maxLength: 500,
-            decoration: const InputDecoration(
-              labelText: 'Reason (optional)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(null),
-              child: const Text('Cancel'),
-            ),
-            FilledButton.tonal(
-              onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
-              child: const Text('Confirm'),
-            ),
-          ],
-        );
-      },
+      builder: (ctx) => _RejectReasonDialog(title: title),
     );
-    ctrl.dispose();
-    return out;
   }
 
   Future<void> _accept() => _runAction(
@@ -765,5 +746,58 @@ class _ErrorBanner extends StatelessWidget {
       case OwnerBookingsFailureKind.other:
         return ('Something went wrong', e.message);
     }
+  }
+}
+
+/// Reject / cancel reason dialog.
+///
+/// Carved out as a `StatefulWidget` (rather than inline inside the
+/// caller's async function) so the `TextEditingController` is
+/// constructed in `initState` + disposed in `dispose`, both bound
+/// to this widget's element lifecycle. The previous implementation
+/// disposed the controller after `showDialog`'s future resolved,
+/// which was racing the route's pop animation — the framework
+/// asserted `TextEditingController used after dispose` in widget
+/// tests.
+class _RejectReasonDialog extends StatefulWidget {
+  const _RejectReasonDialog({required this.title});
+  final String title;
+  @override
+  State<_RejectReasonDialog> createState() => _RejectReasonDialogState();
+}
+
+class _RejectReasonDialogState extends State<_RejectReasonDialog> {
+  late final TextEditingController _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _ctrl,
+        maxLines: 3,
+        maxLength: 500,
+        decoration: const InputDecoration(
+          labelText: 'Reason (optional)',
+          border: OutlineInputBorder(),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(null),
+          child: const Text('Cancel'),
+        ),
+        FilledButton.tonal(
+          onPressed: () => Navigator.of(context).pop(_ctrl.text.trim()),
+          child: const Text('Confirm'),
+        ),
+      ],
+    );
   }
 }
