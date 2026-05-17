@@ -83,7 +83,11 @@ locals {
 resource "aws_db_subnet_group" "this" {
   name        = local.subnet_group
   subnet_ids  = var.private_subnet_ids
-  description = "EthioLink ${var.environment} RDS — private subnets across ${length(var.private_subnet_ids)} AZs."
+  # AWS rejects non-printable + extended-unicode chars in this
+  # description ("InvalidParameterValue: DBSubnetGroupDescription
+  # must not contain non-printable control characters"). Stick to
+  # plain 7-bit ASCII.
+  description = "EthioLink ${var.environment} RDS private subnet group spanning ${length(var.private_subnet_ids)} AZs."
 
   tags = merge(local.common_tags, {
     Name = local.subnet_group
@@ -93,7 +97,11 @@ resource "aws_db_subnet_group" "this" {
 resource "aws_db_parameter_group" "this" {
   name        = local.parameter_group
   family      = "postgres15"
-  description = "EthioLink ${var.environment} RDS — PostgreSQL 15 default parameters."
+  # AWS rejects non-printable + extended-unicode chars in this
+  # description ("InvalidParameterValue: DB parameter group
+  # Description must not contain non-printable control
+  # characters"). Stick to plain 7-bit ASCII.
+  description = "EthioLink ${var.environment} PostgreSQL 15 parameter group with default settings."
 
   # No overrides in MVP. Phase 8 hardening adds `log_min_duration_statement`,
   # `pg_stat_statements.track`, and the `shared_preload_libraries` entry.

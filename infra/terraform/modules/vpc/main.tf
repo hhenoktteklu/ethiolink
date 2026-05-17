@@ -268,9 +268,13 @@ resource "aws_security_group" "lambda" {
 
 resource "aws_vpc_security_group_egress_rule" "lambda_egress_all" {
   security_group_id = aws_security_group.lambda.id
-  description       = "Allow Lambda outbound to anywhere (controlled per-destination by the target's SG)."
-  ip_protocol       = "-1"
-  cidr_ipv4         = "0.0.0.0/0"
+  # AWS restricts rule descriptions to characters in the set
+  # a-zA-Z0-9. _-:/()#,@[]+=&;{}!$* — apostrophes and unicode are
+  # rejected with "Invalid rule description". Keep this string in
+  # the allowed alphabet.
+  description = "Allow Lambda egress anywhere. Targets control ingress on their own SG."
+  ip_protocol = "-1"
+  cidr_ipv4   = "0.0.0.0/0"
 }
 
 # RDS SG. Ingress only from Lambda SG on Postgres port. The

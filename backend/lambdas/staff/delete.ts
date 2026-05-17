@@ -68,9 +68,15 @@ export const handler = async (
     if (!businessId || !UUID_RE.test(businessId)) {
         return validationError('businessId must be a UUID.', { field: 'businessId' });
     }
-    const id = event.pathParameters?.id?.trim();
+    // Phase 9 — the API Gateway route normalized to `{staffId}` so
+    // the staff sub-tree shares a single path-variable name across
+    // the PATCH/DELETE detail routes and the availability +
+    // slots descendants. `id` is accepted as a fallback so any
+    // pre-normalization caller that still sends the old key keeps
+    // working.
+    const id = (event.pathParameters?.staffId ?? event.pathParameters?.id)?.trim();
     if (!id || !UUID_RE.test(id)) {
-        return validationError('id must be a UUID.', { field: 'id' });
+        return validationError('staffId must be a UUID.', { field: 'staffId' });
     }
 
     try {

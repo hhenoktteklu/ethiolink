@@ -36,8 +36,8 @@
 #     PATCH  /v1/businesses/{businessId}/services/{id}
 #     DELETE /v1/businesses/{businessId}/services/{id}
 #     POST   /v1/businesses/{businessId}/staff
-#     PATCH  /v1/businesses/{businessId}/staff/{id}
-#     DELETE /v1/businesses/{businessId}/staff/{id}
+#     PATCH  /v1/businesses/{businessId}/staff/{staffId}
+#     DELETE /v1/businesses/{businessId}/staff/{staffId}
 #     PUT    /v1/businesses/{businessId}/staff/{staffId}/availability
 #     POST   /v1/businesses/{businessId}/staff/{staffId}/availability/override
 #     GET    /v1/businesses/{businessId}/appointments
@@ -71,9 +71,12 @@
 # ONE variable name per segment, so we use `{businessId}` for
 # every URL at that position. Handler code that previously read
 # `event.pathParameters.id` for the business id was normalized to
-# read `.businessId` in the same commit. The `{id}` name is kept
-# only at the children of services / staff / appointments where
-# it doesn't conflict.
+# read `.businessId` in the same commit. Same constraint applies
+# to the staff sub-tree: the position `/v1/businesses/{businessId}/
+# staff/{X}` carries both staff-detail (PATCH / DELETE) and the
+# availability + slots descendants, so we use `{staffId}` for
+# every URL there. The `{id}` name is kept only at the children
+# of services / appointments where it doesn't conflict.
 #
 # CORS:
 #   * Every resource that has at least one non-OPTIONS method
@@ -137,16 +140,14 @@ locals {
     { path = "v1/businesses/{businessId}/services", parent = "v1/businesses/{businessId}" },
     { path = "v1/businesses/{businessId}/services/{id}", parent = "v1/businesses/{businessId}/services" },
     { path = "v1/businesses/{businessId}/staff", parent = "v1/businesses/{businessId}" },
-    { path = "v1/businesses/{businessId}/staff/{id}", parent = "v1/businesses/{businessId}/staff" },
-    # `{staffId}` and `{id}` at the same position collide; the
-    # services/staff-detail patch / delete use `{id}`, but the
-    # availability + slots sub-tree uses `{staffId}` per the
-    # OpenAPI spec + the existing handler code. We keep `{id}`
-    # at the staff-detail position and route the availability
-    # sub-tree under a duplicate `{staffId}` variable to match
-    # handler reads. API Gateway's path matching is positional;
-    # the variable names are independent across non-overlapping
-    # parents.
+    # API Gateway permits only ONE path-variable name per position
+    # within a given parent — declaring both `{staffId}` and `{id}`
+    # under `staff/` raised `BadRequestException: A sibling
+    # ({staffId}) of this resource already has a variable path
+    # part`. We standardize on `{staffId}` (matches the OpenAPI
+    # spec + the availability/slots sub-tree) and have the
+    # staff-patch / staff-delete handlers read `staffId` from
+    # `pathParameters` accordingly.
     { path = "v1/businesses/{businessId}/staff/{staffId}", parent = "v1/businesses/{businessId}/staff" },
     { path = "v1/businesses/{businessId}/staff/{staffId}/availability", parent = "v1/businesses/{businessId}/staff/{staffId}" },
     { path = "v1/businesses/{businessId}/staff/{staffId}/availability/override", parent = "v1/businesses/{businessId}/staff/{staffId}/availability" },
@@ -290,10 +291,10 @@ locals {
       path = "v1/businesses/{businessId}/staff", method = "POST", function = "staff-create", auth = "COGNITO"
     }
     "PATCH_v1_businesses_id_staff_id" = {
-      path = "v1/businesses/{businessId}/staff/{id}", method = "PATCH", function = "staff-patch", auth = "COGNITO"
+      path = "v1/businesses/{businessId}/staff/{staffId}", method = "PATCH", function = "staff-patch", auth = "COGNITO"
     }
     "DELETE_v1_businesses_id_staff_id" = {
-      path = "v1/businesses/{businessId}/staff/{id}", method = "DELETE", function = "staff-delete", auth = "COGNITO"
+      path = "v1/businesses/{businessId}/staff/{staffId}", method = "DELETE", function = "staff-delete", auth = "COGNITO"
     }
     "PUT_v1_businesses_id_staff_id_availability" = {
       path = "v1/businesses/{businessId}/staff/{staffId}/availability", method = "PUT", function = "availability-replace", auth = "COGNITO"
