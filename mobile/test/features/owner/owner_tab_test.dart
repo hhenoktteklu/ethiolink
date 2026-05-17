@@ -351,8 +351,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Access denied'), findsOneWidget);
+    // The forbidden banner's body sentence reads
+    // "...sign out and back in to refresh your role." — lowercase
+    // `sign` because the phrase is mid-sentence. `textContaining`
+    // is case-sensitive, so match the actual casing.
     expect(
-      find.textContaining('Sign out and back in'),
+      find.textContaining('sign out and back in'),
       findsOneWidget,
     );
   });
