@@ -358,7 +358,10 @@ class _PromotePaymentWaitingBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    // The paying-phase overlay delegates typography to
+    // `_OverlayColumn`, so no local `textTheme` is needed here.
+    // (Analyzer flagged the previous `final textTheme = ...` as
+    // an unused local.)
     switch (phase) {
       case _PromotePaymentPhase.opening:
         return _OverlayColumn(

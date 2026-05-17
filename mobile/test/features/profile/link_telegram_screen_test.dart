@@ -4,7 +4,6 @@
 // `TelegramLinkRepository` fake + a recording `LinkLauncher`.
 // Polling uses a tiny `Duration` so the test suite stays fast.
 
-import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

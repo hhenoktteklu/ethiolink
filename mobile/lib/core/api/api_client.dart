@@ -118,8 +118,12 @@ class ApiClient {
                 },
               ),
             ) {
-    dio!.interceptors.add(
-      AuthTokenInterceptor(_tokenProvider, dio: dio!),
+    // Reference the field (non-null) rather than the constructor
+    // parameter (`Dio?`). The analyzer flags `dio!` as an
+    // unnecessary non-null assertion because the field has already
+    // been assigned in the initializer list above.
+    this.dio.interceptors.add(
+      AuthTokenInterceptor(_tokenProvider, dio: this.dio),
     );
   }
 

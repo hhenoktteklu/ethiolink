@@ -4,7 +4,6 @@
 // repo tests — captures the request body so we can assert on the
 // `CreateAppointmentRequest` shape Dio serialised.
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 

@@ -14,7 +14,6 @@
 //     banner; 403 renders the "access denied" banner; 500 renders
 //     the generic retry banner.
 
-import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';

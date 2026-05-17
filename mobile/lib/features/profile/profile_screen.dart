@@ -219,12 +219,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 24),
           _SectionHeader(text: l10n.profileLanguageHeading),
+          // Flutter 3.41 deprecated `RadioListTile.groupValue` /
+          // `.onChanged` in favour of the new `RadioGroup` ancestor.
+          // Migrating the locale picker would expand the widget tree
+          // without a UX change, so we silence the warning at the
+          // call site and revisit when the API graduates to
+          // removed-by.
           for (final entry in SupportedLocale.values)
+            // ignore: deprecated_member_use
             RadioListTile<SupportedLocale>(
               key: ValueKey('localeOption.${entry.languageCode}'),
               contentPadding: EdgeInsets.zero,
               value: entry,
+              // ignore: deprecated_member_use
               groupValue: activeLocale,
+              // ignore: deprecated_member_use
               onChanged: _savingLocale
                   ? null
                   : (picked) {

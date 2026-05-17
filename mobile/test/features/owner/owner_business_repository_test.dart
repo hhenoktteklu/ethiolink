@@ -5,7 +5,6 @@
 // responses so we can verify the path/method and the 404/403
 // classification branches.
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 

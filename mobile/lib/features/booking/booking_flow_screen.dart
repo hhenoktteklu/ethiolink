@@ -711,9 +711,18 @@ class _PaymentMethodPicker extends StatelessWidget {
               ),
         ),
         const SizedBox(height: 4),
+        // Flutter 3.41 marks `RadioListTile.groupValue` / `.onChanged`
+        // deprecated in favour of the new `RadioGroup` ancestor.
+        // Migrating two tiles to that pattern would expand this
+        // widget tree without a UX change, so we silence the warning
+        // here and revisit when the deprecation graduates to
+        // removed-by.
+        // ignore: deprecated_member_use
         RadioListTile<String>(
           value: 'CASH',
+          // ignore: deprecated_member_use
           groupValue: value,
+          // ignore: deprecated_member_use
           onChanged: enabled ? (v) => onChanged(v ?? 'CASH') : null,
           title: const Text('Cash at the business'),
           subtitle: const Text(
@@ -721,9 +730,12 @@ class _PaymentMethodPicker extends StatelessWidget {
           ),
           contentPadding: EdgeInsets.zero,
         ),
+        // ignore: deprecated_member_use
         RadioListTile<String>(
           value: 'ONLINE_PENDING',
+          // ignore: deprecated_member_use
           groupValue: value,
+          // ignore: deprecated_member_use
           onChanged: enabled ? (v) => onChanged(v ?? 'CASH') : null,
           title: const Text('Pay now (Chapa)'),
           subtitle: const Text(
@@ -762,7 +774,10 @@ class _PaymentWaitingStep extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final textTheme = Theme.of(context).textTheme;
+    // The paying-phase body delegates typography to `_BodyColumn`,
+    // so we don't need a local `textTheme` reference here. (The
+    // analyzer flagged the previous `final textTheme = ...` as an
+    // unused local.)
     switch (phase) {
       case _PayingPhase.opening:
         return _BodyColumn(

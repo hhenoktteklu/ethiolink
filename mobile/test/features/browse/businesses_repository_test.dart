@@ -13,7 +13,6 @@
 // `paymentGateways.test.ts` — capture the call shape, don't
 // hit the network.
 
-import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
