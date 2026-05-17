@@ -125,6 +125,16 @@ class _BusinessDetailScreenState extends State<BusinessDetailScreen> {
       },
       onError: (Object _) {},
     );
+    // Attach no-op error handlers on the remaining two so an
+    // already-errored future (the section repositories can return
+    // `Future.error(...)` synchronously) doesn't surface as an
+    // "Unhandled future error" in the zone before the matching
+    // `FutureBuilder` subscribes during the first build pass.
+    // The user-visible section error UI is still rendered by the
+    // `FutureBuilder.builder` snapshot.hasError branch — multiple
+    // listeners on the same future each get the same error.
+    _servicesFuture!.then((_) {}, onError: (Object _) {});
+    _reviewsFuture!.then((_) {}, onError: (Object _) {});
   }
 
   void _onBookTapped(Service service) {

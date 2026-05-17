@@ -73,7 +73,17 @@ Future<void> _pump(
   WidgetTester tester, {
   required TelegramLinkRepository repo,
   required LinkLauncher launcher,
-  Duration pollInterval = const Duration(milliseconds: 10),
+  // `pumpAndSettle` advances the fake clock by 100ms-per-frame
+  // until the tree quiesces, so any periodic Timer scheduled with
+  // a sub-second interval will keep firing through its full
+  // `pollMaxAttempts` budget before the helper returns, leaving
+  // the screen in `pollExhausted` instead of `polling`. We default
+  // the interval to one year so the cancel/back-to-not-linked
+  // tests can read the `Waiting for Telegram confirmation…` copy
+  // in the polling phase. Individual tests that DO want to drive
+  // the polling Timer override this with a tighter interval +
+  // explicit `tester.pump(...)` advances.
+  Duration pollInterval = const Duration(days: 365),
   int pollMaxAttempts = 10,
 }) async {
   await tester.pumpWidget(
@@ -214,7 +224,10 @@ void main() {
       tester,
       repo: repo,
       launcher: launcher.launch,
-      pollInterval: const Duration(seconds: 30),
+      // Same rationale as the default in `_pump`: keep the polling
+      // Timer from firing under pumpAndSettle so we can assert the
+      // polling-phase copy is on-screen.
+      pollInterval: const Duration(days: 365),
     );
 
     await tester.tap(find.widgetWithText(FilledButton, 'Link Telegram'));

@@ -15,6 +15,8 @@
 // with the standard delegates + supported locales so
 // `AppLocalizations.of(context)` resolves to the English bundle.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:ethiolink/generated/l10n/app_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -24,6 +26,26 @@ import 'package:ethiolink/core/auth/auth_service.dart';
 import 'package:ethiolink/core/config/app_config.dart';
 import 'package:ethiolink/core/config/app_config_scope.dart';
 import 'package:ethiolink/features/auth/login_screen.dart';
+
+/// `AuthService` stub whose `signIn()` returns a future that never
+/// completes — keeps the LoginScreen in its "Signing in…" loading
+/// state for the loading-affordance assertion below without
+/// scheduling the `Future.delayed(300ms)` Timer the default
+/// `FakeAuthService` uses. That Timer leaks across the test
+/// boundary because nothing in the test pumps long enough to
+/// drain it, and we don't actually want the navigate-on-success
+/// branch to fire here (BrowseScreen pulls in real platform
+/// channels we deliberately avoid in this widget smoke).
+class _StuckAuthService implements AuthService {
+  @override
+  Future<AuthSession> signIn() => Completer<AuthSession>().future;
+
+  @override
+  Future<void> signOut() async {}
+
+  @override
+  Future<AuthSession?> currentSession() async => null;
+}
 
 const _testConfig = AppConfig(
   apiBaseUrl: 'https://example.test',
@@ -70,9 +92,21 @@ void main() {
     // would instantiate Dio + secure-storage platform channels.
     // Coverage of the destination route lives in
     // `features/browse/browse_screen_test.dart`. This test just
-    // confirms the LoginScreen drives the FakeAuthService and
-    // returns to a non-error state.
-    await pumpLoginScreen(tester);
+    // confirms the LoginScreen drives the auth service and lands
+    // on the "Signing in…" affordance without a real timer
+    // leaking across the test boundary.
+    await tester.pumpWidget(
+      AppConfigScope(
+        config: _testConfig,
+        child: MaterialApp(
+          locale: const Locale('en'),
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: LoginScreen(authServiceOverride: _StuckAuthService()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
 
     expect(find.text('Sign in'), findsOneWidget);
     expect(find.text('Signing in…'), findsNothing);
