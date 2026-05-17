@@ -21,6 +21,10 @@
 #
 # What lands in the zip:
 #   dist/
+#     package.json         — minimal `{name, version, type:module,
+#                            dependencies}`. The `type:module` flag
+#                            is what tells Node 20 to parse the
+#                            ESM-emitted handlers as modules.
 #     lambdas/
 #       auth/sync.js
 #       businesses/create.js
@@ -29,6 +33,10 @@
 #       config/...
 #       domains/...
 #       ...
+#     db/
+#       migrate.mjs        — used by the `maintenance-db-migrate`
+#       migrations/0001_*.sql
+#       ...                  Lambda at runtime.
 #     node_modules/
 #       @aws-sdk/...
 #       pg/...
@@ -38,9 +46,7 @@
 # What does NOT land in the zip:
 #   dist/tests/            — test files compiled by tsc are
 #                            stripped after compilation.
-#   node_modules/<devDep>/ — `npm ci --omit=dev` excludes them.
-#   package.json           — not needed at runtime (the JS files
-#                            don't import it).
+#   node_modules/<devDep>/ — `npm install --omit=dev` excludes them.
 #
 # Invocation:
 #   cd backend && ./scripts/package.sh
@@ -94,27 +100,56 @@ fi
 #
 # A fresh, minimal install inside dist/ keeps the zip free of
 # devDependencies (tsx, @types/*) and leaves the development-side
-# node_modules in `backend/node_modules` untouched. Using `npm ci`
-# guarantees the exact versions from `package-lock.json`.
+# node_modules in `backend/node_modules` untouched.
+#
+# Lockfile handling:
+#   This repo uses npm workspaces, so the only `package-lock.json`
+#   lives at the repo root and describes the hoisted dependency
+#   graph for EVERY workspace (`backend`, `mobile`, `admin`). It is
+#   NOT a 1:1 match for `backend/package.json` and therefore can't
+#   drive `npm ci` against a freestanding `backend/dist/package.json`
+#   — `npm ci` would error with "EUSAGE" because the lockfile
+#   doesn't reference the same root-level package.
+#
+#   Instead we synthesize a minimal manifest with just the backend
+#   runtime `dependencies` (plus `"type":"module"` for the ESM
+#   runtime) and run `npm install --omit=dev --no-package-lock`.
+#   The version ranges are inherited verbatim from
+#   `backend/package.json`, which itself was resolved against the
+#   root lockfile during development — drift between dev resolution
+#   and prod resolution is bounded to the patch range
+#   `^MAJOR.MINOR.PATCH` allows. For the MVP that trade-off is
+#   acceptable; the next operator who needs full determinism should
+#   either commit a backend-local lockfile or generate one in CI
+#   before this step (`npm install --package-lock-only`).
+#
+# `package.json` (with `type: module`) MUST stay in the zip so the
+# Lambda runtime (Node 20) parses the ESM-emitted handlers as
+# modules. Without it, Node defaults to CJS and every cold-start
+# `await loadSecretsThenConfig()` throws `SyntaxError`.
+
+echo "==> Generating minimal dist/package.json"
+# Read backend/package.json's `name`, `version`, and `dependencies`,
+# add `type: module`, drop everything else (`scripts`,
+# `devDependencies`, etc.) — `node -p` is already a prerequisite
+# (the runtime), so no extra tool dependency.
+node -e '
+const pkg = require("./package.json");
+const out = {
+  name: pkg.name,
+  version: pkg.version,
+  private: true,
+  type: "module",
+  dependencies: pkg.dependencies ?? {},
+};
+process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+' > "${DIST_DIR}/package.json"
 
 echo "==> Installing production node_modules into dist/"
-cp package.json package-lock.json "${DIST_DIR}/"
 (
     cd "${DIST_DIR}"
-    npm ci --omit=dev --no-audit --no-fund --ignore-scripts
+    npm install --omit=dev --no-package-lock --no-audit --no-fund --ignore-scripts
 )
-
-# The original package.json + lockfile pulled in dev metadata we
-# don't want bloating the zip. Strip them, then write back a
-# minimal `{"type":"module"}` manifest so the Lambda runtime
-# (Node 20) treats the compiled handlers as ES modules — top-
-# level `await` in the source TypeScript compiles to top-level
-# `await` in the emitted .js, which Node ONLY accepts under an
-# ESM manifest. Without this file the runtime falls back to CJS
-# and every cold-start `await loadSecretsThenConfig()` would
-# throw `SyntaxError: Unexpected reserved word`.
-rm -f "${DIST_DIR}/package.json" "${DIST_DIR}/package-lock.json"
-printf '{"type":"module"}\n' > "${DIST_DIR}/package.json"
 
 # -----------------------------------------------------------------------------
 # 3b. Copy db/ into dist/ for the migration Lambda.
@@ -140,11 +175,12 @@ echo "==> Building zip"
     # zip's content hash is stable across machines that build the
     # same source tree. `-r` recurses; `-q` is quiet.
     #
-    # `package.json` (the minimal `{"type":"module"}` manifest
-    # written above) must be in the zip — without it Node treats
-    # the bundle as CJS and the ESM-emitted handlers fail to
-    # parse.
-    zip -Xrq "${ZIP_PATH}" package.json lambdas shared node_modules
+    # `package.json` (with `"type":"module"`) must be in the zip —
+    # without it Node treats the bundle as CJS and the ESM-emitted
+    # handlers fail to parse. `db/` carries the migration runner's
+    # `.mjs` + `.sql` assets read at runtime by the
+    # `maintenance-db-migrate` Lambda.
+    zip -Xrq "${ZIP_PATH}" package.json lambdas shared node_modules db
 )
 
 # -----------------------------------------------------------------------------
