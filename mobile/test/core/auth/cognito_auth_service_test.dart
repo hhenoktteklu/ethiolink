@@ -3,18 +3,29 @@
 // The signOut path crosses two platform channels (flutter_appauth
 // and flutter_secure_storage) so we don't run the full method in
 // a widget test; instead we pin the EndSessionRequest the service
-// builds for Cognito via `buildEndSessionRequest`. That's the
-// regression sentinel for the bug this commit fixes:
+// builds for Cognito via `buildEndSessionRequest`. The tests
+// guard against two regressions in the order they were
+// surfaced live on the dev pool:
 //
-//   "Required String parameter 'client_id' is not present"
+//   1. "Required String parameter 'client_id' is not present" —
+//      Cognito's `/logout` endpoint requires `client_id` even
+//      though the OIDC end-session spec only mandates
+//      `id_token_hint`.
 //
-// served by Cognito's `/logout` endpoint when the request omits
-// `client_id`. Cognito's logout endpoint is not OIDC-spec-
-// compliant — it requires `client_id` even though the OIDC
-// end-session spec only mandates `id_token_hint`. flutter_appauth's
-// `EndSessionRequest` doesn't expose a top-level `clientId`
-// field, so we thread it through `additionalParameters` and the
-// platform layer forwards it verbatim as a query string parameter.
+//   2. "Required String parameter 'redirect_uri' is not present"
+//      — Cognito ignores OIDC's `post_logout_redirect_uri` and
+//      requires its own non-standard `logout_uri` and/or
+//      `redirect_uri`. Sending both is the documented
+//      belt-and-braces shape; Cognito prefers `logout_uri` when
+//      both are present and no `response_type` is supplied, so we
+//      get a clean local-sign-out redirect.
+//
+// flutter_appauth's `EndSessionRequest` exposes neither
+// `clientId` nor `logoutUri` nor `redirectUri` as top-level
+// fields (those are Cognito-specific), so all three are threaded
+// through `additionalParameters` and the platform layer forwards
+// them verbatim as query string params on the
+// `endSessionEndpoint` URL.
 //
 // The clear-on-success / clear-on-failure invariants live in
 // `cognito_auth_service.dart`'s `signOut` ordering — local
@@ -40,12 +51,12 @@ const _testConfig = AppConfig(
 void main() {
   group('CognitoAuthService.buildEndSessionRequest', () {
     test(
-      'attaches client_id via additionalParameters — the regression sentinel',
+      'attaches client_id via additionalParameters — the first regression '
+      'sentinel ("client_id is not present")',
       () {
         final service = CognitoAuthService(config: _testConfig);
         final req = service.buildEndSessionRequest('id-token-hint-stub');
 
-        // The fix: Cognito's /logout endpoint demands client_id.
         // additionalParameters is forwarded as query string by the
         // platform implementation.
         expect(req.additionalParameters, isNotNull);
@@ -63,18 +74,79 @@ void main() {
       },
     );
 
+    test(
+      'attaches logout_uri + redirect_uri — the second regression sentinel '
+      '("redirect_uri is not present")',
+      () {
+        // Cognito ignores OIDC `post_logout_redirect_uri` and
+        // requires its own `logout_uri` (and accepts `redirect_uri`
+        // as an alternative target). The previous client_id-only
+        // fix moved Cognito past the first parser check but landed
+        // on "Required String parameter 'redirect_uri' is not
+        // present". This sentinel pins the belt-and-braces shape
+        // that satisfies both branches of Cognito's logout-URL
+        // parser.
+        final service = CognitoAuthService(config: _testConfig);
+        final req = service.buildEndSessionRequest('hint');
+
+        expect(req.additionalParameters, contains('logout_uri'));
+        expect(req.additionalParameters, contains('redirect_uri'));
+        expect(
+          req.additionalParameters!['logout_uri'],
+          'com.ethiolink.app:/logout',
+          reason:
+              'Cognito serves "Required String parameter '
+              '\'redirect_uri\' is not present" when the logout URL '
+              'omits both logout_uri and redirect_uri. logout_uri is '
+              'Cognito\'s canonical post-sign-out redirect parameter.',
+        );
+        expect(
+          req.additionalParameters!['redirect_uri'],
+          'com.ethiolink.app:/logout',
+          reason:
+              'redirect_uri mirrors logout_uri so Cognito\'s '
+              'alternative redirect-then-reauth parser branch '
+              '(used by some account configurations) is also '
+              'satisfied.',
+        );
+      },
+    );
+
+    test(
+      'when AppConfig.logoutUri is null, only client_id is sent — Cognito '
+      "surfaces its own missing-param error rather than us sending 'null'",
+      () {
+        const nullLogoutConfig = AppConfig(
+          apiBaseUrl: 'https://example.test',
+          cognitoDomain: 'd',
+          cognitoClientId: 'c',
+          redirectUri: 'com.ethiolink.app:/oauthredirect',
+          // logoutUri intentionally omitted (defaults to null).
+        );
+        final service = CognitoAuthService(config: nullLogoutConfig);
+        final req = service.buildEndSessionRequest('hint');
+
+        expect(req.additionalParameters, contains('client_id'));
+        // Defensive: must NOT serialize the string 'null' as the
+        // logout_uri value — better to omit and let Cognito's
+        // error surface the misconfiguration clearly.
+        expect(req.additionalParameters, isNot(contains('logout_uri')));
+        expect(req.additionalParameters, isNot(contains('redirect_uri')));
+      },
+    );
+
     test('passes the id_token_hint we received', () {
       final service = CognitoAuthService(config: _testConfig);
       final req = service.buildEndSessionRequest('hint-abc-xyz');
       expect(req.idTokenHint, 'hint-abc-xyz');
     });
 
-    test('uses the configured logout redirect URI', () {
+    test('uses the configured logout redirect URI (OIDC field too)', () {
       final service = CognitoAuthService(config: _testConfig);
       final req = service.buildEndSessionRequest('hint');
-      // The logout URI is the reverse-domain private-use URI scheme
-      // (RFC 8252 §7.1) registered with Cognito's
-      // mobile_logout_urls; matches mobile/env/dev.example.json.
+      // postLogoutRedirectUrl serialises as OIDC `post_logout_redirect_uri`.
+      // Cognito ignores it but spec-compliant IdPs use it; sending
+      // it costs nothing.
       expect(req.postLogoutRedirectUrl, 'com.ethiolink.app:/logout');
     });
 

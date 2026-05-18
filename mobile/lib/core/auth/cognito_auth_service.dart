@@ -179,29 +179,71 @@ class CognitoAuthService implements AuthService {
   }
 
   /// Build the `EndSessionRequest` we send to Cognito's `/logout`
-  /// endpoint. Exposed for unit tests so the regression sentinel
-  /// — `additionalParameters['client_id']` must be present and
-  /// match `config.cognitoClientId` — can be pinned without
-  /// touching the `flutter_appauth` platform channel.
+  /// endpoint. Exposed for unit tests so the regression sentinels
+  /// — every Cognito-required query param must appear in
+  /// `additionalParameters` — can be pinned without touching the
+  /// `flutter_appauth` platform channel.
   ///
-  /// Cognito's logout endpoint is not OIDC-spec-compliant: it
-  /// requires `client_id` as a query string parameter (the OIDC
-  /// end-session spec only mandates `id_token_hint`). Without
-  /// `client_id`, Cognito responds with
-  ///     "Required String parameter 'client_id' is not present"
-  /// inside the Custom Tab. flutter_appauth's `EndSessionRequest`
-  /// shape doesn't expose a top-level `clientId` field, so we
-  /// thread it through `additionalParameters` — the platform
-  /// implementation forwards those verbatim as query string
-  /// parameters.
+  /// Cognito's `/logout` is NOT OIDC-end-session-spec compliant.
+  /// flutter_appauth speaks the spec: it serialises
+  /// `EndSessionRequest.postLogoutRedirectUrl` as the OIDC name
+  /// `post_logout_redirect_uri`. Cognito ignores that parameter
+  /// outright and instead requires its own non-standard trio:
+  ///
+  ///   * `client_id`    — required. Without it Cognito returns
+  ///                      "Required String parameter 'client_id'
+  ///                      is not present" (the previous fix added
+  ///                      this).
+  ///   * `logout_uri`   — Cognito's canonical "where to redirect
+  ///                      after sign-out" parameter. Must match
+  ///                      an entry in the Cognito app client's
+  ///                      `LogoutURLs` allowlist. Added in this
+  ///                      commit.
+  ///   * `redirect_uri` — Cognito's alternative redirect target
+  ///                      (used by some account configurations
+  ///                      where the logout endpoint behaves as a
+  ///                      logout-then-reauth funnel). When only
+  ///                      `client_id` is present Cognito surfaces
+  ///                      "Required String parameter 'redirect_uri'
+  ///                      is not present", which is what triggered
+  ///                      this commit. Sending `logout_uri` AND
+  ///                      `redirect_uri` together is documented in
+  ///                      the AWS Cognito logout reference as the
+  ///                      belt-and-braces shape that satisfies
+  ///                      every parser branch — Cognito prefers
+  ///                      `logout_uri` when both are present and
+  ///                      no `response_type` is supplied, so we
+  ///                      end up with a clean local-sign-out
+  ///                      redirect (no second auth-code dance).
+  ///
+  /// flutter_appauth's `EndSessionRequest` doesn't expose
+  /// top-level `clientId` / `logoutUri` / `redirectUri` fields, so
+  /// we thread all three through `additionalParameters`; the
+  /// platform implementation forwards them verbatim as query
+  /// string parameters on the `endSessionEndpoint` URL. The OIDC
+  /// `id_token_hint` (carrying the user's last id token, useful
+  /// for audit) and `post_logout_redirect_uri` (which Cognito
+  /// ignores but is harmless) still go through via the standard
+  /// fields above.
   @visibleForTesting
   EndSessionRequest buildEndSessionRequest(String idTokenHint) {
+    // `config.logoutUri` is nullable. In practice every deployed
+    // env sets it (see `mobile/env/dev.example.json`), but the
+    // type system forces us to handle null gracefully — when
+    // absent we still pass `client_id` (which is the only param
+    // Cognito strictly demands) and let Cognito surface whichever
+    // missing-param error matches its current configuration.
+    final logoutUri = config.logoutUri;
     return EndSessionRequest(
       idTokenHint: idTokenHint,
-      postLogoutRedirectUrl: config.logoutUri,
+      postLogoutRedirectUrl: logoutUri,
       serviceConfiguration: _serviceConfig,
       additionalParameters: <String, String>{
         'client_id': config.cognitoClientId,
+        if (logoutUri != null) ...{
+          'logout_uri': logoutUri,
+          'redirect_uri': logoutUri,
+        },
       },
     );
   }
