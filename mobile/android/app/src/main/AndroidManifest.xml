@@ -57,26 +57,47 @@
         <activity
             android:name="net.openid.appauth.RedirectUriReceiverActivity"
             android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="${applicationId}"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
             android:theme="@style/Theme.EthioLink.AppAuthRedirect"
             tools:node="replace">
             <!--
-                `RedirectUriReceiverActivity` extends
-                `androidx.appcompat.app.AppCompatActivity`, which
-                asserts at `onCreate` time that the inflated theme is
-                a `Theme.AppCompat` (or descendant). The Flutter
-                scaffold's default `LaunchTheme` / `NormalTheme`
-                extend `@android:style/Theme.Light.NoTitleBar` (a
-                platform theme), so the activity crashed with
-                `IllegalStateException: You need to use a
-                Theme.AppCompat theme (or descendant)` immediately
-                after Cognito redirected back to the app.
+                `RedirectUriReceiverActivity` runs the OAuth response
+                handoff from Custom Tabs back to AppAuth's
+                `AuthorizationManagementActivity`. The launch
+                attributes here are critical for the handoff:
 
-                `Theme.EthioLink.AppAuthRedirect` (defined in
-                `res/values/styles.xml`) extends
-                `Theme.AppCompat.Translucent` so the receiver
-                activity is both AppCompat-compliant and visually
-                invisible — it's a transient handoff to AppAuth, not
-                a screen the user should see.
+                  * `launchMode="singleTask"` + `taskAffinity` of the
+                    app's `${applicationId}` route the redirect back
+                    into the SAME task that initiated sign-in. Without
+                    this, the Custom Tab spawns the receiver in its
+                    own task and AppAuth's stored state lookup fails
+                    with `AppAuth: No stored state - unable to handle
+                    response` — the state lives in the original
+                    `AuthorizationManagementActivity` instance, which
+                    only the original task can reach.
+
+                  * `noHistory="true"` + `excludeFromRecents="true"`
+                    keep the transient activity off the back stack
+                    and out of the recents card — it's a one-shot
+                    handoff, not something the user navigates to.
+
+                  * Theme: `RedirectUriReceiverActivity` extends
+                    `androidx.appcompat.app.AppCompatActivity`, which
+                    asserts at `onCreate` that the inflated theme is
+                    a `Theme.AppCompat` descendant. The Flutter
+                    scaffold's default `LaunchTheme` / `NormalTheme`
+                    extend `@android:style/Theme.Light.NoTitleBar`
+                    (a platform theme), which previously crashed with
+                    `IllegalStateException: You need to use a
+                    Theme.AppCompat theme (or descendant)`.
+                    `Theme.EthioLink.AppAuthRedirect` (defined in
+                    `res/values/styles.xml`) extends
+                    `Theme.AppCompat.NoActionBar` and is
+                    fully-transparent so the receiver activity is
+                    both AppCompat-compliant and visually invisible.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
