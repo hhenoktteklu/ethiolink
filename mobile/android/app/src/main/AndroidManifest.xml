@@ -57,7 +57,27 @@
         <activity
             android:name="net.openid.appauth.RedirectUriReceiverActivity"
             android:exported="true"
+            android:theme="@style/Theme.EthioLink.AppAuthRedirect"
             tools:node="replace">
+            <!--
+                `RedirectUriReceiverActivity` extends
+                `androidx.appcompat.app.AppCompatActivity`, which
+                asserts at `onCreate` time that the inflated theme is
+                a `Theme.AppCompat` (or descendant). The Flutter
+                scaffold's default `LaunchTheme` / `NormalTheme`
+                extend `@android:style/Theme.Light.NoTitleBar` (a
+                platform theme), so the activity crashed with
+                `IllegalStateException: You need to use a
+                Theme.AppCompat theme (or descendant)` immediately
+                after Cognito redirected back to the app.
+
+                `Theme.EthioLink.AppAuthRedirect` (defined in
+                `res/values/styles.xml`) extends
+                `Theme.AppCompat.Translucent` so the receiver
+                activity is both AppCompat-compliant and visually
+                invisible — it's a transient handoff to AppAuth, not
+                a screen the user should see.
+            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
