@@ -15,8 +15,14 @@ publish_to: "none"
 version: 0.0.1+1
 
 environment:
-  sdk: ">=3.4.0 <4.0.0"
-  flutter: ">=3.22.0"
+  # Floor raised to track `flutter_appauth ^12.0.0`'s minimum SDK
+  # requirement (Flutter 3.38.1 / Dart 3.10). The plugin's 12.0.0
+  # release migrated the iOS / macOS sides to `UISceneDelegate`,
+  # which only became stable in that Flutter line. Bumping the
+  # constraint here surfaces the requirement at `flutter pub get`
+  # instead of as a confusing runtime error.
+  sdk: ">=3.10.0 <4.0.0"
+  flutter: ">=3.38.1"
 
 dependencies:
   flutter:
@@ -38,7 +44,23 @@ dependencies:
   # + end-session. `flutter_secure_storage` backs the token cache
   # via Keychain (iOS) / Keystore (Android), so the refresh token
   # never lands on the device file system in plaintext.
-  flutter_appauth: ^7.0.0
+  #
+  # Bumped from ^7.0.0 → ^12.0.0 to take in the AppAuth-Android
+  # 0.11.x line's fixes around redirect-state restoration. The
+  # 7.0.1 surface dropped Cognito's redirect callback intermittently
+  # ("AppAuth : No stored state - unable to handle response" in
+  # logcat) even after migrating to the reverse-domain redirect
+  # scheme. The 12.0.0 line bundles AppAuth-Android 0.11.1, which
+  # ships the upstream `AuthorizationManagementActivity` rewrite
+  # that survives the process-restart Custom Tabs occasionally
+  # triggers on Android 14+. The API surface our `CognitoAuthService`
+  # relies on (`authorizeAndExchangeCode` / `endSession` / `token`
+  # plus the `AuthorizationTokenRequest` / `EndSessionRequest` /
+  # `TokenRequest` shape) was preserved unchanged through the
+  # 8 → 12 majors, so no Dart-side rewrite is needed; the
+  # SDK / Android-floor bumps live in the `environment:` block above
+  # and in `android/app/build.gradle.kts`.
+  flutter_appauth: ^12.0.0
   flutter_secure_storage: ^9.2.2
 
   # Phase 9 — HTTP client. Dio's interceptor model fits the

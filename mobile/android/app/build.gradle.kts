@@ -28,7 +28,16 @@ android {
         applicationId = "com.ethiolink.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        //
+        // `flutter_appauth ^12.0.0` requires Android 7.0 (API 24) at
+        // minimum. `flutter.minSdkVersion` resolves to the Flutter
+        // SDK's current floor (currently 21 on the stable channel),
+        // so we override it here with `maxOf(flutter.minSdkVersion,
+        // 24)` to keep the plugin's requirement satisfied without
+        // dropping below Flutter's own floor if it ever lifts past
+        // 24. Set explicitly rather than via a `local.properties`
+        // override so CI / fresh checkouts pick the right value.
+        minSdk = maxOf(flutter.minSdkVersion, 24)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
