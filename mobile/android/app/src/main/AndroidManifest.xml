@@ -3,11 +3,38 @@
         android:label="ethiolink"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!--
+            Do NOT add `android:taskAffinity=""` here. Flutter's
+            project template sets it by default to isolate the
+            Flutter MainActivity into its own task; that default
+            breaks `flutter_appauth` on Android because the AppAuth
+            library contributes `AuthorizationManagementActivity`
+            (launchMode=singleTask) and `RedirectUriReceiverActivity`
+            with the application-default task affinity
+            (= `com.ethiolink.app`). With empty affinity on
+            MainActivity, AMA's `singleTask` resolution places it
+            in a SEPARATE task from MainActivity; once the Chrome
+            Custom Tab takes the foreground, AMA's task drops in
+            priority and the OS destroys AMA on memory pressure
+            (extremely common on the emulator). When Cognito
+            redirects to `com.ethiolink.app:/oauthredirect`,
+            RedirectUriReceiverActivity routes correctly to
+            `cmp=com.ethiolink.app/net.openid.appauth.RedirectUriReceiverActivity`,
+            but the response handler creates a FRESH AMA with
+            `savedInstanceState=null` and only `.setData()` on the
+            intent — so AppAuth logs
+              `AppAuth : No stored state - unable to handle response`
+            and `flutter_appauth` surfaces
+            `FlutterAppAuthUserCancelledException`. See
+            AppAuth-Android issue #592 + MaikuB/flutter_appauth
+            issue #449 — removing the empty affinity attribute
+            collapses all three activities into one task, so AMA
+            survives alongside MainActivity behind the Custom Tab.
+        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
