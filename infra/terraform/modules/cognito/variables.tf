@@ -21,15 +21,15 @@ variable "name_prefix" {
 }
 
 variable "mobile_callback_urls" {
-  description = "OAuth callback URLs for the mobile app client. Deep link scheme is used in production; localhost is allowed in dev."
+  description = "OAuth callback URLs for the mobile app client. Uses the reverse-domain private-use URI scheme `com.ethiolink.app:/oauthredirect` (RFC 8252 §7.1) — that scheme is claimed by exactly one app on a device, so no other installed app can intercept the Cognito redirect."
   type        = list(string)
-  default     = ["ethiolink://auth/callback"]
+  default     = ["com.ethiolink.app:/oauthredirect"]
 }
 
 variable "mobile_logout_urls" {
-  description = "OAuth logout URLs for the mobile app client."
+  description = "OAuth logout URLs for the mobile app client. Same reverse-domain scheme as `mobile_callback_urls`."
   type        = list(string)
-  default     = ["ethiolink://auth/logout"]
+  default     = ["com.ethiolink.app:/logout"]
 }
 
 variable "admin_callback_urls" {

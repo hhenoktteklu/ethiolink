@@ -10,7 +10,7 @@
 //   * `cognitoClientId`   — Cognito mobile app-client id (public
 //                            PKCE; no secret).
 //   * `redirectUri`       — Deep-link URI for the OAuth callback,
-//                            e.g. `ethiolink://auth/callback`.
+//                            e.g. `com.ethiolink.app:/oauthredirect`.
 //
 // Resolution order at runtime (`fromCompileTimeEnv`):
 //
@@ -49,11 +49,13 @@ class AppConfig {
   final String cognitoClientId;
 
   /// OAuth callback deep-link URI registered with Cognito's
-  /// `callback_urls`. The default is `ethiolink://auth/callback`.
+  /// `callback_urls`. The default is
+  /// `com.ethiolink.app:/oauthredirect` — a reverse-domain
+  /// private-use URI scheme per RFC 8252 §7.1.
   final String redirectUri;
 
   /// OAuth logout deep-link URI registered with Cognito's
-  /// `logout_urls`. Defaults to `ethiolink://auth/logout` if
+  /// `logout_urls`. Defaults to `com.ethiolink.app:/logout` if
   /// unset.
   final String? logoutUri;
 
@@ -75,11 +77,11 @@ class AppConfig {
     const cognitoClientId = String.fromEnvironment('COGNITO_CLIENT_ID');
     const redirectUri = String.fromEnvironment(
       'COGNITO_REDIRECT_URI',
-      defaultValue: 'ethiolink://auth/callback',
+      defaultValue: 'com.ethiolink.app:/oauthredirect',
     );
     const logoutUri = String.fromEnvironment(
       'COGNITO_LOGOUT_URI',
-      defaultValue: 'ethiolink://auth/logout',
+      defaultValue: 'com.ethiolink.app:/logout',
     );
     const environmentName = String.fromEnvironment(
       'APP_ENV',

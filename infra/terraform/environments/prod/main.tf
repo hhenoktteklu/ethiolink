@@ -59,12 +59,16 @@ module "cognito" {
   admin_callback_urls = ["https://admin.ethiolink.app/login"]
   admin_logout_urls   = ["https://admin.ethiolink.app/login"]
 
-  # Mobile callbacks stay on the Flutter deep-link scheme — the
-  # module default is correct for prod and dev alike, but pinning
-  # the value here keeps the prod stack explicit about what's
-  # registered.
-  mobile_callback_urls = ["ethiolink://auth/callback"]
-  mobile_logout_urls   = ["ethiolink://auth/logout"]
+  # Mobile callbacks use the reverse-domain custom scheme that
+  # AppAuth registers on Android (and the iOS bundle id registers
+  # via `CFBundleURLTypes`). The module default is correct for prod
+  # and dev alike, but pinning the value here keeps the prod stack
+  # explicit about what's registered. The shape matches RFC 8252
+  # §7.1 "Private-Use URI Scheme Redirection" — one app on the
+  # device claims `com.ethiolink.app:/…`, so no other app can
+  # intercept the Cognito redirect.
+  mobile_callback_urls = ["com.ethiolink.app:/oauthredirect"]
+  mobile_logout_urls   = ["com.ethiolink.app:/logout"]
 }
 
 output "cognito_user_pool_id" {

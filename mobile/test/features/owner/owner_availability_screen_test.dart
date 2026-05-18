@@ -30,7 +30,7 @@ const _testConfig = AppConfig(
   apiBaseUrl: 'https://example.test',
   cognitoDomain: 'd',
   cognitoClientId: 'c',
-  redirectUri: 'ethiolink://auth/callback',
+  redirectUri: 'com.ethiolink.app:/oauthredirect',
 );
 
 Staff _staff({String id = 'staff-1', String name = 'Selam Tadesse'}) {

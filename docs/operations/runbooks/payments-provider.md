@@ -173,7 +173,7 @@ A targeted smoke confirms the full loop works. Use sandbox keys (`CHASECK_TEST-�
 Real-device runs on TestFlight (iOS) / Play Store internal-track (Android):
 
 1. **Redirect opens.** Tap "Pay now (Chapa)" → tap Book → the system browser must open and load `checkout.chapa.co`. If it doesn't, see "Mobile launcher refused" in Troubleshooting.
-2. **Return deep link.** After completing payment in the browser, the OS should foreground the EthioLink app and surface the waiting screen's "Payment received" success branch. If the OS shows a "No app can handle this URL" toast, the deep-link scheme didn't propagate — confirm the existing Cognito `ethiolink://auth/callback` flow still works first; if THAT broke, the scheme is the issue. If only payments are affected, the Chapa-side return URL is mistyped.
+2. **Return deep link.** After completing payment in the browser, the OS should foreground the EthioLink app and surface the waiting screen's "Payment received" success branch. If the OS shows a "No app can handle this URL" toast, the deep-link scheme didn't propagate — confirm the existing Cognito `com.ethiolink.app:/oauthredirect` flow still works first; if THAT broke, the reverse-domain auth scheme is the issue. If only payments are affected, the Chapa-side return URL (or the separate `ethiolink://payments/return` scheme registration) is mistyped.
 3. **Polling success / failure / timeout.** Drive each case once:
    - Success: standard happy path above.
    - Failure: cancel on Chapa's hosted page → the app's waiting screen transitions to "Payment failed" with the "Pick another slot" CTA.

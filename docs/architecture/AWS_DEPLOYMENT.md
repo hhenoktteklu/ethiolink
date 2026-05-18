@@ -96,7 +96,7 @@ VPC endpoints (S3, Secrets Manager) and flow logs are intentionally out of scope
 - One user pool per environment.
 - Three groups: `CUSTOMER`, `BUSINESS_OWNER`, `ADMIN`.
 - App clients:
-  - `ethiolink-mobile` (public, PKCE, no client secret) — Flutter app on the `ethiolink://auth/{callback,logout}` deep-link scheme.
+  - `ethiolink-mobile` (public, PKCE, no client secret) — Flutter app on the reverse-domain `com.ethiolink.app:/{oauthredirect,logout}` redirect (RFC 8252 §7.1 private-use URI scheme; Android registers it via `flutter_appauth`'s `appAuthRedirectScheme` placeholder, iOS via `CFBundleURLSchemes`).
   - `ethiolink-admin` (public, PKCE, no client secret) — React SPA. The dashboard runs the PKCE flow in-browser via `admin/src/lib/auth.ts`; the callback route is `/login?code=...` (the `LoginPage` component handles the exchange). The Cognito client's `callback_urls` and `logout_urls` MUST list the same `/login` path per environment:
     - Dev: `http://localhost:5173/login`
     - Prod: `https://admin.ethiolink.app/login`

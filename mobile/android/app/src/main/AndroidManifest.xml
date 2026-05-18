@@ -36,10 +36,13 @@
             redirect back into the same task as the
             `AuthorizationManagementActivity` that initiated sign-in.
             The plugin's intent filter pulls the scheme from
-            `${appAuthRedirectScheme}` — set to `ethiolink` in
-            `android/app/build.gradle.kts` to match
-            `COGNITO_REDIRECT_URI=ethiolink://auth/callback` in
-            `mobile/env/dev.json`.
+            `${appAuthRedirectScheme}` — set to `com.ethiolink.app`
+            in `android/app/build.gradle.kts` to match
+            `COGNITO_REDIRECT_URI=com.ethiolink.app:/oauthredirect`
+            in `mobile/env/dev.json`. The reverse-domain scheme is
+            the OAuth-for-native-apps best practice from RFC 8252
+            §7.1 — exactly one app on the device claims it, so the
+            Cognito redirect cannot be intercepted by another app.
 
             We previously overrode the activity here with a
             full-URI intent filter + `tools:node="replace"`. That

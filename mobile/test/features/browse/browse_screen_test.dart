@@ -28,7 +28,7 @@ const _testConfig = AppConfig(
   apiBaseUrl: 'https://example.test',
   cognitoDomain: 'ethiolink-test.auth.eu-west-1.amazoncognito.com',
   cognitoClientId: 'test-client',
-  redirectUri: 'ethiolink://auth/callback',
+  redirectUri: 'com.ethiolink.app:/oauthredirect',
   environmentName: 'test',
 );
 

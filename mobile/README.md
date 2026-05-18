@@ -134,58 +134,38 @@ The app resolves four required + two optional values from compile-time constants
 | `API_BASE_URL`            | yes      | —                                | `terraform output -raw api_gateway_invoke_url`               |
 | `COGNITO_DOMAIN`          | yes      | —                                | `terraform output -raw cognito_hosted_ui_domain` (+ `.auth.<region>.amazoncognito.com`) |
 | `COGNITO_CLIENT_ID`       | yes      | —                                | `terraform output -raw cognito_mobile_app_client_id`         |
-| `COGNITO_REDIRECT_URI`    | optional | `ethiolink://auth/callback`      | Must match Cognito's `callback_urls` exactly                 |
-| `COGNITO_LOGOUT_URI`      | optional | `ethiolink://auth/logout`        | Must match Cognito's `logout_urls` exactly                   |
+| `COGNITO_REDIRECT_URI`    | optional | `com.ethiolink.app:/oauthredirect` | Must match Cognito's `callback_urls` exactly               |
+| `COGNITO_LOGOUT_URI`      | optional | `com.ethiolink.app:/logout`      | Must match Cognito's `logout_urls` exactly                   |
 | `APP_ENV`                 | optional | `dev`                            | Free-form label surfaced in the placeholder UI               |
 
 Missing any of the three required values throws `MissingConfigError` at boot — the app fails loud rather than booting half-wired.
 
 ## Cognito PKCE — platform deep-link setup
 
-`CognitoAuthService` drives the PKCE flow via [`flutter_appauth`](https://pub.dev/packages/flutter_appauth). The callback URI `ethiolink://auth/callback` (and logout URI `ethiolink://auth/logout`) must be registered on **both** Cognito (handled by Terraform) and the native platforms (handled per-OS below). Skipping the platform step results in the system browser opening Cognito's hosted UI on sign-in but never returning to the app after the user signs in — the redirect succeeds at the IdP and then nothing happens.
+`CognitoAuthService` drives the PKCE flow via [`flutter_appauth`](https://pub.dev/packages/flutter_appauth). The callback URI `com.ethiolink.app:/oauthredirect` (and logout URI `com.ethiolink.app:/logout`) must be registered on **both** Cognito (handled by Terraform) and the native platforms (handled per-OS below). The shape is a reverse-domain private-use URI scheme per RFC 8252 §7.1 — exactly one app on a device claims `com.ethiolink.app:`, so the Cognito redirect cannot be intercepted by another app. Skipping the platform step results in the system browser opening Cognito's hosted UI on sign-in but never returning to the app after the user signs in — the redirect succeeds at the IdP and then nothing happens.
 
 Both platforms regenerate their scaffolding via `flutter create .`; the edits below are layered on top of the generated files.
 
-### Android — `android/app/src/main/AndroidManifest.xml`
+### Android — `android/app/build.gradle.kts`
 
-Add an intent filter to the launcher `Activity` so Android routes `ethiolink://auth/...` deep links back to the app:
+`flutter_appauth` contributes its own `RedirectUriReceiverActivity` to the merged manifest with the correct launchMode + theme + task affinity. The only edit needed on the app side is the Gradle manifest placeholder that the plugin's intent filter substitutes into its `<data android:scheme="${appAuthRedirectScheme}"/>`:
 
-```xml
-<activity
-    android:name=".MainActivity"
-    ...
-    android:launchMode="singleTask">
-    <!-- existing MAIN / LAUNCHER intent filter stays as-is -->
-
-    <intent-filter android:autoVerify="false">
-        <action android:name="android.intent.action.VIEW" />
-        <category android:name="android.intent.category.DEFAULT" />
-        <category android:name="android.intent.category.BROWSABLE" />
-        <data
-            android:scheme="ethiolink"
-            android:host="auth" />
-    </intent-filter>
-</activity>
-```
-
-`android:launchMode="singleTask"` is important — without it the Custom Tab launches a new activity instance on every sign-in attempt, and the redirect breaks.
-
-In `android/app/build.gradle`, set the `appAuthRedirectScheme` manifest placeholder so `flutter_appauth` registers its own intent receiver:
-
-```gradle
+```kotlin
 android {
     defaultConfig {
-        ...
-        manifestPlaceholders = [appAuthRedirectScheme: 'ethiolink']
+        // …
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.ethiolink.app"
     }
 }
 ```
 
-The scheme `ethiolink` is lowercase — Android matches schemes case-insensitively but the convention is lowercase + no version suffix.
+Do NOT add an explicit `<activity android:name="net.openid.appauth.RedirectUriReceiverActivity" tools:node="replace">` block to `AndroidManifest.xml` — overriding the plugin's contribution drops AppAuth's stored-state plumbing and surfaces `AppAuth: No stored state - unable to handle response` after a successful Cognito redirect.
+
+The scheme `com.ethiolink.app` is a reverse-domain private-use URI scheme (RFC 8252 §7.1). Android matches schemes case-insensitively; lowercase + dots is the convention.
 
 ### iOS — `ios/Runner/Info.plist`
 
-Register the `ethiolink://` URL scheme so iOS routes deep links into the app:
+Register the reverse-domain URL scheme so iOS routes deep links into the app:
 
 ```xml
 <key>CFBundleURLTypes</key>
@@ -195,13 +175,13 @@ Register the `ethiolink://` URL scheme so iOS routes deep links into the app:
         <string>app.ethiolink.callback</string>
         <key>CFBundleURLSchemes</key>
         <array>
-            <string>ethiolink</string>
+            <string>com.ethiolink.app</string>
         </array>
     </dict>
 </array>
 ```
 
-Cognito's `/oauth2/authorize` redirects to `ethiolink://auth/callback`; iOS dispatches that URL to the registered scheme and `flutter_appauth` resumes the token exchange.
+Cognito's `/oauth2/authorize` redirects to `com.ethiolink.app:/oauthredirect`; iOS dispatches that URL to the registered scheme and `flutter_appauth` resumes the token exchange.
 
 iOS 11+ uses `ASWebAuthenticationSession` under the hood (system-managed; no `Info.plist` entitlement needed). On iOS 12+, the alternative `SFSafariViewController` path is auto-selected by `flutter_appauth` when the user has disabled the browser-session controller — both work without extra config.
 
@@ -217,7 +197,7 @@ If the browser closes but the app stays on the LoginScreen, the deep link didn't
 
 - Intent filter or `CFBundleURLSchemes` missing or scheme typo.
 - `appAuthRedirectScheme` manifest placeholder not set in Android.
-- `redirectUri` env value doesn't match Cognito's `callback_urls` exactly (Cognito is strict — `ethiolink://auth/callback/` with trailing slash is a different URL).
+- `redirectUri` env value doesn't match Cognito's `callback_urls` exactly (Cognito is strict — `com.ethiolink.app:/oauthredirect/` with trailing slash is a different URL).
 - Cognito client ID typo — the IdP returns an error page in the browser; check the URL bar before the browser closes.
 
 ### Phase 10 — Chapa hosted-checkout deep link
@@ -268,7 +248,7 @@ Each item below is on the immediate Phase 9 Track 3 backlog. The scaffold leaves
 - ❌ OpenAPI-generated Dart client from `backend/api/openapi.yaml`. Lands once the auth path is real so generated requests can be authenticated end-to-end.
 - ❌ State management (Riverpod). Adopted when the first feature with non-trivial state lands — likely the slot picker or the booking funnel.
 - ❌ Routing library (go_router). Adopted when the screen count crosses ~6.
-- ❌ Per-platform scaffolding (`android/`, `ios/`, ...). Regenerated locally; iOS Info.plist edits for the `ethiolink://` URL scheme land in a follow-up.
+- ❌ Per-platform scaffolding (`android/`, `ios/`, ...). The Android scaffold + the Cognito reverse-domain redirect (`com.ethiolink.app:/oauthredirect`) are checked in; iOS `CFBundleURLSchemes` edits for `com.ethiolink.app` land in a follow-up.
 - ✅ **Localization — English + Amharic.** Phase 9 Track 5 closed on the mobile side. `flutter_localizations` + Flutter's built-in `gen-l10n` are wired through `l10n.yaml` + `lib/l10n/app_en.arb` + `lib/l10n/app_am.arb`; `MaterialApp` resolves `AppLocalizations.localizationsDelegates` + `AppLocalizations.supportedLocales` (`[en, am]`). The visible English copy on login, the bottom-nav, the profile + bookings + owner-dashboard surfaces, and the booking-flow confirm + success steps reads from `AppLocalizations.of(context)`. The Profile tab carries a language picker (English / አማርኛ) — tapping a row drives `PATCH /v1/me { locale }` via `HttpMeRepository`, then flips `LocaleScope` on success and persists the pick to `flutter_secure_storage` via `SecureLocalePreferences` so the next cold-start renders in the chosen language before the network round-trip. Failures surface a SnackBar with localized copy and leave the active locale untouched — the server-side `users.locale` row stays canonical.
 - ❌ Push notifications via FCM / APNs. Out of MVP scope per `docs/product/MVP_SCOPE.md`.
 - ❌ Open-date availability overrides, owner-side `no-show` action (backend not yet exposed), push notifications, business analytics, business cover photos / media polish. With the profile editor landed, every dashboard card on the My Business tab opens a real screen — Track 3.5 is closed end-to-end. The remaining deferred items are all post-MVP polish that pair with backend or infrastructure work tracked in `PHASE_9_POST_MVP.md`.

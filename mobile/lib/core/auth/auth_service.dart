@@ -6,7 +6,7 @@
 // uses `flutter_appauth` (or `amplify_auth_cognito`, decided at
 // the time) to drive the Cognito PKCE flow against
 // `${cognitoDomain}/oauth2/authorize` with the
-// `ethiolink://auth/callback` deep link.
+// `com.ethiolink.app:/oauthredirect` reverse-domain redirect URI.
 //
 // The scaffold ships a `FakeAuthService` that records each
 // invocation and simulates a successful sign-in after a 300 ms

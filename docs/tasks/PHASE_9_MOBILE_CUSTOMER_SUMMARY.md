@@ -35,7 +35,7 @@ Each commit is independently summarised at the commit-message + file-listing lev
 
 The seven commits chain into the following end-to-end flows on a real device pointed at the dev API:
 
-1. **Login.** Tap "Sign in" → Cognito hosted UI in the system browser → Cognito callback resolves to `ethiolink://auth/callback` → `CognitoAuthService` exchanges the code for tokens via `flutter_appauth` → tokens persist in `flutter_secure_storage` → app lands on the Browse tab.
+1. **Login.** Tap "Sign in" → Cognito hosted UI in the system browser → Cognito callback resolves to `com.ethiolink.app:/oauthredirect` → `CognitoAuthService` exchanges the code for tokens via `flutter_appauth` → tokens persist in `flutter_secure_storage` → app lands on the Browse tab.
 2. **Browse categories.** The Browse tab loads `GET /v1/categories` on mount. The four MVP categories (Salons / Barbers / Spas / Beauty Pros) render as cards. Pull-to-refresh works.
 3. **List businesses.** Tap a category card → `BusinessesScreen` loads `GET /v1/businesses?category=<slug>`. Cursor pagination via Load more.
 4. **View business detail.** Tap a business row → `BusinessDetailScreen` composes four concurrent fetches into one scrollable page: business header, services list, staff roster, recent reviews.
@@ -81,7 +81,7 @@ The test suites are deliberately self-contained — no live network, no platform
 
 Six manual / device-led items before the customer surface can ship to TestFlight + Play Store internal testing. None require new code; each is a discrete operator action.
 
-1. **Android deep-link verification.** Apply the `AndroidManifest.xml` intent filter for `ethiolink://auth` + the `appAuthRedirectScheme` Gradle manifest placeholder per `mobile/README.md` § "Cognito PKCE — platform deep-link setup". Boot on a real Android device, walk the full login → callback flow, confirm the app resumes correctly. Common failure: `singleTask` launch mode missing → app re-launches instead of resuming.
+1. **Android deep-link verification.** Confirm the `appAuthRedirectScheme = "com.ethiolink.app"` Gradle manifest placeholder per `mobile/README.md` § "Cognito PKCE — platform deep-link setup". `flutter_appauth` contributes the `RedirectUriReceiverActivity` with the correct launchMode + theme + task affinity itself — do NOT override it in `AndroidManifest.xml`. Boot on a real Android device, walk the full login → callback flow, confirm the app resumes correctly.
 2. **iOS deep-link verification.** Apply the `Info.plist` `CFBundleURLSchemes` entry. Boot on a real iOS device (the simulator's custom-scheme handling is finicky), walk the login flow, confirm the `ASWebAuthenticationSession` browser closes and the app resumes.
 3. **TestFlight internal track.** Operator creates the iOS App Store Connect app record + uploads the first signed `.ipa`. Invite the internal QA list. The TestFlight build can drive the same `env/dev.json` config as `flutter run`; the prod env stack flip is a future commit.
 4. **Play Store internal testing.** Operator creates the Play Console app record + uploads the first signed `.aab`. Invite the internal QA list.

@@ -31,7 +31,7 @@ const _testConfig = AppConfig(
   apiBaseUrl: 'https://example.test',
   cognitoDomain: 'd',
   cognitoClientId: 'c',
-  redirectUri: 'ethiolink://auth/callback',
+  redirectUri: 'com.ethiolink.app:/oauthredirect',
 );
 
 OwnerBusinessView _draftView({String status = 'DRAFT'}) {
