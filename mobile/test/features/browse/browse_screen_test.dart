@@ -257,48 +257,101 @@ void main() {
   // Bookings / Profile) — admin operations live in the admin SPA.
   // ----------------------------------------------------------------
 
-  testWidgets('shows the My Business tab for BUSINESS_OWNER sessions',
-      (tester) async {
-    await _pumpBrowse(
-      tester,
-      repository: FakeCategoriesRepository.value(<Category>[]),
-      ownerBusinessRepository: _PendingOwnerRepo(),
-      session: _sessionWithRole('BUSINESS_OWNER'),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'BUSINESS_OWNER session: Browse / Bookings / My Business / Profile nav, '
+    '"Manage your business" hero, owner banner',
+    (tester) async {
+      await _pumpBrowse(
+        tester,
+        repository: FakeCategoriesRepository.value(<Category>[]),
+        ownerBusinessRepository: _PendingOwnerRepo(),
+        session: _sessionWithRole('BUSINESS_OWNER'),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('My Business'), findsOneWidget);
-    expect(find.text('Browse'), findsOneWidget);
-    expect(find.text('Bookings'), findsOneWidget);
-    expect(find.text('Profile'), findsOneWidget);
-  });
+      // Four-tab nav.
+      expect(find.text('Browse'), findsOneWidget);
+      expect(find.text('Bookings'), findsOneWidget);
+      expect(find.text('My Business'), findsOneWidget);
+      expect(find.text('Profile'), findsOneWidget);
+      // ADMIN-only tab is hidden.
+      expect(find.text('Admin'), findsNothing);
+      // Role-driven hero on Browse.
+      expect(find.text('Manage your business'), findsOneWidget);
+      // Owner context banner — present for owner, hidden for
+      // customer (asserted below).
+      expect(
+        find.textContaining('Owner view'),
+        findsOneWidget,
+      );
+    },
+  );
 
-  testWidgets('hides the My Business tab for CUSTOMER sessions',
-      (tester) async {
-    await _pumpBrowse(
-      tester,
-      repository: FakeCategoriesRepository.value(<Category>[]),
-      session: _sessionWithRole('CUSTOMER'),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'CUSTOMER session: Browse / Bookings / Profile nav, '
+    '"Find services near you" hero, no role banner',
+    (tester) async {
+      await _pumpBrowse(
+        tester,
+        repository: FakeCategoriesRepository.value(<Category>[]),
+        session: _sessionWithRole('CUSTOMER'),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('My Business'), findsNothing);
-    expect(find.text('Browse'), findsOneWidget);
-    expect(find.text('Bookings'), findsOneWidget);
-    expect(find.text('Profile'), findsOneWidget);
-  });
+      // Three-tab customer nav.
+      expect(find.text('Browse'), findsOneWidget);
+      expect(find.text('Bookings'), findsOneWidget);
+      expect(find.text('Profile'), findsOneWidget);
+      expect(find.text('My Business'), findsNothing);
+      expect(find.text('Admin'), findsNothing);
+      // Customer hero copy + no owner / admin banner — the
+      // marketplace IS the customer's context.
+      expect(find.text('Find services near you'), findsOneWidget);
+      expect(find.textContaining('Owner view'), findsNothing);
+      expect(find.textContaining('Operator view'), findsNothing);
+    },
+  );
 
-  testWidgets('hides the My Business tab for ADMIN sessions',
-      (tester) async {
-    await _pumpBrowse(
-      tester,
-      repository: FakeCategoriesRepository.value(<Category>[]),
-      session: _sessionWithRole('ADMIN'),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'ADMIN session: Browse / Admin / Profile nav, AdminHome content, '
+    'operator banner on Browse',
+    (tester) async {
+      await _pumpBrowse(
+        tester,
+        repository: FakeCategoriesRepository.value(<Category>[]),
+        session: _sessionWithRole('ADMIN'),
+      );
+      await tester.pumpAndSettle();
 
-    expect(find.text('My Business'), findsNothing);
-  });
+      // Admin three-tab nav.
+      expect(find.text('Browse'), findsOneWidget);
+      expect(find.text('Admin'), findsOneWidget);
+      expect(find.text('Profile'), findsOneWidget);
+      expect(find.text('Bookings'), findsNothing);
+      expect(find.text('My Business'), findsNothing);
+      // Operator banner on Browse.
+      expect(
+        find.textContaining('Operator view'),
+        findsOneWidget,
+      );
+      // Tap the Admin tab and confirm the informational landing
+      // surfaces. The marketplace mobile app deliberately does
+      // NOT expose admin write operations — see
+      // `AdminHomeScreen`'s file-level docs + the runbook at
+      // docs/operations/runbooks/dev-cognito-users.md.
+      await tester.tap(find.text('Admin'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Admin tools live in the web console'),
+        findsOneWidget,
+      );
+      // Status row labels for the session info panel.
+      expect(find.text('Signed in as'), findsOneWidget);
+      expect(find.text('Role'), findsOneWidget);
+      expect(find.text('Environment'), findsOneWidget);
+      expect(find.text('API base URL'), findsOneWidget);
+    },
+  );
 
   // ----------------------------------------------------------------
   // Phase 9 Track 6 — search input on the browse tab.
