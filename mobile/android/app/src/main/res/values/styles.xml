@@ -15,21 +15,4 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
-
-    <!--
-        Theme applied to `net.openid.appauth.RedirectUriReceiverActivity`
-        when it handles the `ethiolink://auth/callback` redirect from
-        Cognito. The activity extends `AppCompatActivity`, which
-        rejects platform-only themes at runtime — we extend
-        `Theme.AppCompat` and additionally make the window
-        translucent so the brief handoff to AppAuth doesn't flash a
-        white screen between the Custom Tab closing and Flutter
-        regaining focus.
-    -->
-    <style name="Theme.EthioLink.AppAuthRedirect" parent="Theme.AppCompat.NoActionBar">
-        <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowAnimationStyle">@null</item>
-    </style>
 </resources>

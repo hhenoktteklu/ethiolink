@@ -1,6 +1,4 @@
-<manifest
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
         android:label="ethiolink"
         android:name="${applicationName}"
@@ -29,86 +27,34 @@
         </activity>
 
         <!--
-            Cognito hosted-UI callback handler.
+            Cognito hosted-UI callback routing.
 
-            `flutter_appauth` declares its own
-            `net.openid.appauth.RedirectUriReceiverActivity` in the
-            plugin manifest with a scheme-only intent filter that
-            reads `${appAuthRedirectScheme}` from
-            `defaultConfig.manifestPlaceholders` (set to `ethiolink`
-            in `android/app/build.gradle.kts`). In practice that
-            filter alone wasn't routing the
-            `ethiolink://auth/callback` redirect Cognito issues —
-            Android returned the user to a closed Custom Tab and
-            AppAuth surfaced `UserCancelledException` because no
-            redirect Intent ever reached the app.
+            `flutter_appauth` (via the upstream AppAuth-Android
+            library) declares its own
+            `net.openid.appauth.RedirectUriReceiverActivity` with the
+            right launchMode / taskAffinity / theme to deliver the
+            redirect back into the same task as the
+            `AuthorizationManagementActivity` that initiated sign-in.
+            The plugin's intent filter pulls the scheme from
+            `${appAuthRedirectScheme}` — set to `ethiolink` in
+            `android/app/build.gradle.kts` to match
+            `COGNITO_REDIRECT_URI=ethiolink://auth/callback` in
+            `mobile/env/dev.json`.
 
-            Re-declaring `RedirectUriReceiverActivity` here with a
-            full-URI filter (scheme + host + path) overrides the
-            plugin's contribution via the `tools:node="replace"`
-            merger directive and pins the exact callback shape from
-            `mobile/env/dev.json`
-            (`COGNITO_REDIRECT_URI=ethiolink://auth/callback`).
+            We previously overrode the activity here with a
+            full-URI intent filter + `tools:node="replace"`. That
+            override dropped the plugin's stored-state plumbing and
+            surfaced `AppAuth: No stored state - unable to handle
+            response` after a successful Cognito redirect. The
+            plugin's default contribution is now intentionally NOT
+            replaced; the gradle `appAuthRedirectScheme` placeholder
+            is sufficient.
 
-            If the redirect URI ever changes, update BOTH this filter
-            AND the Cognito app client's callback list — they must
-            match exactly.
+            If the redirect URI ever changes, update BOTH the
+            `appAuthRedirectScheme` value in
+            `android/app/build.gradle.kts` AND the Cognito app
+            client's allowed callback list — they must match.
         -->
-        <activity
-            android:name="net.openid.appauth.RedirectUriReceiverActivity"
-            android:exported="true"
-            android:launchMode="singleTask"
-            android:taskAffinity="${applicationId}"
-            android:noHistory="true"
-            android:excludeFromRecents="true"
-            android:theme="@style/Theme.EthioLink.AppAuthRedirect"
-            tools:node="replace">
-            <!--
-                `RedirectUriReceiverActivity` runs the OAuth response
-                handoff from Custom Tabs back to AppAuth's
-                `AuthorizationManagementActivity`. The launch
-                attributes here are critical for the handoff:
-
-                  * `launchMode="singleTask"` + `taskAffinity` of the
-                    app's `${applicationId}` route the redirect back
-                    into the SAME task that initiated sign-in. Without
-                    this, the Custom Tab spawns the receiver in its
-                    own task and AppAuth's stored state lookup fails
-                    with `AppAuth: No stored state - unable to handle
-                    response` — the state lives in the original
-                    `AuthorizationManagementActivity` instance, which
-                    only the original task can reach.
-
-                  * `noHistory="true"` + `excludeFromRecents="true"`
-                    keep the transient activity off the back stack
-                    and out of the recents card — it's a one-shot
-                    handoff, not something the user navigates to.
-
-                  * Theme: `RedirectUriReceiverActivity` extends
-                    `androidx.appcompat.app.AppCompatActivity`, which
-                    asserts at `onCreate` that the inflated theme is
-                    a `Theme.AppCompat` descendant. The Flutter
-                    scaffold's default `LaunchTheme` / `NormalTheme`
-                    extend `@android:style/Theme.Light.NoTitleBar`
-                    (a platform theme), which previously crashed with
-                    `IllegalStateException: You need to use a
-                    Theme.AppCompat theme (or descendant)`.
-                    `Theme.EthioLink.AppAuthRedirect` (defined in
-                    `res/values/styles.xml`) extends
-                    `Theme.AppCompat.NoActionBar` and is
-                    fully-transparent so the receiver activity is
-                    both AppCompat-compliant and visually invisible.
-            -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW"/>
-                <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
-                <data
-                    android:scheme="ethiolink"
-                    android:host="auth"
-                    android:path="/callback"/>
-            </intent-filter>
-        </activity>
 
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
