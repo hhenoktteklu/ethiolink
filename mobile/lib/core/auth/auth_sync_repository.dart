@@ -35,7 +35,7 @@
 // The response is the `UserView` shape, but we only need the
 // success / failure signal so the repository returns `void`.
 
-import 'api_client.dart' show ApiClient, ApiException;
+import '../api/api_client.dart' show ApiClient, ApiException;
 
 /// Domain port. Production wires `HttpAuthSyncRepository`; tests
 /// substitute a fake that records invocations + scripts
