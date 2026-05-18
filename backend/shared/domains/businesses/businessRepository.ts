@@ -425,22 +425,44 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
         }
 
         params.push(limit);
-        const limitParam = `$${params.length}`;
+        // `LIMIT $N` provides a type context that Postgres infers
+        // as `bigint`, so the cast is not strictly necessary today.
+        // We add `::int` anyway: (a) makes the contract explicit
+        // alongside the other positional casts in this query, and
+        // (b) keeps the SQL-shape regression test in
+        // `tests/businesses/pgBusinessRepository.test.ts` simple
+        // — assert every bound param appears with `$N::TYPE`.
+        const limitParam = `$${params.length}::int`;
 
         // The full-text predicate uses the `search_tsv` generated
         // column (migration 0017). When the tsvector path returns
         // zero rows for a short prefix, the trigram-indexed `name`
         // ILIKE predicate complements it — `OR` between the two so
         // either path can match.
-        const queryPredicate = trimmedQuery
-            ? `AND (
+        //
+        // IMPORTANT: $3 (the query string) MUST always appear in the
+        // SQL with an explicit `::text` cast — even when no query was
+        // supplied — because the params array always includes a value
+        // at index 3 (`trimmedQuery`, which is `null` when no `?q=`).
+        // Postgres derives the parameter count from the highest `$N`
+        // referenced in the SQL, but it also needs to assign a type
+        // to every positional slot implied by that count. If $3 is
+        // bound but not referenced, Postgres throws
+        //   `could not determine data type of parameter $3`
+        // on every category-only request like `?category=salon`.
+        // The fix is the `$3::text IS NULL OR (...)` short-circuit:
+        // when `trimmedQuery` is null, $3 is typed by the cast and
+        // the predicate evaluates to TRUE without filtering; when
+        // it's non-null, the FTS + trigram fallback applies as
+        // before. Same pattern as `$1::uuid IS NULL OR …` /
+        // `$2::text IS NULL OR …` above.
+        const queryPredicate = `AND ($3::text IS NULL OR (
                   search_tsv @@ websearch_to_tsquery(
                       'simple',
-                      ethiolink_unaccent_immutable($3)
+                      ethiolink_unaccent_immutable($3::text)
                   )
-                  OR lower(name) ILIKE '%' || lower($3) || '%'
-              )`
-            : '';
+                  OR lower(name) ILIKE '%' || lower($3::text) || '%'
+              ))`;
 
         const featuredOnlyPredicate = `
               AND ($5::boolean = false
@@ -456,7 +478,7 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
         const rankExpr = useRelevance
             ? `ts_rank(
                    search_tsv,
-                   websearch_to_tsquery('simple', ethiolink_unaccent_immutable($3))
+                   websearch_to_tsquery('simple', ethiolink_unaccent_immutable($3::text))
                )`
             : 'NULL::real';
 
@@ -471,7 +493,7 @@ export class PgBusinessRepository extends BaseRepository implements BusinessRepo
                     ? `COALESCE(featured_until, '-infinity'::timestamptz) DESC,
                        ts_rank(
                            search_tsv,
-                           websearch_to_tsquery('simple', ethiolink_unaccent_immutable($3))
+                           websearch_to_tsquery('simple', ethiolink_unaccent_immutable($3::text))
                        ) DESC,
                        rating_avg DESC,
                        created_at DESC,
