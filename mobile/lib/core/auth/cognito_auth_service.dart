@@ -19,13 +19,23 @@
 //      return a populated `AuthSession`.
 //
 //   On `signOut()`:
-//     * Clear the secure-storage entries.
+//     * Clear the secure-storage entries FIRST. This is the
+//       load-bearing local-sign-out action — even if the
+//       Cognito-side cookie teardown fails (network blip, plugin
+//       error, user closes the Custom Tab before redirect), the
+//       app still considers the user signed out and the
+//       LoginScreen renders.
 //     * Best-effort call to Cognito's `/logout` endpoint via
 //       `FlutterAppAuth.endSession` so the hosted-UI session cookie
-//       is torn down. If `endSession` throws (often the case on
-//       Cognito's non-standard logout endpoint shape), we swallow
-//       and log — local clear is the binding action; the cookie
-//       expiring naturally is acceptable for MVP.
+//       is torn down. The Cognito logout endpoint is NOT spec-OIDC
+//       compliant — it requires `client_id` as a query parameter
+//       (the OIDC end-session spec only mandates `id_token_hint`),
+//       so we thread the client id through
+//       `EndSessionRequest.additionalParameters`. Without that,
+//       Cognito serves "Required String parameter 'client_id' is
+//       not present" inside the Custom Tab. If `endSession` still
+//       throws for any other reason, we swallow and log — local
+//       clear has already happened above.
 //
 //   On `currentSession()`:
 //     * Read the persisted tokens. When `idTokenExpiresAt` is more
@@ -55,6 +65,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -145,19 +156,15 @@ class CognitoAuthService implements AuthService {
     // Clear local state FIRST so even if endSession blows up the
     // app considers the user signed out. The storage clear is the
     // binding action; the Cognito-side cookie teardown is best
-    // effort.
+    // effort. This ordering also satisfies the "logout failure
+    // still clears local session" contract — the LoginScreen
+    // appears on the next frame regardless of what Cognito does.
     await _clearStorage();
 
     if (idToken == null || idToken.isEmpty) return;
 
     try {
-      await _appAuth.endSession(
-        EndSessionRequest(
-          idTokenHint: idToken,
-          postLogoutRedirectUrl: config.logoutUri,
-          serviceConfiguration: _serviceConfig,
-        ),
-      );
+      await _appAuth.endSession(buildEndSessionRequest(idToken));
     } catch (e) {
       // Swallowed by design — the Cognito `/logout` endpoint shape
       // differs slightly from the OIDC standard and some
@@ -169,6 +176,34 @@ class CognitoAuthService implements AuthService {
       print('CognitoAuthService.signOut: endSession threw '
           '(swallowed): $e');
     }
+  }
+
+  /// Build the `EndSessionRequest` we send to Cognito's `/logout`
+  /// endpoint. Exposed for unit tests so the regression sentinel
+  /// — `additionalParameters['client_id']` must be present and
+  /// match `config.cognitoClientId` — can be pinned without
+  /// touching the `flutter_appauth` platform channel.
+  ///
+  /// Cognito's logout endpoint is not OIDC-spec-compliant: it
+  /// requires `client_id` as a query string parameter (the OIDC
+  /// end-session spec only mandates `id_token_hint`). Without
+  /// `client_id`, Cognito responds with
+  ///     "Required String parameter 'client_id' is not present"
+  /// inside the Custom Tab. flutter_appauth's `EndSessionRequest`
+  /// shape doesn't expose a top-level `clientId` field, so we
+  /// thread it through `additionalParameters` — the platform
+  /// implementation forwards those verbatim as query string
+  /// parameters.
+  @visibleForTesting
+  EndSessionRequest buildEndSessionRequest(String idTokenHint) {
+    return EndSessionRequest(
+      idTokenHint: idTokenHint,
+      postLogoutRedirectUrl: config.logoutUri,
+      serviceConfiguration: _serviceConfig,
+      additionalParameters: <String, String>{
+        'client_id': config.cognitoClientId,
+      },
+    );
   }
 
   @override
