@@ -24,9 +24,13 @@ import {
 import { CognitoAuthProvider } from '../../shared/adapters/auth/CognitoAuthProvider.js';
 import { loadSecretsThenConfig } from '../../shared/config/loadSecretsThenConfig.js';
 import { getPool } from '../../shared/db/pgClient.js';
+import { PgAdminActionRepository } from '../../shared/domains/admin/adminActionRepository.js';
 import { PgBusinessRepository } from '../../shared/domains/businesses/businessRepository.js';
 import { BusinessService } from '../../shared/domains/businesses/businessService.js';
-import { toBusinessOwnerView } from '../../shared/domains/businesses/businessView.js';
+import {
+    type BusinessRejection,
+    toBusinessOwnerView,
+} from '../../shared/domains/businesses/businessView.js';
 import { PgUserRepository } from '../../shared/domains/users/userRepository.js';
 import { UserService } from '../../shared/domains/users/userService.js';
 import { extractPrincipal } from '../../shared/http/principal.js';
@@ -44,6 +48,15 @@ const authProvider = new CognitoAuthProvider(config.cognito);
 const pool = getPool(config);
 const userService = new UserService(new PgUserRepository(pool));
 const businessService = new BusinessService(new PgBusinessRepository(pool));
+const adminActionRepository = new PgAdminActionRepository(pool);
+
+// How many admin actions to scan when looking for the most-recent
+// REJECT_BUSINESS row. 20 is comfortably above the typical
+// approve / reject / suspend / feature ping-pong a single business
+// goes through and well below the 200-row hard cap the repository
+// enforces. Newer actions sort first (`created_at DESC, id DESC`),
+// so the latest REJECT_BUSINESS always lands in the first page.
+const REJECT_LOOKBACK = 20;
 
 export const handler = async (
     event: APIGatewayProxyEvent,
@@ -68,7 +81,31 @@ export const handler = async (
             );
         }
 
-        return ok(toBusinessOwnerView(business));
+        // Surface the latest rejection note when the business is
+        // REJECTED. Other statuses leave `rejection: null` — there's
+        // no audit lookup on the happy path. The lookback is a
+        // bounded query (LIMIT 20) so cold-start cost is one extra
+        // round-trip only when an owner is staring at a rejected
+        // business waiting to fix it.
+        let rejection: BusinessRejection | null = null;
+        if (business.status === 'REJECTED') {
+            const actions = await adminActionRepository.listForTarget(
+                'business_profile',
+                business.id,
+                REJECT_LOOKBACK,
+            );
+            const latestReject = actions.find(
+                (a) => a.action === 'REJECT_BUSINESS',
+            );
+            if (latestReject) {
+                rejection = {
+                    reason: latestReject.notes,
+                    rejectedAt: latestReject.createdAt.toISOString(),
+                };
+            }
+        }
+
+        return ok(toBusinessOwnerView(business, { rejection }));
     } catch (err) {
         if (
             err instanceof TokenExpiredError ||

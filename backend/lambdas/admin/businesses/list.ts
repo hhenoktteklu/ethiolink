@@ -80,7 +80,16 @@ export const handler = async (
             { status: parsed.status },
             parsed.limit,
         );
-        return ok({ items: rows.map(toBusinessOwnerView) });
+        // Explicit arrow rather than `.map(toBusinessOwnerView)` —
+        // the view now accepts an optional `options` parameter for
+        // the `me.business` rejection-reason surface, and
+        // `Array.prototype.map` would otherwise pass `(value, index)`
+        // and the `index: number` would clash with the `options:
+        // { rejection? }` shape at compile time. Admin list doesn't
+        // need the rejection envelope (admin already sees status +
+        // can open detail for the audit trail) so we pass no
+        // options.
+        return ok({ items: rows.map((row) => toBusinessOwnerView(row)) });
     } catch (err) {
         if (
             err instanceof TokenExpiredError ||

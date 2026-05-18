@@ -27,7 +27,10 @@ const _testConfig = AppConfig(
   redirectUri: 'com.ethiolink.app:/oauthredirect',
 );
 
-OwnerBusinessView _sampleBusiness({String status = 'APPROVED'}) {
+OwnerBusinessView _sampleBusiness({
+  String status = 'APPROVED',
+  BusinessRejection? rejection,
+}) {
   return OwnerBusinessView(
     detail: const BusinessDetail(
       id: 'biz-1',
@@ -48,6 +51,7 @@ OwnerBusinessView _sampleBusiness({String status = 'APPROVED'}) {
     ),
     status: status,
     ownerUserId: 'owner-1',
+    rejection: rejection,
   );
 }
 
@@ -275,6 +279,80 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'renders the REJECTED banner with the admin note when '
+    'OwnerBusinessView.rejection carries a reason',
+    (tester) async {
+      // The me.business handler populates rejection from the most-
+      // recent REJECT_BUSINESS row in admin_actions. The banner
+      // surfaces the admin's note inline in a distinct sub-container
+      // so the owner sees the exact feedback to fix.
+      await _pump(
+        tester,
+        repo: _FakeRepo.value(_sampleBusiness(
+          status: 'REJECTED',
+          rejection: const BusinessRejection(
+            reason:
+                'Business license photo is unreadable. Please re-upload '
+                'a clearer scan.',
+            rejectedAt: '2026-05-13T09:00:00.000Z',
+          ),
+        )),
+        actionsRepo: _StubActionsRepo(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rejected'), findsOneWidget);
+      // The "Admin note" label sits above the reason copy in the
+      // sub-container.
+      expect(find.text('Admin note'), findsOneWidget);
+      expect(
+        find.textContaining('Business license photo is unreadable'),
+        findsOneWidget,
+      );
+      // The structural key the banner attaches to the note
+      // sub-container — guards against the layout regressing into
+      // a generic Container without the differentiating treatment.
+      expect(find.byKey(const Key('ownerRejectReason')), findsOneWidget);
+      // Submit-for-review is still available so the owner can
+      // resubmit after fixing the noted issue.
+      expect(
+        find.widgetWithText(FilledButton, 'Submit for review'),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'REJECTED banner falls back to generic copy when rejection.reason '
+    'is null (admin rejected without a note)',
+    (tester) async {
+      await _pump(
+        tester,
+        repo: _FakeRepo.value(_sampleBusiness(
+          status: 'REJECTED',
+          rejection: const BusinessRejection(
+            reason: null,
+            rejectedAt: '2026-05-13T09:00:00.000Z',
+          ),
+        )),
+        actionsRepo: _StubActionsRepo(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rejected'), findsOneWidget);
+      // Generic copy from the no-note branch.
+      expect(
+        find.textContaining('Fix the noted issues'),
+        findsOneWidget,
+      );
+      // The "Admin note" sub-container is hidden when there's no
+      // reason to show.
+      expect(find.byKey(const Key('ownerRejectReason')), findsNothing);
+      expect(find.text('Admin note'), findsNothing);
+    },
+  );
 
   testWidgets('DRAFT banner submit button calls the actions repo',
       (tester) async {

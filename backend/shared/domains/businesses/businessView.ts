@@ -53,6 +53,34 @@ export interface BusinessPublicView {
 export interface BusinessOwnerView extends BusinessPublicView {
     readonly ownerUserId: string;
     readonly status: BusinessStatus;
+    /**
+     * The most-recent rejection note, populated by
+     * `GET /v1/me/business` from the latest `REJECT_BUSINESS`
+     * row in `admin_actions` (the canonical rejection-reason
+     * store — see migration 0012 + Phase 5's "no dedicated
+     * `business_profiles.rejection_reason` column" scoping note
+     * in `admin_actions` doc-comment).
+     *
+     * Non-REJECTED businesses (DRAFT / PENDING_REVIEW / APPROVED
+     * / SUSPENDED) leave this `null`. The shape is non-optional
+     * so the mobile client can branch on a single field without
+     * juggling `undefined` vs `null`.
+     */
+    readonly rejection: BusinessRejection | null;
+}
+
+export interface BusinessRejection {
+    /**
+     * Free-text reason as typed by the admin in the admin SPA's
+     * `BusinessDetailPage` "Reason" textarea. May be `null` when
+     * the admin rejected without supplying a note (the admin
+     * SPA's reject dialog labels it "Reason (recommended)" —
+     * recommended but not required).
+     */
+    readonly reason: string | null;
+
+    /** ISO-8601 timestamp of the admin's reject action. */
+    readonly rejectedAt: string;
 }
 
 export function toBusinessPublicView(business: Business): BusinessPublicView {
@@ -79,10 +107,23 @@ export function toBusinessPublicView(business: Business): BusinessPublicView {
     });
 }
 
-export function toBusinessOwnerView(business: Business): BusinessOwnerView {
+/**
+ * Materialize a `BusinessOwnerView`. The optional `rejection`
+ * argument lets the caller (`GET /v1/me/business`) attach the
+ * latest `REJECT_BUSINESS` admin-action row to the response when
+ * the business is in `REJECTED`. Other callers (the
+ * `POST/PATCH/SUBMIT` mutations) leave it `null` — those return
+ * the freshly-mutated row and there's no need to fetch audit
+ * history.
+ */
+export function toBusinessOwnerView(
+    business: Business,
+    options: { rejection?: BusinessRejection | null } = {},
+): BusinessOwnerView {
     return Object.freeze<BusinessOwnerView>({
         ...toBusinessPublicView(business),
         ownerUserId: business.ownerUserId,
         status: business.status,
+        rejection: options.rejection ?? null,
     });
 }

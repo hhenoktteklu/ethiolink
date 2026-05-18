@@ -13,11 +13,44 @@
 
 import '../../browse/models/business_detail.dart';
 
+/// Latest rejection note from the backend. Non-null only when
+/// `OwnerBusinessView.status == 'REJECTED'`. The mobile owner
+/// dashboard surfaces this inline so the owner sees the admin's
+/// specific feedback instead of generic "fix the noted issues"
+/// copy.
+class BusinessRejection {
+  const BusinessRejection({required this.reason, required this.rejectedAt});
+
+  /// Free-text reason from the admin's reject dialog. May be
+  /// `null` when the admin rejected without supplying a note
+  /// (the admin SPA labels it "Reason (recommended)").
+  final String? reason;
+
+  /// ISO-8601 timestamp of the admin's reject action. Used by
+  /// the banner to render "Rejected on Jan 12" style copy.
+  final String rejectedAt;
+
+  factory BusinessRejection.fromJson(Map<String, dynamic> json) {
+    final reasonRaw = json['reason'];
+    final reason = reasonRaw is String && reasonRaw.isNotEmpty
+        ? reasonRaw
+        : null;
+    final rejectedAt = json['rejectedAt'];
+    if (rejectedAt is! String || rejectedAt.isEmpty) {
+      throw const FormatException(
+        'BusinessRejection.rejectedAt missing or non-string.',
+      );
+    }
+    return BusinessRejection(reason: reason, rejectedAt: rejectedAt);
+  }
+}
+
 class OwnerBusinessView {
   const OwnerBusinessView({
     required this.detail,
     required this.status,
     required this.ownerUserId,
+    this.rejection,
   });
 
   final BusinessDetail detail;
@@ -31,6 +64,13 @@ class OwnerBusinessView {
   final String status;
 
   final String ownerUserId;
+
+  /// Latest rejection details, populated by the backend's
+  /// `GET /v1/me/business` from the most-recent `REJECT_BUSINESS`
+  /// row in `admin_actions`. Non-null only when [status] is
+  /// `'REJECTED'`. The `_RejectedBanner` in `owner_tab.dart`
+  /// renders [BusinessRejection.reason] inline when present.
+  final BusinessRejection? rejection;
 
   /// Convenience getters — keep call sites concise without
   /// surfacing every `BusinessDetail` field as a one-liner here.
@@ -73,6 +113,14 @@ class OwnerBusinessView {
       );
     }
 
+    // Optional `rejection` object; only present when the status
+    // is REJECTED.
+    final rejectionJson = json['rejection'];
+    BusinessRejection? rejection;
+    if (rejectionJson is Map<String, dynamic>) {
+      rejection = BusinessRejection.fromJson(rejectionJson);
+    }
+
     // Reuse the existing `BusinessDetail.fromJson` to decode the
     // public-view fields. The owner endpoint returns a superset
     // so the same parse target applies.
@@ -80,6 +128,7 @@ class OwnerBusinessView {
       detail: BusinessDetail.fromJson(json),
       status: status,
       ownerUserId: ownerUserId,
+      rejection: rejection,
     );
   }
 }

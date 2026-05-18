@@ -751,11 +751,24 @@ class _SubmittableBannerState extends State<_SubmittableBanner> {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final (title, body) = widget.business.status == 'REJECTED'
+    final isRejected = widget.business.status == 'REJECTED';
+    // Pull the admin's reject-note off the owner-view (populated
+    // by GET /v1/me/business from the latest `REJECT_BUSINESS`
+    // row in admin_actions). When the admin supplied a note we
+    // surface it inline below the banner copy in a distinct
+    // sub-container so it reads as the admin's words, not app copy.
+    final rejection = widget.business.rejection;
+    final hasRejectReason = isRejected &&
+        rejection?.reason != null &&
+        rejection!.reason!.isNotEmpty;
+    final (title, body) = isRejected
         ? (
             'Rejected',
-            'Your previous submission was rejected. Fix the noted issues '
-                'and submit again.',
+            hasRejectReason
+                ? 'An admin rejected this submission. Read the note below, '
+                    'address the feedback, and submit again.'
+                : 'Your previous submission was rejected. Fix the noted issues '
+                    'and submit again.',
           )
         : (
             'Draft',
@@ -785,6 +798,41 @@ class _SubmittableBannerState extends State<_SubmittableBanner> {
                   color: colors.onTertiaryContainer,
                 ),
           ),
+          if (hasRejectReason) ...[
+            const SizedBox(height: 10),
+            Container(
+              key: const Key('ownerRejectReason'),
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: colors.surface,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: colors.outlineVariant),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Admin note',
+                    style:
+                        Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                            ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    rejection.reason!,
+                    style:
+                        Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: colors.onSurface,
+                            ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 8),
             Text(
