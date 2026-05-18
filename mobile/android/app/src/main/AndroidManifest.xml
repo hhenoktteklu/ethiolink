@@ -1,4 +1,6 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:label="ethiolink"
         android:name="${applicationName}"
@@ -25,6 +27,48 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!--
+            Cognito hosted-UI callback handler.
+
+            `flutter_appauth` declares its own
+            `net.openid.appauth.RedirectUriReceiverActivity` in the
+            plugin manifest with a scheme-only intent filter that
+            reads `${appAuthRedirectScheme}` from
+            `defaultConfig.manifestPlaceholders` (set to `ethiolink`
+            in `android/app/build.gradle.kts`). In practice that
+            filter alone wasn't routing the
+            `ethiolink://auth/callback` redirect Cognito issues —
+            Android returned the user to a closed Custom Tab and
+            AppAuth surfaced `UserCancelledException` because no
+            redirect Intent ever reached the app.
+
+            Re-declaring `RedirectUriReceiverActivity` here with a
+            full-URI filter (scheme + host + path) overrides the
+            plugin's contribution via the `tools:node="replace"`
+            merger directive and pins the exact callback shape from
+            `mobile/env/dev.json`
+            (`COGNITO_REDIRECT_URI=ethiolink://auth/callback`).
+
+            If the redirect URI ever changes, update BOTH this filter
+            AND the Cognito app client's callback list — they must
+            match exactly.
+        -->
+        <activity
+            android:name="net.openid.appauth.RedirectUriReceiverActivity"
+            android:exported="true"
+            tools:node="replace">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="ethiolink"
+                    android:host="auth"
+                    android:path="/callback"/>
+            </intent-filter>
+        </activity>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
