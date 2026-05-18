@@ -115,11 +115,11 @@ class AdminHomeScreen extends StatelessWidget {
                           );
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
+                            const SnackBar(
                               content: Text(
                                 'Admin console URL copied to clipboard.',
                               ),
-                              duration: const Duration(seconds: 3),
+                              duration: Duration(seconds: 3),
                             ),
                           );
                         },

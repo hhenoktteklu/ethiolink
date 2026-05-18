@@ -24,7 +24,6 @@
 // leaves the user signed out locally. The file's doc comment
 // records that contract.
 
-import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:ethiolink/core/auth/cognito_auth_service.dart';

@@ -77,7 +77,11 @@ void main() {
 
   group('configurations are distinct', () {
     test('every pair has a different primary palette', () {
-      const palettes = <Color>[
+      // `RoleExperience.customer.primarySeed` is a property access
+      // on a static const instance; reading it isn't itself a
+      // compile-time constant expression, so the list has to be
+      // `final` rather than `const`.
+      final palettes = <Color>[
         RoleExperience.customer.primarySeed,
         RoleExperience.businessOwner.primarySeed,
         RoleExperience.admin.primarySeed,
