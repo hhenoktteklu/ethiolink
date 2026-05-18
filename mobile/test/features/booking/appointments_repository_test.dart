@@ -154,7 +154,12 @@ void main() {
       expect(req.method, 'POST');
       expect(req.path, '/v1/appointments');
       // Authorization attached by the interceptor.
-      expect(req.headers['Authorization'], 'Bearer fake-token');
+      // Bare ID token — no `Bearer ` prefix. The backend API
+      // Gateway REST COGNITO_USER_POOLS authorizer validates the
+      // raw Authorization-header value as a JWT; a `Bearer eyJ…`
+      // value fails to parse and is rejected with 401 before the
+      // Lambda runs. See `api_client.dart`'s header rationale.
+      expect(req.headers['Authorization'], 'fake-token');
       // Body shape.
       final body = json.decode(adapter.capturedBodies[0]) as Map<String, dynamic>;
       expect(body['staffId'], 'stf-1');

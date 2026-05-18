@@ -15,13 +15,48 @@
 //     request goes out unauthenticated and the API serves it via
 //     its `authorization = "NONE"` route handler.
 //
-//   * Authenticated endpoints attach
-//     `Authorization: Bearer <idToken>`. The token comes from the
-//     same `flutter_secure_storage` cache `CognitoAuthService`
-//     writes — we read by key, not by inversion-of-control through
-//     `AuthService`, to keep the interceptor synchronous-feeling at
-//     the call site (it still issues the storage read async; the
-//     `onRequest` handler is async-aware).
+//   * Authenticated endpoints attach the Cognito ID token directly
+//     as the Authorization header value — `Authorization: <idToken>`,
+//     with NO `Bearer ` scheme prefix. The backend authorizer is an
+//     API Gateway REST API `COGNITO_USER_POOLS` authorizer (see
+//     `infra/terraform/modules/api-gateway/main.tf` —
+//     `aws_api_gateway_authorizer.cognito` with `identity_source =
+//     "method.request.header.Authorization"` and no
+//     `authorizationScopes` on the methods). That authorizer
+//     extracts the verbatim Authorization-header value and validates
+//     it as a JWT against the configured user pool. When the value
+//     starts with `Bearer ` the authorizer treats the entire
+//     `Bearer eyJ...` string as the candidate JWT, fails to parse
+//     it (JWTs start with `eyJ`, not `Bearer `), and rejects the
+//     request with 401 before the Lambda ever runs. The mobile app
+//     was hitting exactly that on every authenticated route
+//     (`/v1/me/appointments`, owner inbox, etc.) — CloudWatch had
+//     no Lambda invocations because API Gateway short-circuited at
+//     the authorizer. The fix is to send the raw ID token. The
+//     Cognito hosted-UI `/oauth2/userInfo` endpoint, which DOES
+//     follow the OAuth 2.0 bearer-token convention, takes the
+//     access token with the `Bearer ` prefix — but `CognitoAuthService`
+//     calls that endpoint directly via `flutter_appauth`'s
+//     `userinfoEndpoint` helper, not through this interceptor, so
+//     dropping the prefix here has no impact on it.
+//
+//   * Token type — ID token (not access token). With
+//     `authorizationScopes` unset on the methods (which it is —
+//     see API Gateway module Terraform), the COGNITO_USER_POOLS
+//     authorizer expects the ID token; the `token_use` claim is
+//     `id` for these. Access tokens (`token_use=access`) are only
+//     required when the method declares specific OAuth scopes the
+//     authorizer must enforce. We keep the access token in secure
+//     storage anyway (see `cognito_auth_service.dart`'s
+//     `cognito.access_token` key) for any future userinfo / scope-
+//     gated call, but ApiClient never reads it.
+//
+//   The token comes from the same `flutter_secure_storage` cache
+//   `CognitoAuthService` writes — we read by key, not by
+//   inversion-of-control through `AuthService`, to keep the
+//   interceptor synchronous-feeling at the call site (it still
+//   issues the storage read async; the `onRequest` handler is
+//   async-aware).
 //
 //   * 401 retry — when the API rejects an authenticated request,
 //     the interceptor asks the `TokenProvider` to refresh once,
@@ -246,11 +281,14 @@ class AuthTokenInterceptor extends Interceptor {
   ) async {
     // Don't overwrite an explicit Authorization header — the
     // caller may have a reason (e.g. forwarding a different
-    // bearer in a test). Otherwise attach when a token exists.
+    // token in a test). Otherwise attach the bare Cognito ID
+    // token when one exists (see header rationale in the file
+    // docs — API Gateway REST `COGNITO_USER_POOLS` rejects a
+    // `Bearer eyJ…` value with 401 before the Lambda runs).
     if (!options.headers.containsKey('Authorization')) {
       final token = await _tokenProvider.currentIdToken();
       if (token != null && token.isNotEmpty) {
-        options.headers['Authorization'] = 'Bearer $token';
+        options.headers['Authorization'] = token;
       }
     }
     handler.next(options);
@@ -280,7 +318,8 @@ class AuthTokenInterceptor extends Interceptor {
     final retryOptions = err.requestOptions.copyWith(
       headers: <String, dynamic>{
         ...err.requestOptions.headers,
-        'Authorization': 'Bearer $fresh',
+        // Bare ID token, no `Bearer ` prefix — see file docs.
+        'Authorization': fresh,
       },
       extra: <String, dynamic>{
         ...err.requestOptions.extra,
