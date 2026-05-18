@@ -347,6 +347,7 @@ class ApiException implements Exception {
     this.statusCode,
     this.isNetworkError = false,
     this.apiErrorCode,
+    this.apiErrorDetails,
     this.cause,
   });
 
@@ -361,17 +362,28 @@ class ApiException implements Exception {
   /// domain-specific copy.
   final String? apiErrorCode;
 
+  /// Server-side `{error: {details: {...}}}` payload, when
+  /// present. Free-shape per-endpoint — e.g. the submit-business
+  /// 400 returns `{missing: [<field>, ...]}` so the owner can be
+  /// told exactly which fields are blocking. Repositories that
+  /// know an endpoint's shape parse the relevant keys; the raw
+  /// map stays here so unforeseen surfaces don't need a new
+  /// release of the client.
+  final Map<String, dynamic>? apiErrorDetails;
+
   final Object? cause;
 
   factory ApiException.fromDio(DioException err) {
     final status = err.response?.statusCode;
     if (status != null) {
       // 4xx / 5xx with a parsed response. Try to pull
-      // `body.error.code` + `body.error.message` per the OpenAPI
-      // Error schema. The interceptor / Dio parses JSON automatically.
+      // `body.error.code` + `body.error.message` + `body.error.details`
+      // per the OpenAPI Error schema. The interceptor / Dio parses
+      // JSON automatically.
       final data = err.response?.data;
       String? code;
       String? serverMessage;
+      Map<String, dynamic>? errorDetails;
       if (data is Map<String, dynamic>) {
         final errBody = data['error'];
         if (errBody is Map<String, dynamic>) {
@@ -379,6 +391,8 @@ class ApiException implements Exception {
           if (c is String && c.isNotEmpty) code = c;
           final m = errBody['message'];
           if (m is String && m.isNotEmpty) serverMessage = m;
+          final d = errBody['details'];
+          if (d is Map<String, dynamic>) errorDetails = d;
         }
       }
       return ApiException(
@@ -386,6 +400,7 @@ class ApiException implements Exception {
             'HTTP $status from ${err.requestOptions.path}.',
         statusCode: status,
         apiErrorCode: code,
+        apiErrorDetails: errorDetails,
         cause: err,
       );
     }

@@ -211,12 +211,26 @@ class BusinessActionFailure implements Exception {
     required this.message,
     this.statusCode,
     this.apiErrorCode,
+    this.missingFields = const <String>[],
   });
 
   final BusinessActionFailureKind kind;
   final String message;
   final int? statusCode;
   final String? apiErrorCode;
+
+  /// Server-supplied list of field names that blocked the
+  /// `submitBusiness` call, parsed from `error.details.missing[]`
+  /// on a 400 VALIDATION_ERROR response. The submit Lambda
+  /// (`backend/lambdas/businesses/submit.ts`) returns this for
+  /// `BusinessIncompleteForSubmitError`; field names mirror
+  /// `missingForSubmit` in `businessService.ts` — currently
+  /// `name`, `description`, `city`, `categoryId`.
+  ///
+  /// Owner UI uses this to render a structured "Complete these
+  /// before submitting" checklist instead of the vague raw
+  /// message text. Empty list for any other failure kind.
+  final List<String> missingFields;
 
   factory BusinessActionFailure.fromApi(ApiException e) {
     final status = e.statusCode;
@@ -239,11 +253,28 @@ class BusinessActionFailure implements Exception {
     } else {
       k = BusinessActionFailureKind.other;
     }
+    // Parse `details.missing[]` when the backend supplied it.
+    // Only relevant on validation errors today (submit-business),
+    // but the parse is defensive — other endpoints can adopt the
+    // same shape without touching the mobile client.
+    final details = e.apiErrorDetails;
+    final missingFields = <String>[];
+    if (details != null) {
+      final raw = details['missing'];
+      if (raw is List) {
+        for (final entry in raw) {
+          if (entry is String && entry.isNotEmpty) {
+            missingFields.add(entry);
+          }
+        }
+      }
+    }
     return BusinessActionFailure(
       kind: k,
       message: e.message,
       statusCode: status,
       apiErrorCode: code,
+      missingFields: List.unmodifiable(missingFields),
     );
   }
 

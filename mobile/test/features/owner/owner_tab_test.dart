@@ -30,15 +30,18 @@ const _testConfig = AppConfig(
 OwnerBusinessView _sampleBusiness({
   String status = 'APPROVED',
   BusinessRejection? rejection,
+  String? name = 'Sunset Salon',
+  String? descriptionEn = 'Best in town.',
+  String? city = 'Addis Ababa',
 }) {
   return OwnerBusinessView(
-    detail: const BusinessDetail(
+    detail: BusinessDetail(
       id: 'biz-1',
       categoryId: 'cat-1',
-      name: 'Sunset Salon',
-      descriptionEn: 'Best in town.',
+      name: name,
+      descriptionEn: descriptionEn,
       descriptionAm: null,
-      city: 'Addis Ababa',
+      city: city,
       addressLine: null,
       latitude: null,
       longitude: null,
@@ -279,6 +282,123 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets(
+    'DRAFT with missing required fields renders the checklist + disables submit',
+    (tester) async {
+      // All three Profile-required fields blanked. The banner
+      // should surface a structured "Complete these before
+      // submitting" block (NOT the vague backend message) and
+      // the Submit-for-review button should be disabled.
+      await _pump(
+        tester,
+        repo: _FakeRepo.value(_sampleBusiness(
+          status: 'DRAFT',
+          name: null,
+          descriptionEn: null,
+          city: null,
+        )),
+        actionsRepo: _StubActionsRepo(),
+      );
+      await tester.pumpAndSettle();
+
+      // The structural key the checklist attaches.
+      expect(find.byKey(const Key('ownerSubmitChecklist')), findsOneWidget);
+      // Heading.
+      expect(
+        find.text('Complete these before submitting'),
+        findsOneWidget,
+      );
+      // Section + every blocked field shown.
+      expect(find.text('Profile'), findsOneWidget);
+      expect(find.text('Business name'), findsOneWidget);
+      expect(find.text('Description'), findsOneWidget);
+      expect(find.text('City'), findsOneWidget);
+      // Profile dashboard card carries the "Missing info" chip.
+      expect(find.byKey(const Key('ownerCardMissingChip')), findsOneWidget);
+      // Submit button is rendered but disabled (onPressed: null).
+      final btn = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Submit for review'),
+      );
+      expect(btn.onPressed, isNull);
+      // The vague backend-style message text must NOT appear —
+      // that's the whole point of this commit.
+      expect(
+        find.textContaining('missing required fields for submission'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'DRAFT with partial missing renders only the affected checklist rows',
+    (tester) async {
+      // Only City missing. Owner sees just the City row under
+      // Profile; no Business-name / Description rows.
+      await _pump(
+        tester,
+        repo: _FakeRepo.value(_sampleBusiness(
+          status: 'DRAFT',
+          city: '',
+        )),
+        actionsRepo: _StubActionsRepo(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('ownerSubmitChecklist')), findsOneWidget);
+      expect(find.text('City'), findsOneWidget);
+      expect(find.text('Business name'), findsNothing);
+      expect(find.text('Description'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'fully-populated DRAFT shows no checklist + enabled submit + no chip',
+    (tester) async {
+      await _pump(
+        tester,
+        repo: _FakeRepo.value(_sampleBusiness(status: 'DRAFT')),
+        actionsRepo: _StubActionsRepo(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('ownerSubmitChecklist')), findsNothing);
+      expect(find.byKey(const Key('ownerCardMissingChip')), findsNothing);
+      final btn = tester.widget<FilledButton>(
+        find.widgetWithText(FilledButton, 'Submit for review'),
+      );
+      expect(btn.onPressed, isNotNull);
+    },
+  );
+
+  testWidgets(
+    'tapping disabled Submit on incomplete DRAFT does NOT call the actions repo',
+    (tester) async {
+      final actions = _StubActionsRepo();
+      await _pump(
+        tester,
+        repo: _FakeRepo.value(_sampleBusiness(
+          status: 'DRAFT',
+          city: '',
+        )),
+        actionsRepo: actions,
+      );
+      await tester.pumpAndSettle();
+
+      // Tap the button anyway — disabled buttons absorb the tap;
+      // the repo must not see a submit call. This is the
+      // defense-in-depth check: a bug that re-enables the
+      // button programmatically (e.g. a future refactor) would
+      // still fail this test because the readiness gate in
+      // `_submit` is the failsafe.
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Submit for review'),
+      );
+      await tester.pumpAndSettle();
+
+      expect(actions.lastSubmitId, isNull);
+    },
+  );
 
   testWidgets(
     'renders the REJECTED banner with the admin note when '

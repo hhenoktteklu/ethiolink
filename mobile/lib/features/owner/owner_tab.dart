@@ -41,6 +41,7 @@ import 'owner_profile_screen.dart';
 import 'owner_promote_screen.dart';
 import 'owner_services_screen.dart';
 import 'owner_staff_screen.dart';
+import 'submit_readiness.dart';
 
 class OwnerTab extends StatefulWidget {
   const OwnerTab({
@@ -461,6 +462,15 @@ class OwnerDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    // Compute submit-readiness once at the dashboard level so the
+    // banner AND any cards that visually reflect blockers (today
+    // only the Profile card) share the same source of truth.
+    // Other statuses (PENDING_REVIEW / APPROVED / SUSPENDED) don't
+    // render a submit affordance; the chip is silent for them
+    // even if readiness somehow flags issues.
+    final readiness = business.isSubmittable
+        ? evaluateSubmitReadiness(business)
+        : const SubmitReadiness(<SubmitReadinessIssue>[]);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -477,6 +487,17 @@ class OwnerDashboard extends StatelessWidget {
         for (final kind in _cards) ...[
           _DashboardCard(
             spec: _specFor(kind, l10n),
+            // Only the Profile card has a submit-gate today
+            // (backend's missingForSubmit lists name + description
+            // + city + categoryId, all owned by the profile
+            // screen). Services / Staff / Availability cards
+            // are NOT submit gates server-side, so we don't
+            // dangle a misleading "Missing info" chip on them.
+            // If a future commit promotes one of those to a
+            // submit gate, extend submit_readiness.dart AND
+            // mirror the section name here.
+            incomplete: kind == _DashboardCardKind.profile &&
+                readiness.blockedSections.contains('Profile'),
             onTap: () => _openCard(context, kind),
           ),
           const SizedBox(height: 8),
@@ -731,7 +752,54 @@ class _SubmittableBannerState extends State<_SubmittableBanner> {
   bool _busy = false;
   BusinessActionFailure? _error;
 
+  /// Local pre-flight: if the OwnerBusinessView already has
+  /// blocking gaps we render the checklist + disable the submit
+  /// button INSTEAD of issuing a network call we know will fail.
+  /// Server-side defense-in-depth fires through `_error` if a
+  /// concurrent edit cleared a field between fetches.
+  SubmitReadiness get _readiness =>
+      evaluateSubmitReadiness(widget.business);
+
+  /// Issue list to render. Prefers the server's `missing[]` when
+  /// present (handles the rare race where the dashboard's cached
+  /// view is fresher than the server's). Falls back to the local
+  /// readiness when only one side flagged the issue.
+  List<SubmitReadinessIssue> get _issuesToRender {
+    final err = _error;
+    if (err != null && err.kind == BusinessActionFailureKind.validation) {
+      final mapped = <SubmitReadinessIssue>[];
+      for (final key in err.missingFields) {
+        final issue = issueForBackendField(key);
+        if (issue != null) {
+          mapped.add(issue);
+        } else {
+          // Unknown field — surface the raw key so we don't
+          // silently hide a new backend gate. The dashboard
+          // section falls back to "Other".
+          mapped.add(SubmitReadinessIssue(
+            backendFieldKey: key,
+            section: 'Other',
+            fieldLabel: key,
+          ));
+        }
+      }
+      if (mapped.isNotEmpty) return mapped;
+    }
+    return _readiness.issues;
+  }
+
   Future<void> _submit() async {
+    // Pre-flight. If anything's missing locally don't even hit
+    // the backend — the structured checklist is already on
+    // screen via `_issuesToRender`. (The button is disabled in
+    // this state, but this guard is also the failsafe for any
+    // future programmatic invocation.)
+    if (!_readiness.isReady) {
+      // Clear any previous server-side error; the local
+      // readiness already covers it.
+      setState(() => _error = null);
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
@@ -833,7 +901,25 @@ class _SubmittableBannerState extends State<_SubmittableBanner> {
               ),
             ),
           ],
-          if (_error != null) ...[
+          // Structured "Complete these before submitting" checklist.
+          // Renders when the local readiness flags any blocker OR
+          // when a server-side 400 surfaces `details.missing[]`.
+          // Replaces the previous vague "Business is missing
+          // required fields for submission" inline error — the
+          // checklist names every blocking section + field.
+          if (_issuesToRender.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            _SubmitChecklistBlock(
+              issues: _issuesToRender,
+              key: const Key('ownerSubmitChecklist'),
+            ),
+          ] else if (_error != null) ...[
+            // Non-validation failures (network / server / etc.)
+            // still surface inline so the owner knows something
+            // didn't go through. validation-kind errors with no
+            // parsed missing[] also fall here as a defensive
+            // fallback, though in practice the submit Lambda
+            // always populates the array.
             const SizedBox(height: 8),
             Text(
               _errorCopy(_error!),
@@ -846,7 +932,11 @@ class _SubmittableBannerState extends State<_SubmittableBanner> {
           Align(
             alignment: Alignment.centerRight,
             child: FilledButton.icon(
-              onPressed: _busy ? null : _submit,
+              // Submit is disabled when local readiness flags
+              // anything — clicking would just round-trip a 400.
+              // Once the owner fixes every blocker the button
+              // re-enables.
+              onPressed: (_busy || !_readiness.isReady) ? null : _submit,
               icon: _busy
                   ? const SizedBox(
                       width: 16,
@@ -899,9 +989,20 @@ class _DashboardCardSpec {
 }
 
 class _DashboardCard extends StatelessWidget {
-  const _DashboardCard({required this.spec, required this.onTap});
+  const _DashboardCard({
+    required this.spec,
+    required this.onTap,
+    this.incomplete = false,
+  });
   final _DashboardCardSpec spec;
   final VoidCallback onTap;
+
+  /// When true, the card surfaces a "Missing info" chip next to
+  /// the label so the owner can spot the section that's blocking
+  /// submit-for-review without expanding the banner checklist.
+  /// Today only the Profile card sets this; see the dashboard
+  /// build comment.
+  final bool incomplete;
 
   @override
   Widget build(BuildContext context) {
@@ -922,9 +1023,21 @@ class _DashboardCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      spec.label,
-                      style: Theme.of(context).textTheme.titleMedium,
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            spec.label,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        if (incomplete) ...[
+                          const SizedBox(width: 8),
+                          _MissingInfoChip(
+                            key: const Key('ownerCardMissingChip'),
+                          ),
+                        ],
+                      ],
                     ),
                     Text(
                       spec.blurb,
@@ -939,6 +1052,124 @@ class _DashboardCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small warning chip the dashboard renders next to a section
+/// label when that section's fields are blocking submit-for-
+/// review. Pairs with `_SubmitChecklistBlock` below — chip
+/// surfaces the section identity, checklist enumerates the
+/// specific fields.
+class _MissingInfoChip extends StatelessWidget {
+  // ignore: unused_element_parameter
+  const _MissingInfoChip({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: colors.errorContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        'Missing info',
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: colors.onErrorContainer,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+      ),
+    );
+  }
+}
+
+/// Structured "Complete these before submitting" checklist
+/// rendered inside `_SubmittableBanner` when local readiness or
+/// the backend's `details.missing[]` array flags blockers.
+/// Groups issues by section so the owner sees the same shape
+/// regardless of where the gap was caught (local pre-flight or
+/// server defense).
+class _SubmitChecklistBlock extends StatelessWidget {
+  // ignore: unused_element_parameter
+  const _SubmitChecklistBlock({required this.issues, super.key});
+
+  final List<SubmitReadinessIssue> issues;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    // Group by section, preserve first-seen order so the
+    // Profile section always sits at the top of the checklist.
+    final grouped = <String, List<SubmitReadinessIssue>>{};
+    for (final issue in issues) {
+      grouped.putIfAbsent(issue.section, () => <SubmitReadinessIssue>[])
+          .add(issue);
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: colors.error.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Complete these before submitting',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: colors.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+          const SizedBox(height: 6),
+          for (final entry in grouped.entries) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                entry.key,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: colors.onErrorContainer,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.2,
+                    ),
+              ),
+            ),
+            for (final issue in entry.value)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, top: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Icon(
+                        Icons.radio_button_unchecked,
+                        size: 14,
+                        color: colors.onErrorContainer,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        issue.fieldLabel,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colors.onErrorContainer,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ],
       ),
     );
   }
