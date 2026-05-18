@@ -15,18 +15,29 @@ build/
 *.iws
 
 # Generated / per-platform scaffolding.
-# The `flutter create` artifacts for each native target (android/, ios/,
+# The `flutter create` artifacts for each native target (ios/,
 # linux/, macos/, web/, windows/) are NOT committed in this scaffold —
 # `flutter create .` regenerates them locally on the operator's machine
 # alongside the platform SDK they target. Commit only when a
 # platform-specific override is required (e.g. iOS Info.plist edits for
 # Cognito deep-link callbacks; that lives in a follow-up commit).
-android/
 ios/
 linux/
 macos/
 web/
 windows/
+
+# Android — we DO commit the project / app gradle files because they
+# carry project-specific overrides (the `appAuthRedirectScheme`
+# manifest placeholder, future flavor wiring, signing config). The
+# usual transient Android build artifacts stay ignored:
+android/.gradle/
+android/captures/
+android/local.properties
+android/key.properties
+android/**/build/
+android/**/GeneratedPluginRegistrant.java
+android/**/*.iml
 
 # Local env files. The `dart-define-from-file` JSON files at
 # `env/*.json` carry secrets-shaped values (Cognito client id) and
