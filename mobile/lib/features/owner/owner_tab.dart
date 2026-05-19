@@ -53,8 +53,16 @@ class OwnerTab extends StatefulWidget {
     this.availabilityRepositoryOverride,
     this.bookingsRepositoryOverride,
     this.featuringRepositoryOverride,
+    this.mode = OwnerDashboardMode.full,
     super.key,
   });
+
+  /// Which portion of the owner dashboard to render. The mobile
+  /// role-nav uses `OwnerDashboardScreen` (mode: dashboardOnly)
+  /// and `OwnerBusinessSetupScreen` (mode: setupOnly) as the
+  /// owner's top-level tabs; legacy callers + the existing tests
+  /// default to `full` for backward compatibility.
+  final OwnerDashboardMode mode;
 
   /// Test seam. Production builds an `HttpOwnerBusinessRepository`
   /// over the `AppConfigScope` `AppConfig`.
@@ -162,6 +170,7 @@ class _OwnerTabState extends State<OwnerTab> {
             }
             return OwnerDashboard(
               business: snapshot.data!,
+              mode: widget.mode,
               actionsRepository: _actionsRepo!,
               categoriesRepositoryOverride:
                   widget.categoriesRepositoryOverride,
@@ -393,18 +402,35 @@ class _GenericErrorBanner extends StatelessWidget {
 // OwnerDashboard — placeholder for the APPROVED state
 // ---------------------------------------------------------------------------
 
-/// Renders the five entry-card hub. Each card is a placeholder
-/// for a follow-up commit; tap → SnackBar pointing at the
-/// upcoming work. Status-aware: PENDING_REVIEW / REJECTED /
-/// SUSPENDED render a status banner above the cards explaining
-/// the current state. DRAFT / REJECTED render a banner with a
-/// "Submit for review" action that hits
-/// `POST /v1/businesses/{id}/submit`.
+/// Toggles which portion of the owner dashboard renders. The
+/// role-nav refactor split "OwnerTab" into three top-level tabs:
+///
+///   * Dashboard tab    → `OwnerDashboardMode.dashboardOnly`
+///                        Status banner / submit checklist /
+///                        rejection note / submit CTA.
+///   * Business Setup   → `OwnerDashboardMode.setupOnly`
+///                        Profile / Services / Staff /
+///                        Availability / Promote cards only.
+///   * (legacy / tests) → `OwnerDashboardMode.full`
+///                        Both halves stacked, the original
+///                        OwnerTab behaviour. Kept so existing
+///                        owner_tab_test.dart cases keep passing
+///                        without per-test mode plumbing.
+enum OwnerDashboardMode { dashboardOnly, setupOnly, full }
+
+/// Renders the owner dashboard. Status-aware: PENDING_REVIEW /
+/// REJECTED / SUSPENDED render a status banner; DRAFT / REJECTED
+/// surface the "Submit for review" CTA + submit-readiness
+/// checklist. The setup cards (Profile / Services / Staff /
+/// Availability / Promote / Bookings) sit below the status block.
+/// The [mode] field controls which of those two surfaces actually
+/// renders.
 class OwnerDashboard extends StatelessWidget {
   const OwnerDashboard({
     required this.business,
     required this.actionsRepository,
     required this.onChanged,
+    this.mode = OwnerDashboardMode.full,
     this.categoriesRepositoryOverride,
     this.servicesRepositoryOverride,
     this.staffRepositoryOverride,
@@ -413,6 +439,11 @@ class OwnerDashboard extends StatelessWidget {
     this.featuringRepositoryOverride,
     super.key,
   });
+
+  /// Selects which subset of the dashboard renders. Defaults to
+  /// `full` for backward compatibility — existing OwnerTab tests
+  /// expect both surfaces in one screen.
+  final OwnerDashboardMode mode;
   final OwnerBusinessView business;
   final BusinessActionsRepository actionsRepository;
 
@@ -471,37 +502,52 @@ class OwnerDashboard extends StatelessWidget {
     final readiness = business.isSubmittable
         ? evaluateSubmitReadiness(business)
         : const SubmitReadiness(<SubmitReadinessIssue>[]);
+    final showStatus = mode != OwnerDashboardMode.setupOnly;
+    final showSetupCards = mode != OwnerDashboardMode.dashboardOnly;
+    // In dashboardOnly mode the cards are gone, so the Bookings
+    // card (which previously surfaced owner-side appointments) is
+    // also redundant — the role-nav Appointments tab covers it.
+    // In setupOnly we drop the Bookings card too, so cards in
+    // both non-full modes match the "Setup" mental model.
+    final cards = mode == OwnerDashboardMode.full
+        ? _cards
+        : _cards
+            .where((k) => k != _DashboardCardKind.bookings)
+            .toList(growable: false);
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        _BusinessHeader(business: business),
-        const SizedBox(height: 8),
-        if (business.isReadOnly) _PendingBanner(status: business.status),
-        if (business.isSubmittable)
-          _SubmittableBanner(
-            business: business,
-            actionsRepository: actionsRepository,
-            onSubmitted: onChanged,
-          ),
-        const SizedBox(height: 16),
-        for (final kind in _cards) ...[
-          _DashboardCard(
-            spec: _specFor(kind, l10n),
-            // Only the Profile card has a submit-gate today
-            // (backend's missingForSubmit lists name + description
-            // + city + categoryId, all owned by the profile
-            // screen). Services / Staff / Availability cards
-            // are NOT submit gates server-side, so we don't
-            // dangle a misleading "Missing info" chip on them.
-            // If a future commit promotes one of those to a
-            // submit gate, extend submit_readiness.dart AND
-            // mirror the section name here.
-            incomplete: kind == _DashboardCardKind.profile &&
-                readiness.blockedSections.contains('Profile'),
-            onTap: () => _openCard(context, kind),
-          ),
+        if (showStatus) ...[
+          _BusinessHeader(business: business),
           const SizedBox(height: 8),
+          if (business.isReadOnly) _PendingBanner(status: business.status),
+          if (business.isSubmittable)
+            _SubmittableBanner(
+              business: business,
+              actionsRepository: actionsRepository,
+              onSubmitted: onChanged,
+            ),
         ],
+        if (showStatus && showSetupCards) const SizedBox(height: 16),
+        if (showSetupCards)
+          for (final kind in cards) ...[
+            _DashboardCard(
+              spec: _specFor(kind, l10n),
+              // Only the Profile card has a submit-gate today
+              // (backend's missingForSubmit lists name + description
+              // + city + categoryId, all owned by the profile
+              // screen). Services / Staff / Availability cards
+              // are NOT submit gates server-side, so we don't
+              // dangle a misleading "Missing info" chip on them.
+              // If a future commit promotes one of those to a
+              // submit gate, extend submit_readiness.dart AND
+              // mirror the section name here.
+              incomplete: kind == _DashboardCardKind.profile &&
+                  readiness.blockedSections.contains('Profile'),
+              onTap: () => _openCard(context, kind),
+            ),
+            const SizedBox(height: 8),
+          ],
       ],
     );
   }

@@ -280,8 +280,31 @@ void main() {
   // ----------------------------------------------------------------
 
   testWidgets(
-    'BUSINESS_OWNER session: Browse / Bookings / My Business / Profile nav, '
-    '"Manage your business" hero, owner banner',
+    'CUSTOMER session: Discover / My Bookings / Profile — NO owner / admin tabs',
+    (tester) async {
+      await _pumpBrowse(
+        tester,
+        repository: FakeCategoriesRepository.value(<Category>[]),
+        session: _sessionWithRole('CUSTOMER'),
+      );
+      await tester.pumpAndSettle();
+
+      // Three-tab customer nav with the new labels.
+      expect(find.text('Discover'), findsOneWidget);
+      expect(find.text('My Bookings'), findsOneWidget);
+      expect(find.text('Profile'), findsOneWidget);
+      // None of the owner / admin tabs leak.
+      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Setup'), findsNothing);
+      expect(find.text('Appointments'), findsNothing);
+      expect(find.text('Review'), findsNothing);
+      expect(find.text('Businesses'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'BUSINESS_OWNER session: Dashboard / Setup / Appointments / Profile — '
+    'NO customer Discover or My Bookings',
     (tester) async {
       await _pumpBrowse(
         tester,
@@ -291,52 +314,24 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Four-tab nav.
-      expect(find.text('Browse'), findsOneWidget);
-      expect(find.text('Bookings'), findsOneWidget);
-      expect(find.text('My Business'), findsOneWidget);
+      // Four-tab owner nav.
+      expect(find.text('Dashboard'), findsOneWidget);
+      expect(find.text('Setup'), findsOneWidget);
+      expect(find.text('Appointments'), findsOneWidget);
       expect(find.text('Profile'), findsOneWidget);
-      // ADMIN-only tab is hidden.
-      expect(find.text('Admin'), findsNothing);
-      // Role-driven hero on Browse.
-      expect(find.text('Manage your business'), findsOneWidget);
-      // Owner context banner — present for owner, hidden for
-      // customer (asserted below).
-      expect(
-        find.textContaining('Owner view'),
-        findsOneWidget,
-      );
+      // Customer tabs absent — owner is a manage-your-business
+      // surface, not a marketplace surface.
+      expect(find.text('Discover'), findsNothing);
+      expect(find.text('My Bookings'), findsNothing);
+      // Admin tabs absent.
+      expect(find.text('Review'), findsNothing);
+      expect(find.text('Businesses'), findsNothing);
     },
   );
 
   testWidgets(
-    'CUSTOMER session: Browse / Bookings / Profile nav, '
-    '"Find services near you" hero, no role banner',
-    (tester) async {
-      await _pumpBrowse(
-        tester,
-        repository: FakeCategoriesRepository.value(<Category>[]),
-        session: _sessionWithRole('CUSTOMER'),
-      );
-      await tester.pumpAndSettle();
-
-      // Three-tab customer nav.
-      expect(find.text('Browse'), findsOneWidget);
-      expect(find.text('Bookings'), findsOneWidget);
-      expect(find.text('Profile'), findsOneWidget);
-      expect(find.text('My Business'), findsNothing);
-      expect(find.text('Admin'), findsNothing);
-      // Customer hero copy + no owner / admin banner — the
-      // marketplace IS the customer's context.
-      expect(find.text('Find services near you'), findsOneWidget);
-      expect(find.textContaining('Owner view'), findsNothing);
-      expect(find.textContaining('Operator view'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'ADMIN session: Review / Admin / Profile nav, no customer Browse, '
-    'Review queue is the landing tab',
+    'ADMIN session: Review / Businesses / Profile — '
+    'NO customer Discover or My Bookings',
     (tester) async {
       await _pumpBrowse(
         tester,
@@ -346,32 +341,20 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Admin three-tab nav, NO customer Browse / Bookings /
-      // My Business.
+      // Admin three-tab nav.
       expect(find.text('Review'), findsOneWidget);
-      expect(find.text('Admin'), findsOneWidget);
+      expect(find.text('Businesses'), findsOneWidget);
       expect(find.text('Profile'), findsOneWidget);
-      expect(find.text('Browse'), findsNothing);
-      expect(find.text('Bookings'), findsNothing);
-      expect(find.text('My Business'), findsNothing);
-      // Review queue AppBar title (the landing screen).
+      // Customer tabs absent.
+      expect(find.text('Discover'), findsNothing);
+      expect(find.text('My Bookings'), findsNothing);
+      // Owner tabs absent.
+      expect(find.text('Dashboard'), findsNothing);
+      expect(find.text('Setup'), findsNothing);
+      expect(find.text('Appointments'), findsNothing);
+      // Review-queue screen's AppBar title is shown as the
+      // landing tab.
       expect(find.text('Review queue'), findsAtLeastNWidgets(1));
-
-      // Tap the Admin tab and confirm the informational landing
-      // surfaces. The mobile review queue covers the common
-      // approve/reject case; the AdminHome tab still links to
-      // the full admin web console for everything else.
-      await tester.tap(find.text('Admin'));
-      await tester.pumpAndSettle();
-      expect(
-        find.text('Admin tools live in the web console'),
-        findsOneWidget,
-      );
-      // Status row labels for the session info panel.
-      expect(find.text('Signed in as'), findsOneWidget);
-      expect(find.text('Role'), findsOneWidget);
-      expect(find.text('Environment'), findsOneWidget);
-      expect(find.text('API base URL'), findsOneWidget);
     },
   );
 

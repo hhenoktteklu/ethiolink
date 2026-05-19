@@ -46,29 +46,52 @@ import '../auth/auth_service.dart';
 /// the actual `NavigationDestination` + tab-body construction;
 /// this enum is just the contract.
 enum RoleNavDestination {
-  /// Marketplace browse (categories + search). Customer-facing.
-  /// Admin does NOT carry this anymore — admin uses
-  /// [adminReviewQueue] as the landing tab instead.
+  /// CUSTOMER landing — marketplace browse. Label "Discover".
+  /// NOT in owner or admin destinations: owners manage their
+  /// own business; admins use the Review queue + Businesses
+  /// tabs.
   browse,
 
-  /// Customer's own appointment history.
+  /// CUSTOMER appointment history. Label "My Bookings".
+  /// Owner / admin never see this tab.
   bookings,
 
-  /// BUSINESS_OWNER-only dashboard with manage-business actions.
+  /// BUSINESS_OWNER-only landing — status dashboard with
+  /// submit checklist, rejection note, status banner. Label
+  /// "Dashboard". Owner-only.
   ownerDashboard,
 
-  /// ADMIN-only mobile review queue. Lists every PENDING_REVIEW
-  /// business with inline Approve / Reject actions.
+  /// BUSINESS_OWNER setup hub — Profile / Services / Staff /
+  /// Availability / Promote cards. Label "Setup". Owner-only.
+  /// Separated from [ownerDashboard] so the dashboard tab is
+  /// a clean status surface and the setup tab is the action
+  /// surface.
+  businessSetup,
+
+  /// BUSINESS_OWNER appointment queue for the owner's business.
+  /// Label "Appointments". Reads from the owner-side
+  /// `GET /v1/businesses/{businessId}/appointments` endpoint
+  /// (NOT the customer-side `/v1/me/appointments`). Owner-only.
+  ownerAppointments,
+
+  /// ADMIN landing — pending-review queue with inline approve
+  /// / reject. Label "Review". Admin-only.
   adminReviewQueue,
 
-  /// ADMIN-only informational landing — points the operator at
-  /// the admin web SPA for full admin tools (featuring history,
-  /// audit, etc. — operations the mobile review queue
-  /// intentionally doesn't cover).
+  /// ADMIN browseable list of all businesses with status filter
+  /// (APPROVED / PENDING_REVIEW / REJECTED / SUSPENDED / ALL).
+  /// Label "Businesses". Admin-only. Mobile shows read-only;
+  /// suspend / feature live on the web console.
+  adminBusinesses,
+
+  /// Deprecated. Was the admin's informational landing
+  /// (web-console URL surface); replaced by [adminBusinesses].
+  /// Kept in the enum for any legacy reference but not in any
+  /// role's destinations list.
   adminHome,
 
-  /// Settings / sign-out / language / Telegram linking. Always
-  /// present.
+  /// Settings / sign-out / language / Telegram linking. In
+  /// every role's destinations.
   profile,
 }
 
@@ -141,22 +164,21 @@ class RoleExperience {
   );
 
   /// Business owner — professional dashboard. Indigo + gold
-  /// accent. Four tabs: Browse, Bookings, My Business, Profile.
+  /// accent. Four tabs: Dashboard, Setup, Appointments, Profile.
+  /// NO customer Browse or My Bookings; owner is a manage-your-
+  /// business surface, not a marketplace surface.
   static const RoleExperience businessOwner = RoleExperience(
     role: 'BUSINESS_OWNER',
     label: 'Business owner',
     heroHeadline: 'Manage your business',
     heroSubtitle:
         'Appointments, services, staff, and promotion — all in one place.',
-    // Indigo-600 (#4F46E5) is the "operator tools" colour from
-    // the admin SPA's palette; gold (#D4AF37) is the highlight
-    // we already use on featured-business badges.
     primarySeed: Color(0xFF4F46E5),
     accent: Color(0xFFD4AF37),
     destinations: [
-      RoleNavDestination.browse,
-      RoleNavDestination.bookings,
       RoleNavDestination.ownerDashboard,
+      RoleNavDestination.businessSetup,
+      RoleNavDestination.ownerAppointments,
       RoleNavDestination.profile,
     ],
   );
@@ -182,7 +204,7 @@ class RoleExperience {
     accent: Color(0xFFF59E0B),
     destinations: [
       RoleNavDestination.adminReviewQueue,
-      RoleNavDestination.adminHome,
+      RoleNavDestination.adminBusinesses,
       RoleNavDestination.profile,
     ],
   );

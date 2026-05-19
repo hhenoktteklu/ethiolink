@@ -35,12 +35,13 @@ import '../../core/auth/auth_service.dart';
 import '../../core/config/app_config_scope.dart';
 import '../../core/role/role_experience.dart';
 import '../../core/role/role_theme.dart';
+import '../admin/admin_businesses_screen.dart';
 import '../admin/admin_home_screen.dart';
 import '../admin/admin_review_queue_screen.dart';
 import '../admin/data/admin_businesses_repository.dart';
 import '../bookings/bookings_screen.dart';
 import '../owner/data/owner_business_repository.dart';
-import '../owner/owner_tab.dart';
+import '../owner/owner_role_screens.dart';
 import '../profile/profile_screen.dart';
 import 'businesses_screen.dart';
 import 'data/businesses_repository.dart';
@@ -125,12 +126,24 @@ class _BrowseScreenState extends State<BrowseScreen> {
         businessesRepositoryOverride: widget.businessesRepositoryOverride,
       ),
       RoleNavDestination.bookings: BookingsScreen(session: widget.session),
-      RoleNavDestination.ownerDashboard: OwnerTab(
+      RoleNavDestination.ownerDashboard: OwnerDashboardScreen(
+        repositoryOverride: widget.ownerBusinessRepositoryOverride,
+      ),
+      RoleNavDestination.businessSetup: OwnerBusinessSetupScreen(
+        repositoryOverride: widget.ownerBusinessRepositoryOverride,
+      ),
+      RoleNavDestination.ownerAppointments: OwnerAppointmentsScreen(
         repositoryOverride: widget.ownerBusinessRepositoryOverride,
       ),
       RoleNavDestination.adminReviewQueue: AdminReviewQueueScreen(
         repositoryOverride: widget.adminBusinessesRepositoryOverride,
       ),
+      RoleNavDestination.adminBusinesses: AdminBusinessesScreen(
+        repositoryOverride: widget.adminBusinessesRepositoryOverride,
+      ),
+      // Legacy informational landing — no role lists it in
+      // destinations anymore, but the enum still maps to a
+      // screen so any straggling reference doesn't crash.
       RoleNavDestination.adminHome: AdminHomeScreen(session: widget.session),
       RoleNavDestination.profile: ProfileScreen(
         session: widget.session,
@@ -181,22 +194,40 @@ class _BrowseScreenState extends State<BrowseScreen> {
   ) {
     switch (dest) {
       case RoleNavDestination.browse:
-        return NavigationDestination(
-          icon: const Icon(Icons.search_outlined),
-          selectedIcon: const Icon(Icons.search),
-          label: l10n.navBrowse,
+        // CUSTOMER-only marketplace browse. Label "Discover"
+        // surfaces the customer-friendly intent; the underlying
+        // screen (categories + search + business list) is
+        // unchanged.
+        return const NavigationDestination(
+          icon: Icon(Icons.travel_explore_outlined),
+          selectedIcon: Icon(Icons.travel_explore),
+          label: 'Discover',
         );
       case RoleNavDestination.bookings:
-        return NavigationDestination(
-          icon: const Icon(Icons.event_outlined),
-          selectedIcon: const Icon(Icons.event),
-          label: l10n.navBookings,
+        // CUSTOMER-only appointment history. Label "My Bookings"
+        // is unambiguous vs an owner's appointment queue.
+        return const NavigationDestination(
+          icon: Icon(Icons.event_outlined),
+          selectedIcon: Icon(Icons.event),
+          label: 'My Bookings',
         );
       case RoleNavDestination.ownerDashboard:
-        return NavigationDestination(
-          icon: const Icon(Icons.storefront_outlined),
-          selectedIcon: const Icon(Icons.storefront),
-          label: l10n.navOwner,
+        return const NavigationDestination(
+          icon: Icon(Icons.space_dashboard_outlined),
+          selectedIcon: Icon(Icons.space_dashboard),
+          label: 'Dashboard',
+        );
+      case RoleNavDestination.businessSetup:
+        return const NavigationDestination(
+          icon: Icon(Icons.tune_outlined),
+          selectedIcon: Icon(Icons.tune),
+          label: 'Setup',
+        );
+      case RoleNavDestination.ownerAppointments:
+        return const NavigationDestination(
+          icon: Icon(Icons.calendar_today_outlined),
+          selectedIcon: Icon(Icons.calendar_today),
+          label: 'Appointments',
         );
       case RoleNavDestination.adminReviewQueue:
         return const NavigationDestination(
@@ -204,7 +235,15 @@ class _BrowseScreenState extends State<BrowseScreen> {
           selectedIcon: Icon(Icons.fact_check),
           label: 'Review',
         );
+      case RoleNavDestination.adminBusinesses:
+        return const NavigationDestination(
+          icon: Icon(Icons.storefront_outlined),
+          selectedIcon: Icon(Icons.storefront),
+          label: 'Businesses',
+        );
       case RoleNavDestination.adminHome:
+        // Not currently in any role's destinations; kept for
+        // backward compatibility with the enum surface.
         return const NavigationDestination(
           icon: Icon(Icons.shield_outlined),
           selectedIcon: Icon(Icons.shield),

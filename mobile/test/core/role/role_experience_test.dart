@@ -106,7 +106,8 @@ void main() {
   });
 
   group('nav destinations per role', () {
-    test('customer: Browse, Bookings, Profile', () {
+    test('customer: Discover (browse), My Bookings, Profile — nothing else',
+        () {
       expect(
         RoleExperience.customer.destinations,
         const <RoleNavDestination>[
@@ -115,35 +116,74 @@ void main() {
           RoleNavDestination.profile,
         ],
       );
-    });
-
-    test('business owner: Browse, Bookings, OwnerDashboard, Profile', () {
+      // Sentinels — customer must not see owner / admin tabs.
       expect(
-        RoleExperience.businessOwner.destinations,
-        const <RoleNavDestination>[
-          RoleNavDestination.browse,
-          RoleNavDestination.bookings,
-          RoleNavDestination.ownerDashboard,
-          RoleNavDestination.profile,
-        ],
+        RoleExperience.customer.destinations,
+        isNot(contains(RoleNavDestination.ownerDashboard)),
+      );
+      expect(
+        RoleExperience.customer.destinations,
+        isNot(contains(RoleNavDestination.businessSetup)),
+      );
+      expect(
+        RoleExperience.customer.destinations,
+        isNot(contains(RoleNavDestination.ownerAppointments)),
+      );
+      expect(
+        RoleExperience.customer.destinations,
+        isNot(contains(RoleNavDestination.adminReviewQueue)),
+      );
+      expect(
+        RoleExperience.customer.destinations,
+        isNot(contains(RoleNavDestination.adminBusinesses)),
       );
     });
 
     test(
-      'admin: ReviewQueue, AdminHome, Profile '
-      '(NO customer Browse; NO Bookings; NO OwnerDashboard)',
+      'business owner: Dashboard, Setup, Appointments, Profile — '
+      'NO customer Browse / Bookings',
+      () {
+        expect(
+          RoleExperience.businessOwner.destinations,
+          const <RoleNavDestination>[
+            RoleNavDestination.ownerDashboard,
+            RoleNavDestination.businessSetup,
+            RoleNavDestination.ownerAppointments,
+            RoleNavDestination.profile,
+          ],
+        );
+        // Hard sentinels — owners do NOT see customer-side tabs.
+        expect(
+          RoleExperience.businessOwner.destinations,
+          isNot(contains(RoleNavDestination.browse)),
+        );
+        expect(
+          RoleExperience.businessOwner.destinations,
+          isNot(contains(RoleNavDestination.bookings)),
+        );
+        expect(
+          RoleExperience.businessOwner.destinations,
+          isNot(contains(RoleNavDestination.adminReviewQueue)),
+        );
+        expect(
+          RoleExperience.businessOwner.destinations,
+          isNot(contains(RoleNavDestination.adminBusinesses)),
+        );
+      },
+    );
+
+    test(
+      'admin: ReviewQueue, AdminBusinesses, Profile — '
+      'NO customer Browse / Bookings / OwnerDashboard',
       () {
         expect(
           RoleExperience.admin.destinations,
           const <RoleNavDestination>[
             RoleNavDestination.adminReviewQueue,
-            RoleNavDestination.adminHome,
+            RoleNavDestination.adminBusinesses,
             RoleNavDestination.profile,
           ],
         );
-        // Sentinels — the spec is "Admin must NOT show customer
-        // booking functionality" so none of the customer-facing
-        // tabs should leak into the admin nav.
         expect(
           RoleExperience.admin.destinations,
           isNot(contains(RoleNavDestination.browse)),
@@ -156,10 +196,24 @@ void main() {
           RoleExperience.admin.destinations,
           isNot(contains(RoleNavDestination.ownerDashboard)),
         );
+        expect(
+          RoleExperience.admin.destinations,
+          isNot(contains(RoleNavDestination.businessSetup)),
+        );
+        expect(
+          RoleExperience.admin.destinations,
+          isNot(contains(RoleNavDestination.ownerAppointments)),
+        );
+        // AdminHome is the deprecated informational landing; no
+        // role lists it anymore.
+        expect(
+          RoleExperience.admin.destinations,
+          isNot(contains(RoleNavDestination.adminHome)),
+        );
       },
     );
 
-    test('Profile is in every role; Browse is in customer + owner only', () {
+    test('Profile is in every role', () {
       for (final exp in <RoleExperience>[
         RoleExperience.customer,
         RoleExperience.businessOwner,
@@ -167,19 +221,6 @@ void main() {
       ]) {
         expect(exp.destinations, contains(RoleNavDestination.profile));
       }
-      expect(
-        RoleExperience.customer.destinations,
-        contains(RoleNavDestination.browse),
-      );
-      expect(
-        RoleExperience.businessOwner.destinations,
-        contains(RoleNavDestination.browse),
-      );
-      // Admin gets the review queue instead.
-      expect(
-        RoleExperience.admin.destinations,
-        contains(RoleNavDestination.adminReviewQueue),
-      );
     });
   });
 }
