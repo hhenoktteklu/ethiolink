@@ -46,8 +46,9 @@ import '../auth/auth_service.dart';
 /// the actual `NavigationDestination` + tab-body construction;
 /// this enum is just the contract.
 enum RoleNavDestination {
-  /// Marketplace browse (categories + search). Always present —
-  /// every role can see what customers see.
+  /// Marketplace browse (categories + search). Customer-facing.
+  /// Admin does NOT carry this anymore — admin uses
+  /// [adminReviewQueue] as the landing tab instead.
   browse,
 
   /// Customer's own appointment history.
@@ -56,8 +57,14 @@ enum RoleNavDestination {
   /// BUSINESS_OWNER-only dashboard with manage-business actions.
   ownerDashboard,
 
+  /// ADMIN-only mobile review queue. Lists every PENDING_REVIEW
+  /// business with inline Approve / Reject actions.
+  adminReviewQueue,
+
   /// ADMIN-only informational landing — points the operator at
-  /// the admin web SPA for actual write operations.
+  /// the admin web SPA for full admin tools (featuring history,
+  /// audit, etc. — operations the mobile review queue
+  /// intentionally doesn't cover).
   adminHome,
 
   /// Settings / sign-out / language / Telegram linking. Always
@@ -154,28 +161,27 @@ class RoleExperience {
     ],
   );
 
-  /// Admin operator — read-only console. Slate + amber-warning
-  /// accent. Three tabs: Browse, Admin, Profile.
+  /// Admin operator — review-first console. Slate + amber-
+  /// warning accent. Three tabs: Review Queue, Admin Home,
+  /// Profile.
   ///
-  /// Admin write operations live in the admin web SPA per the
-  /// Phase 9 Track 3.5 design — `AdminHomeScreen` says so
-  /// explicitly. The slate palette is deliberately darker than
-  /// the customer / owner palettes so the admin context is
-  /// visually unmistakable.
+  /// Mobile admin is intentionally NOT a customer browse —
+  /// admins approve / reject pending submissions from the
+  /// Review Queue tab. Full admin tools (featuring history,
+  /// audit, status filters beyond pending) live in the admin
+  /// web SPA, which the AdminHome tab links to. The slate
+  /// palette is deliberately darker than the customer / owner
+  /// palettes so the admin context is visually unmistakable.
   static const RoleExperience admin = RoleExperience(
     role: 'ADMIN',
     label: 'Operator',
-    heroHeadline: 'Operator console',
+    heroHeadline: 'Review queue',
     heroSubtitle:
-        'Browse the marketplace as customers see it. Full admin tools live in the web console.',
-    // Slate-700 (#334155) base + amber-500 (#F59E0B) accent for
-    // the "open the web console" callout. Amber is also the
-    // colour the admin SPA uses for SUSPENDED business badges,
-    // so it carries the right "operator attention" signal.
+        'Approve or reject submitted businesses. Full admin tools live in the web console.',
     primarySeed: Color(0xFF334155),
     accent: Color(0xFFF59E0B),
     destinations: [
-      RoleNavDestination.browse,
+      RoleNavDestination.adminReviewQueue,
       RoleNavDestination.adminHome,
       RoleNavDestination.profile,
     ],

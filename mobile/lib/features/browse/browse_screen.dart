@@ -36,6 +36,8 @@ import '../../core/config/app_config_scope.dart';
 import '../../core/role/role_experience.dart';
 import '../../core/role/role_theme.dart';
 import '../admin/admin_home_screen.dart';
+import '../admin/admin_review_queue_screen.dart';
+import '../admin/data/admin_businesses_repository.dart';
 import '../bookings/bookings_screen.dart';
 import '../owner/data/owner_business_repository.dart';
 import '../owner/owner_tab.dart';
@@ -53,6 +55,7 @@ class BrowseScreen extends StatefulWidget {
     this.categoriesRepositoryOverride,
     this.businessesRepositoryOverride,
     this.ownerBusinessRepositoryOverride,
+    this.adminBusinessesRepositoryOverride,
     super.key,
   });
 
@@ -77,6 +80,11 @@ class BrowseScreen extends StatefulWidget {
   /// `OwnerTab` (visible only when `session.role == 'BUSINESS_OWNER'`).
   /// Production leaves this `null`.
   final OwnerBusinessRepository? ownerBusinessRepositoryOverride;
+
+  /// Test-injected admin businesses repository. Forwarded to
+  /// `AdminReviewQueueScreen` when the session is ADMIN.
+  /// Production leaves this `null`.
+  final AdminBusinessesRepository? adminBusinessesRepositoryOverride;
 
   @override
   State<BrowseScreen> createState() => _BrowseScreenState();
@@ -119,6 +127,9 @@ class _BrowseScreenState extends State<BrowseScreen> {
       RoleNavDestination.bookings: BookingsScreen(session: widget.session),
       RoleNavDestination.ownerDashboard: OwnerTab(
         repositoryOverride: widget.ownerBusinessRepositoryOverride,
+      ),
+      RoleNavDestination.adminReviewQueue: AdminReviewQueueScreen(
+        repositoryOverride: widget.adminBusinessesRepositoryOverride,
       ),
       RoleNavDestination.adminHome: AdminHomeScreen(session: widget.session),
       RoleNavDestination.profile: ProfileScreen(
@@ -186,6 +197,12 @@ class _BrowseScreenState extends State<BrowseScreen> {
           icon: const Icon(Icons.storefront_outlined),
           selectedIcon: const Icon(Icons.storefront),
           label: l10n.navOwner,
+        );
+      case RoleNavDestination.adminReviewQueue:
+        return const NavigationDestination(
+          icon: Icon(Icons.fact_check_outlined),
+          selectedIcon: Icon(Icons.fact_check),
+          label: 'Review',
         );
       case RoleNavDestination.adminHome:
         return const NavigationDestination(

@@ -21,6 +21,7 @@ import 'package:ethiolink/features/browse/data/businesses_repository.dart';
 import 'package:ethiolink/features/browse/data/categories_repository.dart';
 import 'package:ethiolink/features/browse/models/business_summary.dart';
 import 'package:ethiolink/features/browse/models/category.dart';
+import 'package:ethiolink/features/admin/data/admin_businesses_repository.dart';
 import 'package:ethiolink/features/owner/data/owner_business_repository.dart';
 import 'package:ethiolink/features/owner/models/owner_business_view.dart';
 
@@ -55,6 +56,25 @@ AuthSession _sessionWithRole(String role) {
 class _PendingOwnerRepo implements OwnerBusinessRepository {
   @override
   Future<OwnerBusinessView> getMine() => Completer<OwnerBusinessView>().future;
+}
+
+/// Admin-side counterpart for the ADMIN nav test — resolves the
+/// pending list with an empty array so the review queue's
+/// "Queue is clear" empty body renders cleanly without hitting
+/// the production HTTP path.
+class _PendingAdminRepo implements AdminBusinessesRepository {
+  @override
+  Future<List<OwnerBusinessView>> list({
+    String status = 'PENDING_REVIEW',
+    int? limit,
+  }) async =>
+      const <OwnerBusinessView>[];
+  @override
+  Future<OwnerBusinessView> approve(String id, {String? notes}) =>
+      throw UnimplementedError();
+  @override
+  Future<OwnerBusinessView> reject(String id, {required String notes}) =>
+      throw UnimplementedError();
 }
 
 /// Scriptable repository for the three widget tests. Each test
@@ -146,6 +166,7 @@ Future<void> _pumpBrowse(
   required CategoriesRepository repository,
   BusinessesRepository? businessesRepository,
   OwnerBusinessRepository? ownerBusinessRepository,
+  AdminBusinessesRepository? adminBusinessesRepository,
   AuthSession? session,
 }) async {
   await tester.pumpWidget(
@@ -160,6 +181,7 @@ Future<void> _pumpBrowse(
           categoriesRepositoryOverride: repository,
           businessesRepositoryOverride: businessesRepository,
           ownerBusinessRepositoryOverride: ownerBusinessRepository,
+          adminBusinessesRepositoryOverride: adminBusinessesRepository,
         ),
       ),
     ),
@@ -313,32 +335,32 @@ void main() {
   );
 
   testWidgets(
-    'ADMIN session: Browse / Admin / Profile nav, AdminHome content, '
-    'operator banner on Browse',
+    'ADMIN session: Review / Admin / Profile nav, no customer Browse, '
+    'Review queue is the landing tab',
     (tester) async {
       await _pumpBrowse(
         tester,
         repository: FakeCategoriesRepository.value(<Category>[]),
+        adminBusinessesRepository: _PendingAdminRepo(),
         session: _sessionWithRole('ADMIN'),
       );
       await tester.pumpAndSettle();
 
-      // Admin three-tab nav.
-      expect(find.text('Browse'), findsOneWidget);
+      // Admin three-tab nav, NO customer Browse / Bookings /
+      // My Business.
+      expect(find.text('Review'), findsOneWidget);
       expect(find.text('Admin'), findsOneWidget);
       expect(find.text('Profile'), findsOneWidget);
+      expect(find.text('Browse'), findsNothing);
       expect(find.text('Bookings'), findsNothing);
       expect(find.text('My Business'), findsNothing);
-      // Operator banner on Browse.
-      expect(
-        find.textContaining('Operator view'),
-        findsOneWidget,
-      );
+      // Review queue AppBar title (the landing screen).
+      expect(find.text('Review queue'), findsAtLeastNWidgets(1));
+
       // Tap the Admin tab and confirm the informational landing
-      // surfaces. The marketplace mobile app deliberately does
-      // NOT expose admin write operations — see
-      // `AdminHomeScreen`'s file-level docs + the runbook at
-      // docs/operations/runbooks/dev-cognito-users.md.
+      // surfaces. The mobile review queue covers the common
+      // approve/reject case; the AdminHome tab still links to
+      // the full admin web console for everything else.
       await tester.tap(find.text('Admin'));
       await tester.pumpAndSettle();
       expect(

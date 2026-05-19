@@ -129,38 +129,57 @@ void main() {
       );
     });
 
-    test('admin: Browse, AdminHome, Profile (NO Bookings; NO OwnerDashboard)',
-        () {
-      expect(
-        RoleExperience.admin.destinations,
-        const <RoleNavDestination>[
-          RoleNavDestination.browse,
-          RoleNavDestination.adminHome,
-          RoleNavDestination.profile,
-        ],
-      );
-      // Sentinel — mobile admin context is read-only, so the
-      // customer's Bookings tab must NOT leak into the admin
-      // role's nav.
-      expect(
-        RoleExperience.admin.destinations,
-        isNot(contains(RoleNavDestination.bookings)),
-      );
-      expect(
-        RoleExperience.admin.destinations,
-        isNot(contains(RoleNavDestination.ownerDashboard)),
-      );
-    });
+    test(
+      'admin: ReviewQueue, AdminHome, Profile '
+      '(NO customer Browse; NO Bookings; NO OwnerDashboard)',
+      () {
+        expect(
+          RoleExperience.admin.destinations,
+          const <RoleNavDestination>[
+            RoleNavDestination.adminReviewQueue,
+            RoleNavDestination.adminHome,
+            RoleNavDestination.profile,
+          ],
+        );
+        // Sentinels — the spec is "Admin must NOT show customer
+        // booking functionality" so none of the customer-facing
+        // tabs should leak into the admin nav.
+        expect(
+          RoleExperience.admin.destinations,
+          isNot(contains(RoleNavDestination.browse)),
+        );
+        expect(
+          RoleExperience.admin.destinations,
+          isNot(contains(RoleNavDestination.bookings)),
+        );
+        expect(
+          RoleExperience.admin.destinations,
+          isNot(contains(RoleNavDestination.ownerDashboard)),
+        );
+      },
+    );
 
-    test('every role has Browse and Profile', () {
+    test('Profile is in every role; Browse is in customer + owner only', () {
       for (final exp in <RoleExperience>[
         RoleExperience.customer,
         RoleExperience.businessOwner,
         RoleExperience.admin,
       ]) {
-        expect(exp.destinations, contains(RoleNavDestination.browse));
         expect(exp.destinations, contains(RoleNavDestination.profile));
       }
+      expect(
+        RoleExperience.customer.destinations,
+        contains(RoleNavDestination.browse),
+      );
+      expect(
+        RoleExperience.businessOwner.destinations,
+        contains(RoleNavDestination.browse),
+      );
+      // Admin gets the review queue instead.
+      expect(
+        RoleExperience.admin.destinations,
+        contains(RoleNavDestination.adminReviewQueue),
+      );
     });
   });
 }
