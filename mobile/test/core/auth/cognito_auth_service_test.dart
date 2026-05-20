@@ -48,6 +48,8 @@ const _testConfig = AppConfig(
   logoutUri: 'com.ethiolink.app:/logout',
 );
 
+const _logoutUri = 'com.ethiolink.app:/logout';
+
 void main() {
   group('CognitoAuthService.buildEndSessionRequest', () {
     test(
@@ -55,7 +57,8 @@ void main() {
       'sentinel ("client_id is not present")',
       () {
         final service = CognitoAuthService(config: _testConfig);
-        final req = service.buildEndSessionRequest('id-token-hint-stub');
+        final req =
+            service.buildEndSessionRequest('id-token-hint-stub', _logoutUri);
 
         // additionalParameters is forwarded as query string by the
         // platform implementation.
@@ -87,67 +90,47 @@ void main() {
         // that satisfies both branches of Cognito's logout-URL
         // parser.
         final service = CognitoAuthService(config: _testConfig);
-        final req = service.buildEndSessionRequest('hint');
+        final req = service.buildEndSessionRequest('hint', _logoutUri);
 
         expect(req.additionalParameters, contains('logout_uri'));
         expect(req.additionalParameters, contains('redirect_uri'));
-        expect(
-          req.additionalParameters!['logout_uri'],
-          'com.ethiolink.app:/logout',
-          reason:
-              'Cognito serves "Required String parameter '
-              '\'redirect_uri\' is not present" when the logout URL '
-              'omits both logout_uri and redirect_uri. logout_uri is '
-              'Cognito\'s canonical post-sign-out redirect parameter.',
-        );
-        expect(
-          req.additionalParameters!['redirect_uri'],
-          'com.ethiolink.app:/logout',
-          reason:
-              'redirect_uri mirrors logout_uri so Cognito\'s '
-              'alternative redirect-then-reauth parser branch '
-              '(used by some account configurations) is also '
-              'satisfied.',
-        );
+        expect(req.additionalParameters!['logout_uri'], _logoutUri);
+        expect(req.additionalParameters!['redirect_uri'], _logoutUri);
       },
     );
 
     test(
-      'when AppConfig.logoutUri is null, only client_id is sent — Cognito '
-      "surfaces its own missing-param error rather than us sending 'null'",
+      'idTokenHint AND postLogoutRedirectUrl are both non-null — the '
+      'flutter_appauth EndSessionRequest invariant',
       () {
-        const nullLogoutConfig = AppConfig(
-          apiBaseUrl: 'https://example.test',
-          cognitoDomain: 'd',
-          cognitoClientId: 'c',
-          redirectUri: 'com.ethiolink.app:/oauthredirect',
-          // logoutUri intentionally omitted (defaults to null).
-        );
-        final service = CognitoAuthService(config: nullLogoutConfig);
-        final req = service.buildEndSessionRequest('hint');
-
-        expect(req.additionalParameters, contains('client_id'));
-        // Defensive: must NOT serialize the string 'null' as the
-        // logout_uri value — better to omit and let Cognito's
-        // error surface the misconfiguration clearly.
-        expect(req.additionalParameters, isNot(contains('logout_uri')));
-        expect(req.additionalParameters, isNot(contains('redirect_uri')));
+        // flutter_appauth asserts these two are both-null or
+        // both-non-null. signOut() guarantees a non-null logoutUri
+        // reaches buildEndSessionRequest (it short-circuits to a
+        // local-only sign-out when config.logoutUri is null), so
+        // the request always satisfies the invariant. This test
+        // pins it so a refactor that reintroduces a nullable
+        // postLogoutRedirectUrl trips here, not at runtime on the
+        // device.
+        final service = CognitoAuthService(config: _testConfig);
+        final req = service.buildEndSessionRequest('hint', _logoutUri);
+        expect(req.idTokenHint, isNotNull);
+        expect(req.postLogoutRedirectUrl, isNotNull);
       },
     );
 
     test('passes the id_token_hint we received', () {
       final service = CognitoAuthService(config: _testConfig);
-      final req = service.buildEndSessionRequest('hint-abc-xyz');
+      final req = service.buildEndSessionRequest('hint-abc-xyz', _logoutUri);
       expect(req.idTokenHint, 'hint-abc-xyz');
     });
 
-    test('uses the configured logout redirect URI (OIDC field too)', () {
+    test('uses the supplied logout redirect URI (OIDC field too)', () {
       final service = CognitoAuthService(config: _testConfig);
-      final req = service.buildEndSessionRequest('hint');
+      final req = service.buildEndSessionRequest('hint', _logoutUri);
       // postLogoutRedirectUrl serialises as OIDC `post_logout_redirect_uri`.
       // Cognito ignores it but spec-compliant IdPs use it; sending
       // it costs nothing.
-      expect(req.postLogoutRedirectUrl, 'com.ethiolink.app:/logout');
+      expect(req.postLogoutRedirectUrl, _logoutUri);
     });
 
     test(
@@ -155,7 +138,7 @@ void main() {
       'Cognito hosted-UI end-session endpoint',
       () {
         final service = CognitoAuthService(config: _testConfig);
-        final req = service.buildEndSessionRequest('hint');
+        final req = service.buildEndSessionRequest('hint', _logoutUri);
         // The AuthorizationServiceConfiguration plumbing must
         // carry the end-session endpoint; otherwise flutter_appauth
         // wouldn't know where to POST.

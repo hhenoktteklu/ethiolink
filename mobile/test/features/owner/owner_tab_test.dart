@@ -181,6 +181,7 @@ Future<void> _pump(
   BusinessActionsRepository? actionsRepo,
   CategoriesRepository? categoriesRepo,
   FeaturingRepository? featuringRepo,
+  OwnerDashboardMode mode = OwnerDashboardMode.full,
 }) async {
   // The owner tab renders the business card + status banner +
   // promote panel + bookings inbox in a scrollable column. A taller
@@ -200,6 +201,7 @@ Future<void> _pump(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: OwnerTab(
+          mode: mode,
           repositoryOverride: repo,
           actionsRepositoryOverride: actionsRepo ?? _StubActionsRepo(),
           categoriesRepositoryOverride: categoriesRepo,
@@ -286,12 +288,14 @@ void main() {
   testWidgets(
     'DRAFT with missing required fields renders the checklist + disables submit',
     (tester) async {
-      // All three Profile-required fields blanked. The banner
-      // should surface a structured "Complete these before
-      // submitting" block (NOT the vague backend message) and
-      // the Submit-for-review button should be disabled.
+      // All three Profile-required fields blanked. Pumped in
+      // dashboardOnly mode (the Dashboard tab) so the checklist
+      // is the only "Profile" on screen — the setup cards (which
+      // also carry a "Profile" label) live on the separate Setup
+      // tab and are exercised in their own test below.
       await _pump(
         tester,
+        mode: OwnerDashboardMode.dashboardOnly,
         repo: _FakeRepo.value(_sampleBusiness(
           status: 'DRAFT',
           name: null,
@@ -304,27 +308,53 @@ void main() {
 
       // The structural key the checklist attaches.
       expect(find.byKey(const Key('ownerSubmitChecklist')), findsOneWidget);
-      // Heading.
       expect(
         find.text('Complete these before submitting'),
         findsOneWidget,
       );
-      // Section + every blocked field shown.
+      // Section header + every blocked field row. "Profile" is
+      // unambiguous here — no setup cards in dashboardOnly mode.
       expect(find.text('Profile'), findsOneWidget);
       expect(find.text('Business name'), findsOneWidget);
       expect(find.text('Description'), findsOneWidget);
       expect(find.text('City'), findsOneWidget);
-      // Profile dashboard card carries the "Missing info" chip.
-      expect(find.byKey(const Key('ownerCardMissingChip')), findsOneWidget);
       // Submit button is rendered but disabled (onPressed: null).
       final btn = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Submit for review'),
       );
       expect(btn.onPressed, isNull);
       // The vague backend-style message text must NOT appear —
-      // that's the whole point of this commit.
+      // the structured checklist replaced it.
       expect(
         find.textContaining('missing required fields for submission'),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'Setup tab Profile card shows the "Missing info" chip when incomplete',
+    (tester) async {
+      // The Missing-info chip is a Setup-tab (setupOnly) concern —
+      // it sits on the Profile card. The Dashboard tab (above)
+      // owns the checklist; the Setup tab owns the per-card chip.
+      await _pump(
+        tester,
+        mode: OwnerDashboardMode.setupOnly,
+        repo: _FakeRepo.value(_sampleBusiness(
+          status: 'DRAFT',
+          city: '',
+        )),
+        actionsRepo: _StubActionsRepo(),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('ownerCardMissingChip')), findsOneWidget);
+      // setupOnly mode has no status banner, so no checklist + no
+      // submit button here — those are the Dashboard tab's job.
+      expect(find.byKey(const Key('ownerSubmitChecklist')), findsNothing);
+      expect(
+        find.widgetWithText(FilledButton, 'Submit for review'),
         findsNothing,
       );
     },
@@ -334,9 +364,11 @@ void main() {
     'DRAFT with partial missing renders only the affected checklist rows',
     (tester) async {
       // Only City missing. Owner sees just the City row under
-      // Profile; no Business-name / Description rows.
+      // Profile; no Business-name / Description rows. dashboardOnly
+      // so "City" is unambiguous (no Availability/etc. cards).
       await _pump(
         tester,
+        mode: OwnerDashboardMode.dashboardOnly,
         repo: _FakeRepo.value(_sampleBusiness(
           status: 'DRAFT',
           city: '',
@@ -353,17 +385,17 @@ void main() {
   );
 
   testWidgets(
-    'fully-populated DRAFT shows no checklist + enabled submit + no chip',
+    'fully-populated DRAFT shows no checklist + enabled submit',
     (tester) async {
       await _pump(
         tester,
+        mode: OwnerDashboardMode.dashboardOnly,
         repo: _FakeRepo.value(_sampleBusiness(status: 'DRAFT')),
         actionsRepo: _StubActionsRepo(),
       );
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('ownerSubmitChecklist')), findsNothing);
-      expect(find.byKey(const Key('ownerCardMissingChip')), findsNothing);
       final btn = tester.widget<FilledButton>(
         find.widgetWithText(FilledButton, 'Submit for review'),
       );
@@ -377,6 +409,7 @@ void main() {
       final actions = _StubActionsRepo();
       await _pump(
         tester,
+        mode: OwnerDashboardMode.dashboardOnly,
         repo: _FakeRepo.value(_sampleBusiness(
           status: 'DRAFT',
           city: '',

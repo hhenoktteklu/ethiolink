@@ -120,6 +120,14 @@ class _EthioLinkAppState extends State<EthioLinkApp> {
       colorScheme: colorScheme,
       useMaterial3: true,
       visualDensity: VisualDensity.adaptivePlatformDensity,
+      // InkRipple (not the M3-default InkSparkle) so the app +
+      // its widget tests don't depend on the runtime fragment
+      // shader `shaders/ink_sparkle.frag`, whose bundled manifest
+      // version can mismatch a stale local Flutter engine cache.
+      // Mirrors the same setting in `roleThemeFor` (role_theme.dart);
+      // this base theme covers the pre-sign-in LoginScreen which
+      // renders before any role theme is applied.
+      splashFactory: InkRipple.splashFactory,
       appBarTheme: AppBarTheme(
         backgroundColor: colorScheme.surface,
         foregroundColor: colorScheme.onSurface,

@@ -44,6 +44,17 @@ ThemeData roleThemeFor(RoleExperience exp, {Brightness brightness = Brightness.l
     brightness: brightness,
     colorScheme: colorScheme,
     visualDensity: VisualDensity.adaptivePlatformDensity,
+    // Use the InkRipple splash instead of Material 3's default
+    // InkSparkle. InkSparkle loads a runtime fragment shader
+    // (`shaders/ink_sparkle.frag`) whose bundled manifest version
+    // can mismatch a stale local Flutter engine cache — surfacing
+    // in `flutter test` as "Unsupported runtime stages format
+    // version. Expected 2, got 1." InkRipple is shader-free, so
+    // the whole widget-test suite stops depending on the engine's
+    // shader cache being in lock-step. Set centrally here (every
+    // role theme flows through this builder) + in app.dart's base
+    // theme so no per-test patching is needed.
+    splashFactory: InkRipple.splashFactory,
     appBarTheme: AppBarTheme(
       backgroundColor:
           adminContext ? colorScheme.primary : colorScheme.surface,

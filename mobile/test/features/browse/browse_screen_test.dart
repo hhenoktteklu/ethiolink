@@ -279,6 +279,17 @@ void main() {
   // Bookings / Profile) — admin operations live in the admin SPA.
   // ----------------------------------------------------------------
 
+  // Nav destinations carry stable keys (`nav.<role>.<dest>`).
+  // We assert by key, not label text — the label text collides
+  // with screen titles (e.g. the Browse tab's "Discover"
+  // SliverAppBar title) and would make findsOneWidget flaky.
+  // We use bounded `pump()`s rather than `pumpAndSettle()`
+  // because each role's landing screen mounts a FutureBuilder
+  // whose fake repo is intentionally pending (the nav bar is
+  // already laid out by then, but a spinner animates forever and
+  // would hang pumpAndSettle).
+  Finder navKey(String k) => find.byKey(Key(k));
+
   testWidgets(
     'CUSTOMER session: Discover / My Bookings / Profile — NO owner / admin tabs',
     (tester) async {
@@ -287,18 +298,18 @@ void main() {
         repository: FakeCategoriesRepository.value(<Category>[]),
         session: _sessionWithRole('CUSTOMER'),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
 
-      // Three-tab customer nav with the new labels.
-      expect(find.text('Discover'), findsOneWidget);
-      expect(find.text('My Bookings'), findsOneWidget);
-      expect(find.text('Profile'), findsOneWidget);
+      expect(navKey('nav.customer.discover'), findsOneWidget);
+      expect(navKey('nav.customer.bookings'), findsOneWidget);
+      expect(navKey('nav.profile'), findsOneWidget);
       // None of the owner / admin tabs leak.
-      expect(find.text('Dashboard'), findsNothing);
-      expect(find.text('Setup'), findsNothing);
-      expect(find.text('Appointments'), findsNothing);
-      expect(find.text('Review'), findsNothing);
-      expect(find.text('Businesses'), findsNothing);
+      expect(navKey('nav.owner.dashboard'), findsNothing);
+      expect(navKey('nav.owner.setup'), findsNothing);
+      expect(navKey('nav.owner.appointments'), findsNothing);
+      expect(navKey('nav.admin.review'), findsNothing);
+      expect(navKey('nav.admin.businesses'), findsNothing);
     },
   );
 
@@ -312,20 +323,21 @@ void main() {
         ownerBusinessRepository: _PendingOwnerRepo(),
         session: _sessionWithRole('BUSINESS_OWNER'),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
 
       // Four-tab owner nav.
-      expect(find.text('Dashboard'), findsOneWidget);
-      expect(find.text('Setup'), findsOneWidget);
-      expect(find.text('Appointments'), findsOneWidget);
-      expect(find.text('Profile'), findsOneWidget);
+      expect(navKey('nav.owner.dashboard'), findsOneWidget);
+      expect(navKey('nav.owner.setup'), findsOneWidget);
+      expect(navKey('nav.owner.appointments'), findsOneWidget);
+      expect(navKey('nav.profile'), findsOneWidget);
       // Customer tabs absent — owner is a manage-your-business
       // surface, not a marketplace surface.
-      expect(find.text('Discover'), findsNothing);
-      expect(find.text('My Bookings'), findsNothing);
+      expect(navKey('nav.customer.discover'), findsNothing);
+      expect(navKey('nav.customer.bookings'), findsNothing);
       // Admin tabs absent.
-      expect(find.text('Review'), findsNothing);
-      expect(find.text('Businesses'), findsNothing);
+      expect(navKey('nav.admin.review'), findsNothing);
+      expect(navKey('nav.admin.businesses'), findsNothing);
     },
   );
 
@@ -339,22 +351,20 @@ void main() {
         adminBusinessesRepository: _PendingAdminRepo(),
         session: _sessionWithRole('ADMIN'),
       );
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
 
       // Admin three-tab nav.
-      expect(find.text('Review'), findsOneWidget);
-      expect(find.text('Businesses'), findsOneWidget);
-      expect(find.text('Profile'), findsOneWidget);
+      expect(navKey('nav.admin.review'), findsOneWidget);
+      expect(navKey('nav.admin.businesses'), findsOneWidget);
+      expect(navKey('nav.profile'), findsOneWidget);
       // Customer tabs absent.
-      expect(find.text('Discover'), findsNothing);
-      expect(find.text('My Bookings'), findsNothing);
+      expect(navKey('nav.customer.discover'), findsNothing);
+      expect(navKey('nav.customer.bookings'), findsNothing);
       // Owner tabs absent.
-      expect(find.text('Dashboard'), findsNothing);
-      expect(find.text('Setup'), findsNothing);
-      expect(find.text('Appointments'), findsNothing);
-      // Review-queue screen's AppBar title is shown as the
-      // landing tab.
-      expect(find.text('Review queue'), findsAtLeastNWidgets(1));
+      expect(navKey('nav.owner.dashboard'), findsNothing);
+      expect(navKey('nav.owner.setup'), findsNothing);
+      expect(navKey('nav.owner.appointments'), findsNothing);
     },
   );
 

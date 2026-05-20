@@ -1079,8 +1079,8 @@ class _DashboardCard extends StatelessWidget {
                         ),
                         if (incomplete) ...[
                           const SizedBox(width: 8),
-                          _MissingInfoChip(
-                            key: const Key('ownerCardMissingChip'),
+                          const _MissingInfoChip(
+                            key: Key('ownerCardMissingChip'),
                           ),
                         ],
                       ],

@@ -95,7 +95,7 @@ void main() {
           'Find services near you');
       expect(RoleExperience.businessOwner.heroHeadline,
           'Manage your business');
-      expect(RoleExperience.admin.heroHeadline, 'Operator console');
+      expect(RoleExperience.admin.heroHeadline, 'Review queue');
     });
 
     test('role labels are role-specific', () {

@@ -197,8 +197,13 @@ class _BrowseScreenState extends State<BrowseScreen> {
         // CUSTOMER-only marketplace browse. Label "Discover"
         // surfaces the customer-friendly intent; the underlying
         // screen (categories + search + business list) is
-        // unchanged.
+        // unchanged. Stable nav keys (`nav.<role>.<dest>`) let
+        // widget tests target a destination unambiguously — the
+        // label text alone collides with screen titles (e.g. the
+        // Browse tab's "Discover" SliverAppBar title) so tests
+        // assert by key, not by ambiguous text.
         return const NavigationDestination(
+          key: Key('nav.customer.discover'),
           icon: Icon(Icons.travel_explore_outlined),
           selectedIcon: Icon(Icons.travel_explore),
           label: 'Discover',
@@ -207,36 +212,42 @@ class _BrowseScreenState extends State<BrowseScreen> {
         // CUSTOMER-only appointment history. Label "My Bookings"
         // is unambiguous vs an owner's appointment queue.
         return const NavigationDestination(
+          key: Key('nav.customer.bookings'),
           icon: Icon(Icons.event_outlined),
           selectedIcon: Icon(Icons.event),
           label: 'My Bookings',
         );
       case RoleNavDestination.ownerDashboard:
         return const NavigationDestination(
+          key: Key('nav.owner.dashboard'),
           icon: Icon(Icons.space_dashboard_outlined),
           selectedIcon: Icon(Icons.space_dashboard),
           label: 'Dashboard',
         );
       case RoleNavDestination.businessSetup:
         return const NavigationDestination(
+          key: Key('nav.owner.setup'),
           icon: Icon(Icons.tune_outlined),
           selectedIcon: Icon(Icons.tune),
           label: 'Setup',
         );
       case RoleNavDestination.ownerAppointments:
         return const NavigationDestination(
+          key: Key('nav.owner.appointments'),
           icon: Icon(Icons.calendar_today_outlined),
           selectedIcon: Icon(Icons.calendar_today),
           label: 'Appointments',
         );
       case RoleNavDestination.adminReviewQueue:
         return const NavigationDestination(
+          key: Key('nav.admin.review'),
           icon: Icon(Icons.fact_check_outlined),
           selectedIcon: Icon(Icons.fact_check),
           label: 'Review',
         );
       case RoleNavDestination.adminBusinesses:
         return const NavigationDestination(
+          key: Key('nav.admin.businesses'),
           icon: Icon(Icons.storefront_outlined),
           selectedIcon: Icon(Icons.storefront),
           label: 'Businesses',
@@ -245,12 +256,14 @@ class _BrowseScreenState extends State<BrowseScreen> {
         // Not currently in any role's destinations; kept for
         // backward compatibility with the enum surface.
         return const NavigationDestination(
+          key: Key('nav.admin.home'),
           icon: Icon(Icons.shield_outlined),
           selectedIcon: Icon(Icons.shield),
           label: 'Admin',
         );
       case RoleNavDestination.profile:
         return NavigationDestination(
+          key: const Key('nav.profile'),
           icon: const Icon(Icons.person_outline),
           selectedIcon: const Icon(Icons.person),
           label: l10n.navProfile,

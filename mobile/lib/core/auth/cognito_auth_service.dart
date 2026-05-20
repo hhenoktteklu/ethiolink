@@ -163,8 +163,22 @@ class CognitoAuthService implements AuthService {
 
     if (idToken == null || idToken.isEmpty) return;
 
+    // Remote hosted-UI logout requires a logout redirect URI.
+    // flutter_appauth's `EndSessionRequest` asserts that
+    // `idTokenHint` and `postLogoutRedirectUrl` are BOTH null or
+    // BOTH non-null — passing an idToken with a null redirect
+    // would trip that assertion. When `logoutUri` is unset
+    // (only possible on a misconfigured env; every shipped env
+    // sets it) we treat local-storage clear as the complete
+    // sign-out and skip the remote round-trip entirely. The
+    // hosted-UI cookie then expires on its own.
+    final logoutUri = config.logoutUri;
+    if (logoutUri == null || logoutUri.isEmpty) {
+      return;
+    }
+
     try {
-      await _appAuth.endSession(buildEndSessionRequest(idToken));
+      await _appAuth.endSession(buildEndSessionRequest(idToken, logoutUri));
     } catch (e) {
       // Swallowed by design — the Cognito `/logout` endpoint shape
       // differs slightly from the OIDC standard and some
@@ -225,25 +239,28 @@ class CognitoAuthService implements AuthService {
   /// for audit) and `post_logout_redirect_uri` (which Cognito
   /// ignores but is harmless) still go through via the standard
   /// fields above.
+  /// `logoutUri` is REQUIRED and non-null — the caller
+  /// (`signOut`) guarantees it by short-circuiting to a
+  /// local-only sign-out when `config.logoutUri` is unset.
+  /// Taking it as a parameter (rather than reading the nullable
+  /// `config.logoutUri` inside) keeps the
+  /// `idTokenHint`-non-null / `postLogoutRedirectUrl`-non-null
+  /// invariant that flutter_appauth's `EndSessionRequest`
+  /// asserts — a null redirect alongside a non-null id token
+  /// trips that assertion.
   @visibleForTesting
-  EndSessionRequest buildEndSessionRequest(String idTokenHint) {
-    // `config.logoutUri` is nullable. In practice every deployed
-    // env sets it (see `mobile/env/dev.example.json`), but the
-    // type system forces us to handle null gracefully — when
-    // absent we still pass `client_id` (which is the only param
-    // Cognito strictly demands) and let Cognito surface whichever
-    // missing-param error matches its current configuration.
-    final logoutUri = config.logoutUri;
+  EndSessionRequest buildEndSessionRequest(
+    String idTokenHint,
+    String logoutUri,
+  ) {
     return EndSessionRequest(
       idTokenHint: idTokenHint,
       postLogoutRedirectUrl: logoutUri,
       serviceConfiguration: _serviceConfig,
       additionalParameters: <String, String>{
         'client_id': config.cognitoClientId,
-        if (logoutUri != null) ...{
-          'logout_uri': logoutUri,
-          'redirect_uri': logoutUri,
-        },
+        'logout_uri': logoutUri,
+        'redirect_uri': logoutUri,
       },
     );
   }
