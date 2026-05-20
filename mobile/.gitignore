@@ -18,9 +18,11 @@ build/
 # The `flutter create` artifacts for each native target (ios/,
 # linux/, macos/, web/, windows/) are NOT committed in this scaffold —
 # `flutter create .` regenerates them locally on the operator's machine
-# alongside the platform SDK they target. Commit only when a
-# platform-specific override is required (e.g. iOS Info.plist edits for
-# Cognito deep-link callbacks; that lives in a follow-up commit).
+# alongside the platform SDK they target. iOS-specific overrides
+# (bundle id, the Cognito `CFBundleURLSchemes` deep-link entry, the
+# iOS-13 Podfile floor for flutter_appauth) are applied by the
+# committed `scripts/configure_ios.sh` after `flutter create .` rather
+# than by committing the generated tree.
 ios/
 linux/
 macos/
